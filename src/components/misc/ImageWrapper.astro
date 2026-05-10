@@ -23,6 +23,7 @@ const isLocal = !(
 	src.startsWith("data:")
 );
 const isPublic = src.startsWith("/");
+const isBanner = id === "banner";
 
 // TODO temporary workaround for images dynamic import
 // https://github.com/withastro/astro/issues/3373
@@ -44,10 +45,16 @@ if (isLocal) {
 	img = await file();
 }
 
-const imageClass = "w-full h-full object-cover";
+const imageClass = isBanner
+	? "relative z-10 w-full h-full object-contain"
+	: "w-full h-full object-cover";
+const bannerBackgroundClass =
+	"absolute inset-0 w-full h-full object-cover scale-110 blur-2xl opacity-70";
 const imageStyle = `object-position: ${position}`;
 ---
 <div id={id} class:list={[className, 'overflow-hidden relative']}>
+    {isBanner && isLocal && img && <Image src={img} alt="" aria-hidden="true" class={bannerBackgroundClass} style={imageStyle}/>}
+    {isBanner && !isLocal && <img src={isPublic ? url(src) : src} alt="" aria-hidden="true" class={bannerBackgroundClass} style={imageStyle}/>}
     <div class="transition absolute inset-0 dark:bg-black/10 bg-opacity-50 pointer-events-none"></div>
     {isLocal && img && <Image src={img} alt={alt || ""} class={imageClass} style={imageStyle}/>}
     {!isLocal && <img src={isPublic ? url(src) : src} alt={alt || ""} class={imageClass} style={imageStyle}/>}
