@@ -23,6 +23,8 @@ lang: ''
 - 收信：外部服务发邮件到你的域名邮箱，Cloudflare / Cloud Mail 接收后，转发到 Cloud Mail 面板、Telegram 或 Gmail。
 - 发信：Cloud Mail 或 Gmail 通过 Resend 的 SMTP 服务，以你的域名邮箱身份发出邮件。
 
+![域名邮箱收发架构图](./mail-flow-architecture.svg)
+
 需要准备：
 
 - 一个已经接入 Cloudflare 的域名
@@ -57,6 +59,14 @@ Resend 会要求你添加 DNS 记录来验证域名。按页面提示跳转到 C
 
 > [!NOTE]
 > 我这里直接添加主域名。如果你更在意发信信誉隔离，也可以用类似 `mail.example.com` 这样的子域名。
+
+Resend 自动添加的 DNS 记录通常会覆盖 SPF / DKIM 等发信认证，但不会替你补主域名的 DMARC。为了防止别人伪造你的域名发信，建议在 Cloudflare DNS 里手动加一条：
+
+| 类型 | 名称 | 内容 | 代理状态 | TTL |
+| --- | --- | --- | --- | --- |
+| TXT | `_dmarc` | `"v=DMARC1;p=reject"` | 仅 DNS | 自动 |
+
+`p=reject` 是比较严格的策略：当邮件没有通过 SPF / DKIM 对齐时，收件方可以直接拒收。对于刚开始测试的新域名，这样比较干净；如果你的域名之前已经接入过其它发信服务，要先确认所有合法发信服务的 SPF / DKIM 都配置正确，再切到 `reject`。
 
 域名验证完成后，进入 `API keys` 页面，创建一个新的 API Key。这个 Key 只会完整显示一次，一定要立刻保存好。
 
@@ -132,11 +142,29 @@ Gmail 会向这个域名邮箱发送一封确认邮件。你可以在 Cloud Mail
 
 如果 Gmail 迟迟收不到确认邮件，可以先检查 Cloud Mail 是否已经收到，再检查 Cloudflare 邮件路由的目标地址是否完成验证。
 
+## 常见问题
+
+### Gmail 添加 SMTP 时提示无法连接
+
+优先确认端口和加密方式是否对应：`465` 选择 `SSL`，`587` 选择 `TLS` 或 `STARTTLS`。如果你按本文使用 `465`，Gmail 里就选 `SSL`。
+
+### 发出去的邮件进垃圾箱
+
+先检查 Resend 的域名验证状态，确认 SPF、DKIM、DMARC 记录都已经正确生效。DNS 刚添加后可能需要等一会儿，Cloudflare 一般很快，但不同收件方缓存时间不一样。
+
+### Gmail 收不到确认邮件
+
+先看 Cloud Mail 面板是否已经收到确认邮件。如果 Cloud Mail 收到了但 Gmail 没有收到，再检查 Cloudflare Email Routing 的目标地址是否完成验证，以及 Cloud Mail 的第三方邮箱推送是否开启。
+
+### 为什么不直接用 Cloudflare 发信？
+
+传统的 Cloudflare Email Routing 主要负责收信和转发，并不提供常规 SMTP 发信服务器。Cloudflare 现在也在推进 Email Service，可以通过 REST API 或 Workers 发信；但如果只是想接入 Gmail 的“用其他地址发送邮件”，Resend 的 SMTP 配置会更简单。
+
 ## 限制和注意事项
 
 Resend 免费档适合个人低频使用。目前免费额度是 100 封/天、3000 封/月、1 个自定义域。如果你使用 Resend 的接收功能，收到的邮件也会计入额度；但这篇方案主要使用 Resend 发信。
 
-Cloudflare Email Routing 本身只负责收信转发，不提供 SMTP 发信服务器。所以发信这部分必须借助 Resend 这样的第三方 SMTP 服务。
+传统的 Cloudflare Email Routing 主要负责收信转发，不提供常规 SMTP 发信服务器。Cloudflare Email Service 已经提供 REST API / Workers 发信能力，但本文选择 Resend，是因为它有标准 SMTP，直接接入 Gmail 更省事。
 
 这套方案也不是“完全私密邮箱”。从信任模型上，你仍然要信任 Cloudflare、Cloud Mail 的部署环境，以及 Resend 的发信服务。普通注册、通知、项目测试没有太大问题，但高度敏感的邮件不建议放在这类免费组合方案里。
 
@@ -147,6 +175,8 @@ Cloudflare Email Routing 本身只负责收信转发，不提供 SMTP 发信服�
 - <a href="https://doc.skymail.ink/guide/dashboard.html" target="_blank" rel="noopener noreferrer">Cloud Mail 官方文档</a>
 - <a href="https://resend.com/pricing" target="_blank" rel="noopener noreferrer">Resend 价格与免费额度</a>
 - <a href="https://resend.com/docs/send-with-smtp" target="_blank" rel="noopener noreferrer">Resend SMTP 文档</a>
+- <a href="https://resend.com/docs/dashboard/domains/dmarc" target="_blank" rel="noopener noreferrer">Resend DMARC 文档</a>
 - <a href="https://resend.com/docs/knowledge-base/account-quotas-and-limits" target="_blank" rel="noopener noreferrer">Resend 账号额度说明</a>
 - <a href="https://developers.cloudflare.com/email-routing/" target="_blank" rel="noopener noreferrer">Cloudflare Email Routing 文档</a>
+- <a href="https://developers.cloudflare.com/email-service/api/send-emails/rest-api/" target="_blank" rel="noopener noreferrer">Cloudflare Email Service REST API 文档</a>
 - <a href="https://support.google.com/mail/answer/22370" target="_blank" rel="noopener noreferrer">Gmail：使用其他地址发信</a>

@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="560" viewBox="0 0 1120 560" role="img" aria-labelledby="title desc">
+  <title id="title">Cloud Mail、Resend 和 Gmail 的域名邮箱收发架构图</title>
+  <desc id="desc">上半部分展示收信链路，下半部分展示发信链路，并标出 SPF、DKIM、DMARC DNS 认证记录。</desc>
+  <defs>
+    <marker id="arrow-blue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#0284c7"/>
+    </marker>
+    <marker id="arrow-orange" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#f97316"/>
+    </marker>
+    <style>
+      .canvas { fill: #f8fafc; }
+      .panel { fill: #ffffff; stroke: #dbeafe; stroke-width: 2; }
+      .send-panel { fill: #ffffff; stroke: #fed7aa; stroke-width: 2; }
+      .box { fill: #f0f9ff; stroke: #7dd3fc; stroke-width: 2; }
+      .send-box { fill: #fff7ed; stroke: #fdba74; stroke-width: 2; }
+      .security-box { fill: #f0fdf4; stroke: #86efac; stroke-width: 2; }
+      .label { fill: #0f172a; font: 700 24px Inter, "Segoe UI", sans-serif; }
+      .text { fill: #1e293b; font: 600 20px Inter, "Segoe UI", sans-serif; }
+      .small { fill: #475569; font: 500 16px Inter, "Segoe UI", sans-serif; }
+      .arrow-blue { stroke: #0284c7; stroke-width: 3; fill: none; marker-end: url(#arrow-blue); }
+      .arrow-orange { stroke: #f97316; stroke-width: 3; fill: none; marker-end: url(#arrow-orange); }
+      .badge-blue { fill: #e0f2fe; }
+      .badge-orange { fill: #ffedd5; }
+    </style>
+  </defs>
+
+  <rect class="canvas" x="0" y="0" width="1120" height="560" rx="28"/>
+
+  <rect class="panel" x="40" y="40" width="1040" height="210" rx="24"/>
+  <rect class="badge-blue" x="68" y="66" width="104" height="38" rx="19"/>
+  <text class="label" x="120" y="93" text-anchor="middle">收信链路</text>
+
+  <rect class="box" x="90" y="132" width="180" height="72" rx="16"/>
+  <text class="text" x="180" y="162" text-anchor="middle">外部网站/用户</text>
+  <text class="small" x="180" y="188" text-anchor="middle">向域名邮箱发信</text>
+
+  <rect class="box" x="340" y="132" width="190" height="72" rx="16"/>
+  <text class="text" x="435" y="162" text-anchor="middle">admin@yourdomain</text>
+  <text class="small" x="435" y="188" text-anchor="middle">自定义邮箱地址</text>
+
+  <rect class="box" x="600" y="132" width="210" height="72" rx="16"/>
+  <text class="text" x="705" y="162" text-anchor="middle">Cloudflare / Cloud Mail</text>
+  <text class="small" x="705" y="188" text-anchor="middle">接收与路由</text>
+
+  <rect class="box" x="880" y="132" width="150" height="72" rx="16"/>
+  <text class="text" x="955" y="162" text-anchor="middle">收件端</text>
+  <text class="small" x="955" y="188" text-anchor="middle">面板 / TG / Gmail</text>
+
+  <path class="arrow-blue" d="M270 168 H328"/>
+  <path class="arrow-blue" d="M530 168 H588"/>
+  <path class="arrow-blue" d="M810 168 H868"/>
+
+  <rect class="send-panel" x="40" y="310" width="1040" height="210" rx="24"/>
+  <rect class="badge-orange" x="68" y="336" width="104" height="38" rx="19"/>
+  <text class="label" x="120" y="363" text-anchor="middle">发信链路</text>
+
+  <rect class="send-box" x="90" y="402" width="180" height="72" rx="16"/>
+  <text class="text" x="180" y="432" text-anchor="middle">Gmail / Cloud Mail</text>
+  <text class="small" x="180" y="458" text-anchor="middle">选择域名邮箱发信</text>
+
+  <rect class="send-box" x="340" y="402" width="190" height="72" rx="16"/>
+  <text class="text" x="435" y="432" text-anchor="middle">Resend SMTP</text>
+  <text class="small" x="435" y="458" text-anchor="middle">smtp.resend.com</text>
+
+  <rect class="security-box" x="600" y="392" width="210" height="92" rx="16"/>
+  <text class="text" x="705" y="424" text-anchor="middle">DNS 身份认证</text>
+  <text class="small" x="705" y="450" text-anchor="middle">SPF / DKIM / DMARC</text>
+  <text class="small" x="705" y="474" text-anchor="middle">减少伪造与进垃圾箱</text>
+
+  <rect class="send-box" x="880" y="402" width="150" height="72" rx="16"/>
+  <text class="text" x="955" y="432" text-anchor="middle">对方邮箱</text>
+  <text class="small" x="955" y="458" text-anchor="middle">接收邮件</text>
+
+  <path class="arrow-orange" d="M270 438 H328"/>
+  <path class="arrow-orange" d="M530 438 H588"/>
+  <path class="arrow-orange" d="M810 438 H868"/>
+</svg>
