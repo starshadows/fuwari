@@ -31,9 +31,9 @@ lang: ''
 - 一个 Resend 账号，用来发信
 - 一个 Gmail 账号，可选，用来当日常收发客户端
 
-Cloud Mail 项目地址：[maillab/cloud-mail](https://github.com/maillab/cloud-mail)
+Cloud Mail 项目地址：<a href="https://github.com/maillab/cloud-mail" target="_blank" rel="noopener noreferrer">maillab/cloud-mail</a>
 
-Cloud Mail 官方部署文档：[界面部署](https://doc.skymail.ink/guide/dashboard.html)
+Cloud Mail 官方部署文档：<a href="https://doc.skymail.ink/guide/dashboard.html" target="_blank" rel="noopener noreferrer">界面部署</a>
 
 ## 先完成 Cloud Mail 收信
 
@@ -49,7 +49,7 @@ Cloud Mail 的基础部署建议直接按官方文档走。核心步骤是：
 
 ## 配置 Resend 发信
 
-打开 [Resend](https://resend.com/) 官网，注册并登录账号，然后进入 `Domains` 页面，点击 `Add domain` 添加自己的域名。
+打开 <a href="https://resend.com/" target="_blank" rel="noopener noreferrer">Resend</a> 官网，注册并登录账号，然后进入 `Domains` 页面，点击 `Add domain` 添加自己的域名。
 
 ![Resend 的 Domains 页面](./step-01-resend-domain.png)
 
@@ -144,9 +144,9 @@ Cloudflare Email Routing 本身只负责收信转发，不提供 SMTP 发信服�
 
 ## 参考资料
 
-- [Cloud Mail 官方文档](https://doc.skymail.ink/guide/dashboard.html)
-- [Resend 价格与免费额度](https://resend.com/pricing)
-- [Resend SMTP 文档](https://resend.com/docs/send-with-smtp)
-- [Resend 账号额度说明](https://resend.com/docs/knowledge-base/account-quotas-and-limits)
-- [Cloudflare Email Routing 文档](https://developers.cloudflare.com/email-routing/)
-- [Gmail：使用其他地址发信](https://support.google.com/mail/answer/22370)
+- <a href="https://doc.skymail.ink/guide/dashboard.html" target="_blank" rel="noopener noreferrer">Cloud Mail 官方文档</a>
+- <a href="https://resend.com/pricing" target="_blank" rel="noopener noreferrer">Resend 价格与免费额度</a>
+- <a href="https://resend.com/docs/send-with-smtp" target="_blank" rel="noopener noreferrer">Resend SMTP 文档</a>
+- <a href="https://resend.com/docs/knowledge-base/account-quotas-and-limits" target="_blank" rel="noopener noreferrer">Resend 账号额度说明</a>
+- <a href="https://developers.cloudflare.com/email-routing/" target="_blank" rel="noopener noreferrer">Cloudflare Email Routing 文档</a>
+- <a href="https://support.google.com/mail/answer/22370" target="_blank" rel="noopener noreferrer">Gmail：使用其他地址发信</a>
