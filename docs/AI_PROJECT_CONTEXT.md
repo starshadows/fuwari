@@ -53,6 +53,8 @@ Node version: 20
 
 - Site identity is Chinese, under the name `星影`.
 - GitHub repo link is `https://github.com/starshadows/fuwari`.
+- Canonical public domain is `https://starshadow.cc/`.
+- `astro.config.mjs` `site` must stay set to `https://starshadow.cc/`. This value drives `og:url`, `twitter:url`, RSS, sitemap, and post JSON-LD `author.url`; do not revert it to `fuwari.pages.dev`.
 - Contact email is shown as text in the profile bio: `admin@starshadow.cc`.
 - The old demo posts were removed.
 - The current first post is `src/content/posts/hello-fuwari.md`.
@@ -84,6 +86,14 @@ lang: ''
 
 `draft: true` hides a post from production builds. `draft: false` publishes it.
 
+## Practical AI Workflow Notes
+
+- Chinese files are UTF-8. PowerShell `Get-Content` output can look garbled in the tool log even when the file is correct. Verify Chinese text with Python, for example `Path(...).read_text(encoding="utf-8")`, before assuming corruption.
+- Prefer folder posts for articles with local images: `src/content/posts/post-slug/index.md`, `cover.png`, and nearby step images.
+- For public screenshots, use irreversible solid masking for emails, domains, API keys, account avatars, and tokens. Do not rely on blur or partial masks.
+- External article links should open in a new tab using HTML anchors with `target="_blank"` and `rel="noopener noreferrer"`.
+- For multi-service tutorials, add a simple original flow/architecture diagram when text alone is hard to follow. Store the diagram beside the post; do not paste user-supplied screenshots as the diagram.
+
 ## Deployment Notes
 
 This site builds to static HTML/CSS/JS in `dist/`.
@@ -102,6 +112,13 @@ Before pushing meaningful changes, run:
 corepack pnpm check
 corepack pnpm build
 ```
+
+## Build Pitfalls Seen In Practice
+
+- `pnpm check` can pass while `pnpm build` fails. Always run both before pushing.
+- Tailwind `@apply` can fail in production if a CSS file applies a custom component class defined in another CSS file, with errors like `The expand-animation class does not exist` or `The btn-regular-dark class does not exist`. Fix by expanding the needed utilities locally or moving the class into the same visible `@layer`, then rerun `corepack pnpm build`.
+- Browserslist age notices, Svelte `experimental_async_ssr` links, and Pagefind's `zh-cn` stemming note have appeared during successful builds and are not blockers by themselves.
+- Do not commit generated `dist/`, `.astro/`, or temporary preview/review images.
 
 ## Known Design Choices
 
