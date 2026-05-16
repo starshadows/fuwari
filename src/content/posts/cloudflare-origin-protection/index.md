@@ -83,23 +83,30 @@ volumes:
 
 ## UFW 只放行 Cloudflare IP
 
-Cloudflare 官方公开了自己的 IP 段，可以用脚本定期同步到 UFW。核心逻辑是：
+Cloudflare 官方公开了自己的 IP 段，可以用脚本定期同步到 UFW。这里的脚本只负责给 Cloudflare IP 放行 `80/443`，不去改 `/etc/ufw/after.rules`，也不处理 Docker 相关规则：
 
 ```bash
-ufw default deny incoming
-ufw default allow outgoing
+#!/bin/bash
+CF_V4_URL="https://www.cloudflare.com/ips-v4"
+CF_V6_URL="https://www.cloudflare.com/ips-v6"
 
-ufw allow 22/tcp comment 'SSH'
+echo "开始更新 Cloudflare IPv4 规则..."
+for ip in $(curl -s "$CF_V4_URL"); do
+  ufw allow from "$ip" to any port 80 comment 'Cloudflare_IP'
+  ufw allow from "$ip" to any port 443 comment 'Cloudflare_IP'
+done
 
-while read -r cidr; do
-  ufw allow proto tcp from "$cidr" to any port 80 comment 'CF-HOST'
-  ufw allow proto tcp from "$cidr" to any port 443 comment 'CF-HOST'
-done < /etc/ufw/cloudflare/ips-v4
+echo "开始更新 Cloudflare IPv6 规则..."
+for ip in $(curl -s "$CF_V6_URL"); do
+  ufw allow from "$ip" to any port 80 comment 'Cloudflare_IP'
+  ufw allow from "$ip" to any port 443 comment 'Cloudflare_IP'
+done
 
-ufw --force enable
+ufw reload
+echo "更新完成！"
 ```
 
-IPv6 同理，读取 Cloudflare 的 IPv6 列表再加一遍规则。脚本可以每天跑一次，因为 Cloudflare IP 段不是你自己能控制的配置。
+脚本可以每天跑一次，因为 Cloudflare IP 段不是你自己能控制的配置。上面这种写法是追加 allow 规则再 reload；它不会重置 UFW，也不会覆盖 `ufw-docker` 需要的规则文件。正式长期使用时，可以再加上错误处理、日志和旧规则清理，避免脚本失败时悄悄跳过。
 
 > [!WARNING]
 > 远程服务器启用 UFW 之前，先确认 SSH 已经放行。最好保留当前 SSH 会话，再开一个新终端测试能否重新登录，避免把自己锁在外面。
@@ -112,9 +119,9 @@ Docker 发布端口时会改 iptables / NAT 规则。结果是：你在 UFW 里�
 
 这也是这篇文章里最容易踩坑的地方。解决办法是把 Docker 转发流量也纳入 UFW 管理，我这里用的是 <a href="https://github.com/chaifeng/ufw-docker" target="_blank" rel="noopener noreferrer">ufw-docker</a>。
 
-这里不建议照抄一段固定脚本，因为 Docker 网络、容器名和要暴露的端口在每台机器上都不一样。更稳妥的做法是按 `ufw-docker` 官方 README 先安装规则，再用它提供的 `check`、`status`、`allow`、`reload` 等命令确认 Docker 转发流量已经进入 UFW 管理。
+这里不建议把 Docker 转发规则硬塞进 Cloudflare IP 更新脚本，因为 Docker 网络、容器名和要暴露的端口在每台机器上都不一样。更稳妥的做法是按 `ufw-docker` 官方 README 先安装规则，再用它提供的 `check`、`status`、`allow`、`reload` 等命令确认 Docker 转发流量已经进入 UFW 管理。
 
-我自己的 Cloudflare IP 更新脚本只负责维护“哪些来源 IP 可以访问源站 `80/443`”。Docker 这一层按 `ufw-docker` 官方配置处理：新增或删除 Docker 网络后，重新检查并更新 `ufw-docker` 规则；如果你用 `ufw reset` 重建防火墙，也要记得重新接入 Docker 相关规则。
+也就是说，Cloudflare IP 脚本维护的是“哪些来源 IP 可以访问源站 `80/443`”；Docker 这一层由 `ufw-docker` 接管。只要你的 IP 更新脚本没有 `ufw reset`，也没有覆盖 `/etc/ufw/after.rules`，一般不会把 `ufw-docker` 的接入配置冲掉。真正需要重新处理的是：你重置了 UFW、手动改了 after rules、或者新增/删除了 Docker 网络。
 
 修复后，再直接访问源站 IP，浏览器应该打不开，或者超时：
 
@@ -258,7 +265,7 @@ curl -kI --resolve aaa.454849.xyz:443:127.0.0.1 https://aaa.454849.xyz
 
 这套方案不是万能的。
 
-首先，Cloudflare IP 白名单依赖 IP 段同步，脚本要能稳定更新。脚本里如果用了 `ufw reset`，就要把 SSH 和 Cloudflare 主机规则恢复回来；Docker 相关部分则按 `ufw-docker` 官方方式重新检查和接入，别让自动更新把规则冲掉。
+首先，Cloudflare IP 白名单依赖 IP 段同步，脚本要能稳定更新。如果脚本只是追加 Cloudflare allow 规则并 `ufw reload`，通常不会影响 `ufw-docker`；如果脚本用了 `ufw reset`，或者覆盖了 `/etc/ufw/after.rules`，才需要把 SSH、Cloudflare 主机规则和 `ufw-docker` 接入配置一起恢复回来。
 
 其次，Global AOP 仍然是共享信任。它适合个人站和普通项目，因为普通 Cloudflare 配置下，攻击者很难同时做到“让 Cloudflare 回源到你的 IP、伪造正确 Host/SNI、并绕过你的源站校验”。如果你的安全模型要求“只有我这个 zone 可以访问源站”，再考虑自定义 AOP。
 
