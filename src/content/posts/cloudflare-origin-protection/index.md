@@ -1,5 +1,5 @@
 ---
-title: 用 Cloudflare、Caddy 和 UFW 做源站保护：挡住直接访问 IP
+title: 用 Cloudflare、Caddy 和 UFW 保护源站：只接受可信回源
 published: 2026-05-16
 description: 记录一次在 AWS EC2 + Docker + Caddy 上做源站保护的思路：Cloudflare IP 白名单、ufw-docker、Full Strict、Host 校验和 Authenticated Origin Pulls。
 image: 'cover.png'
@@ -25,7 +25,7 @@ lang: ''
 
 1. Cloudflare DNS 开橙云，让正常访问先进入 Cloudflare。
 2. UFW 只允许 Cloudflare IP 访问源站的 `80/443`。
-3. Docker 发布端口后，用 `ufw-docker` 修复 Docker 绕过 UFW 的问题。
+3. Docker 发布端口后，用 `ufw-docker` 把容器转发流量纳入 UFW。
 4. Caddy 使用 Cloudflare Origin CA 证书，Cloudflare SSL/TLS 模式改成 Full Strict。
 5. Caddy 严格匹配 Host，并开启 Authenticated Origin Pulls，让源站只接受 Cloudflare 带客户端证书的回源请求。
 
@@ -106,28 +106,15 @@ IPv6 同理，读取 Cloudflare 的 IPv6 列表再加一遍规则。脚本可以
 
 到这里看起来已经像是“80/443 只允许 Cloudflare IP”了，但如果服务跑在 Docker 里，还没结束。
 
-## Docker 会绕过普通 UFW 规则
+## 把 Docker 转发流量纳入 UFW
 
 Docker 发布端口时会改 iptables / NAT 规则。结果是：你在 UFW 里看见 `80/443` 只允许 Cloudflare，但外部直接访问源站 IP 可能仍然能打到容器。
 
 这也是这篇文章里最容易踩坑的地方。解决办法是把 Docker 转发流量也纳入 UFW 管理，我这里用的是 <a href="https://github.com/chaifeng/ufw-docker" target="_blank" rel="noopener noreferrer">ufw-docker</a>。
 
-安装后，UFW 更新脚本里除了普通 `allow`，还要给 Docker 转发流量加 `route allow`：
+这里不建议照抄一段固定脚本，因为 Docker 网络、容器名和要暴露的端口在每台机器上都不一样。更稳妥的做法是按 `ufw-docker` 官方 README 先安装规则，再用它提供的 `check`、`status`、`allow`、`reload` 等命令确认 Docker 转发流量已经进入 UFW 管理。
 
-```bash
-while read -r cidr; do
-  ufw allow proto tcp from "$cidr" to any port 80 comment 'CF-HOST'
-  ufw allow proto tcp from "$cidr" to any port 443 comment 'CF-HOST'
-  ufw route allow proto tcp from "$cidr" to any port 80 comment 'CF-DOCKER'
-  ufw route allow proto tcp from "$cidr" to any port 443 comment 'CF-DOCKER'
-done < /etc/ufw/cloudflare/ips-v4
-
-ufw --force enable
-ufw-docker install --docker-subnets
-ufw reload
-```
-
-如果你的脚本每次都会 `ufw reset`，记得在重建规则后重新执行 `ufw-docker install --docker-subnets`。否则第二天自动更新完，Docker 相关规则可能又丢了。
+我自己的 Cloudflare IP 更新脚本只负责维护“哪些来源 IP 可以访问源站 `80/443`”。Docker 这一层按 `ufw-docker` 官方配置处理：新增或删除 Docker 网络后，重新检查并更新 `ufw-docker` 规则；如果你用 `ufw reset` 重建防火墙，也要记得重新接入 Docker 相关规则。
 
 修复后，再直接访问源站 IP，浏览器应该打不开，或者超时：
 
@@ -251,7 +238,7 @@ curl -kI --resolve aaa.454849.xyz:443:127.0.0.1 https://aaa.454849.xyz
 开启后，正常域名访问依然走 Cloudflare，Cloudflare 带客户端证书回源，所以可以访问；直接打源站 IP 或本地伪造解析，因为没有 Cloudflare 客户端证书，会在 TLS 阶段失败。
 
 > [!NOTE]
-> Global AOP 用的是 Cloudflare 共享客户端证书，它证明“请求来自 Cloudflare 网络”，不是证明“请求来自我的这个 Cloudflare zone”。对普通个人站来说，Global AOP + 严格 Host 校验 + Cloudflare IP 白名单已经很强。如果是企业级场景，或者需要把源站访问权限精确绑定到自己的配置，可以进一步研究 Zone-level / Per-hostname 的自定义 AOP。
+> Global AOP 用的是 Cloudflare 共享客户端证书，它证明“请求来自 Cloudflare 网络”，不是证明“请求来自我的这个 Cloudflare zone”。不过普通套餐下，别人通常不能随意指定回源端口、改写 Host/SNI 再打到你的源站；这类更强的回源改写能力一般需要 Enterprise 或更高权限配置。对个人站来说，Global AOP + 严格 Host 校验 + Cloudflare IP 白名单已经够用了。
 
 ## 验证清单
 
@@ -262,7 +249,7 @@ curl -kI --resolve aaa.454849.xyz:443:127.0.0.1 https://aaa.454849.xyz
 3. `http://源站IP` 无法直接打开。
 4. 伪造 Host 请求源站，不会返回真实站点内容。
 5. 没有 Cloudflare 客户端证书时，直接打源站 HTTPS 会失败。
-6. `ufw status numbered` 里能看到 Cloudflare IP 的 `ALLOW IN` 和 Docker 转发相关的 `ALLOW FWD`。
+6. UFW 里能看到 Cloudflare IP 白名单，`ufw-docker` 也能确认 Docker 转发流量已经接入 UFW。
 7. 自动更新 Cloudflare IP 的 systemd timer 正常运行。
 
 验证时不要只看“能不能访问域名”。源站保护最重要的是反向测试：绕过 Cloudflare 的路径是不是被挡住了。
@@ -271,13 +258,13 @@ curl -kI --resolve aaa.454849.xyz:443:127.0.0.1 https://aaa.454849.xyz
 
 这套方案不是万能的。
 
-首先，Cloudflare IP 白名单依赖 IP 段同步，脚本要能稳定更新。脚本里如果用了 `ufw reset`，就要把 SSH、Cloudflare、Docker 转发规则都重新写回去，不然容易把自己服务断掉。
+首先，Cloudflare IP 白名单依赖 IP 段同步，脚本要能稳定更新。脚本里如果用了 `ufw reset`，就要把 SSH 和 Cloudflare 主机规则恢复回来；Docker 相关部分则按 `ufw-docker` 官方方式重新检查和接入，别让自动更新把规则冲掉。
 
-其次，Global AOP 仍然是共享信任。它适合个人站和普通项目，但如果你的安全模型要求“只有我这个 zone 可以访问源站”，就应该使用自定义 AOP。
+其次，Global AOP 仍然是共享信任。它适合个人站和普通项目，因为普通 Cloudflare 配置下，攻击者很难同时做到“让 Cloudflare 回源到你的 IP、伪造正确 Host/SNI、并绕过你的源站校验”。如果你的安全模型要求“只有我这个 zone 可以访问源站”，再考虑自定义 AOP。
 
 另外，教程里的 AWS 安全组开放是为了演示对比。正式服务器不要这样配置。安全组、系统防火墙、Caddy Host 校验、mTLS 都是不同层的保护，能叠加就叠加。
 
-最后，如果你的业务不一定要把 Docker 端口直接发布到公网，也可以考虑让容器只监听本机或内网，再由宿主机上的反向代理统一入口。那样规则会更简单，但和这次的演示环境不是同一条路线。
+最后，实际部署时通常让 Caddy 作为唯一公网入口，绑定宿主机的 `80/443` 就够了。其它业务容器不需要直接绑定宿主机公网端口，可以只监听本机或 Docker 内网，再由 Caddy 反向代理过去。即使已有服务绑定了宿主机端口，也要用 UFW / ufw-docker 管住入口，不要让它绕过 Cloudflare 暴露在公网。
 
 ## 参考资料
 
@@ -285,5 +272,5 @@ curl -kI --resolve aaa.454849.xyz:443:127.0.0.1 https://aaa.454849.xyz
 - <a href="https://developers.cloudflare.com/ssl/origin-configuration/ssl-modes/full-strict/" target="_blank" rel="noopener noreferrer">Cloudflare Full (strict) SSL/TLS mode</a>
 - <a href="https://developers.cloudflare.com/ssl/origin-configuration/authenticated-origin-pull/" target="_blank" rel="noopener noreferrer">Cloudflare Authenticated Origin Pulls</a>
 - <a href="https://docs.docker.com/engine/install/ubuntu/" target="_blank" rel="noopener noreferrer">Docker Engine on Ubuntu</a>
-- <a href="https://caddyserver.com/docs/caddyfile/directives/tls" target="_blank" rel="noopener noreferrer">Caddy `tls` directive</a>
+- <a href="https://caddyserver.com/docs/caddyfile/directives/tls" target="_blank" rel="noopener noreferrer">Caddy TLS directive</a>
 - <a href="https://github.com/chaifeng/ufw-docker" target="_blank" rel="noopener noreferrer">ufw-docker</a>
