@@ -83,30 +83,39 @@ volumes:
 
 ## UFW 只放行 Cloudflare IP
 
-Cloudflare 官方公开了自己的 IP 段，可以用脚本定期同步到 UFW。这里的脚本只负责给 Cloudflare IP 放行 `80/443`，不去改 `/etc/ufw/after.rules`，也不处理 Docker 相关规则：
+Cloudflare 官方公开了自己的 IP 段，可以用脚本定期同步到 UFW。这里的脚本只负责给 Cloudflare IP 放行 `80/443`，不去改 `/etc/ufw/after.rules`，也不处理 Docker 相关规则。下面这段以 root 身份执行即可：
 
 ```bash
+cat << 'EOF' > /root/update_cf_ips.sh
 #!/bin/bash
+# 专为 ufw-docker 环境设计的 Cloudflare IP 安全更新脚本
+
 CF_V4_URL="https://www.cloudflare.com/ips-v4"
 CF_V6_URL="https://www.cloudflare.com/ips-v6"
 
 echo "开始更新 Cloudflare IPv4 规则..."
-for ip in $(curl -s "$CF_V4_URL"); do
-  ufw allow from "$ip" to any port 80 comment 'Cloudflare_IP'
-  ufw allow from "$ip" to any port 443 comment 'Cloudflare_IP'
+for ip in $(curl -s $CF_V4_URL); do
+    ufw allow from $ip to any port 80 comment 'Cloudflare_IP'
+    ufw allow from $ip to any port 443 comment 'Cloudflare_IP'
 done
 
 echo "开始更新 Cloudflare IPv6 规则..."
-for ip in $(curl -s "$CF_V6_URL"); do
-  ufw allow from "$ip" to any port 80 comment 'Cloudflare_IP'
-  ufw allow from "$ip" to any port 443 comment 'Cloudflare_IP'
+for ip in $(curl -s $CF_V6_URL); do
+    ufw allow from $ip to any port 80 comment 'Cloudflare_IP'
+    ufw allow from $ip to any port 443 comment 'Cloudflare_IP'
 done
 
+echo "重新加载 UFW..."
 ufw reload
 echo "更新完成！"
+EOF
+
+chmod +x /root/update_cf_ips.sh
+(crontab -l 2>/dev/null | grep -v "/root/update_cf_ips.sh"; echo "0 4 * * 1 /bin/bash /root/update_cf_ips.sh >> /var/log/update_cf_ips.log 2>&1") | crontab -
+/root/update_cf_ips.sh
 ```
 
-脚本可以每天跑一次，因为 Cloudflare IP 段不是你自己能控制的配置。上面这种写法是追加 allow 规则再 reload；它不会重置 UFW，也不会覆盖 `ufw-docker` 需要的规则文件。正式长期使用时，可以再加上错误处理、日志和旧规则清理，避免脚本失败时悄悄跳过。
+这段命令会创建 `/root/update_cf_ips.sh`，每周一凌晨 4 点自动执行，并立即手动跑一次。上面这种写法是追加 allow 规则再 reload；它不会重置 UFW，也不会覆盖 `ufw-docker` 需要的规则文件。正式长期使用时，可以再加上错误处理、日志和旧规则清理，避免脚本失败时悄悄跳过。
 
 > [!WARNING]
 > 远程服务器启用 UFW 之前，先确认 SSH 已经放行。最好保留当前 SSH 会话，再开一个新终端测试能否重新登录，避免把自己锁在外面。
