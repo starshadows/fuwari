@@ -19,7 +19,7 @@ lang: ''
 
 ## 整体链路
 
-![源站保护链路图](./architecture.svg)
+![源站保护链路图](./architecture.png)
 
 这套保护大概分成五层：
 
