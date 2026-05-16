@@ -83,7 +83,7 @@ volumes:
 
 ## UFW 只放行 Cloudflare IP
 
-Cloudflare 官方公开了自己的 IP 段，可以用脚本定期同步到 UFW。这里的脚本只负责给 Cloudflare IP 放行 `80/443`，不去改 `/etc/ufw/after.rules`，也不处理 Docker 相关规则。下面这段以 root 身份执行即可：
+Cloudflare 官方公开了自己的 IP 段，可以用脚本定期同步到 UFW。因为这次 Caddy 跑在 Docker 里，脚本同时加普通 `allow` 和 Docker 转发用的 `route allow`：
 
 ```bash
 cat << 'EOF' > /root/update_cf_ips.sh
@@ -95,14 +95,20 @@ CF_V6_URL="https://www.cloudflare.com/ips-v6"
 
 echo "开始更新 Cloudflare IPv4 规则..."
 for ip in $(curl -s $CF_V4_URL); do
-    ufw allow from $ip to any port 80 comment 'Cloudflare_IP'
-    ufw allow from $ip to any port 443 comment 'Cloudflare_IP'
+    # 允许访问宿主机本身
+    ufw allow proto tcp from $ip to any port 80 comment 'CF-HOST'
+    ufw allow proto tcp from $ip to any port 443 comment 'CF-HOST'
+    # 允许流量转发到 Docker 容器 (ufw-docker 必须)
+    ufw route allow proto tcp from $ip to any port 80 comment 'CF-DOCKER'
+    ufw route allow proto tcp from $ip to any port 443 comment 'CF-DOCKER'
 done
 
 echo "开始更新 Cloudflare IPv6 规则..."
 for ip in $(curl -s $CF_V6_URL); do
-    ufw allow from $ip to any port 80 comment 'Cloudflare_IP'
-    ufw allow from $ip to any port 443 comment 'Cloudflare_IP'
+    ufw allow proto tcp from $ip to any port 80 comment 'CF-HOST'
+    ufw allow proto tcp from $ip to any port 443 comment 'CF-HOST'
+    ufw route allow proto tcp from $ip to any port 80 comment 'CF-DOCKER'
+    ufw route allow proto tcp from $ip to any port 443 comment 'CF-DOCKER'
 done
 
 echo "重新加载 UFW..."
@@ -115,7 +121,7 @@ chmod +x /root/update_cf_ips.sh
 /root/update_cf_ips.sh
 ```
 
-这段命令会创建 `/root/update_cf_ips.sh`，每周一凌晨 4 点自动执行，并立即手动跑一次。上面这种写法是追加 allow 规则再 reload；它不会重置 UFW，也不会覆盖 `ufw-docker` 需要的规则文件。正式长期使用时，可以再加上错误处理、日志和旧规则清理，避免脚本失败时悄悄跳过。
+这段命令会创建 `/root/update_cf_ips.sh`，每周一凌晨 4 点自动执行，并立即手动跑一次。`CF-HOST` 负责宿主机本身的 `80/443`，`CF-DOCKER` 负责转发到 Docker 容器的流量；脚本只追加规则并 reload，不会重置 UFW，也不会覆盖 `/etc/ufw/after.rules`。正式长期使用时，可以再加上错误处理、日志和旧规则清理，避免脚本失败时悄悄跳过。
 
 > [!WARNING]
 > 远程服务器启用 UFW 之前，先确认 SSH 已经放行。最好保留当前 SSH 会话，再开一个新终端测试能否重新登录，避免把自己锁在外面。
