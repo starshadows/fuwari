@@ -251,7 +251,7 @@ Do not:
 - Change theme layout files while only writing an article.
 - Add unused images.
 - Change `src/config.ts` unless the user asks for site-wide settings.
-- Revert `astro.config.mjs` `site` to the upstream Fuwari demo domain. This project uses `https://starshadow.cc/` for canonical URLs, share previews, RSS, sitemap, and author metadata.
+- Revert `astro.config.mjs` `site` to the upstream Fuwari demo domain or the apex domain. This project uses `https://blog.starshadow.cc/` for canonical URLs, share previews, RSS, sitemap, and author metadata.
 
 ## Before Finishing
 

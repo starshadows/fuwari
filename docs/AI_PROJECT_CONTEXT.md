@@ -53,8 +53,8 @@ Node version: 20
 
 - Site identity is Chinese, under the name `星影`.
 - GitHub repo link is `https://github.com/starshadows/fuwari`.
-- Canonical public domain is `https://starshadow.cc/`.
-- `astro.config.mjs` `site` must stay set to `https://starshadow.cc/`. This value drives `og:url`, `twitter:url`, RSS, sitemap, and post JSON-LD `author.url`; do not revert it to `fuwari.pages.dev`.
+- Canonical public domain is `https://blog.starshadow.cc/`.
+- `astro.config.mjs` `site` must stay set to `https://blog.starshadow.cc/`. This value drives `og:url`, `twitter:url`, RSS, sitemap, and post JSON-LD `author.url`; do not revert it to `fuwari.pages.dev` or the apex domain.
 - Contact email is shown as text in the profile bio: `admin@starshadow.cc`.
 - The old demo posts were removed.
 - The current first post is `src/content/posts/hello-fuwari.md`.
