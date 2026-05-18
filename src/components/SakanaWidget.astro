@@ -1,0 +1,327 @@
+---
+import { url } from "../utils/url-utils";
+
+const enabled = import.meta.env.PUBLIC_SAKANA_WIDGET_ENABLED !== "false";
+
+const sakanaCssUrl = url("/vendor/sakana/sakana.min.css");
+const sakanaMobileCssUrl = url("/vendor/sakana/sakana-hide-mobile.css");
+const sakanaScriptUrl = url("/vendor/sakana/sakana.min.js");
+const characterImageUrl = url("/sakana/starshadow.webp");
+---
+
+{enabled && (
+	<>
+		<link rel="stylesheet" href={sakanaCssUrl} />
+		<link rel="stylesheet" href={sakanaMobileCssUrl} />
+		<script is:inline src={sakanaScriptUrl} defer></script>
+
+		<style is:global>
+			#sakana-widget.sakana-float {
+				position: fixed;
+				right: 64px;
+				bottom: 52px;
+				width: 200px;
+				height: 200px;
+				z-index: 9999;
+				pointer-events: none;
+			}
+
+			#sakana-widget .sakana-widget-img {
+				background-size: contain;
+			}
+
+			#sakana-widget .sakana-widget-ctrl {
+				width: 136px;
+				height: 34px;
+				gap: 2px;
+				justify-content: center;
+				padding: 3px 4px;
+				border: 1px solid var(--line-color);
+				border-radius: 0.75rem;
+				background: color-mix(in oklch, var(--card-bg) 90%, transparent);
+				box-shadow: 0 0.75rem 2rem rgba(0, 0, 0, 0.14);
+				backdrop-filter: blur(12px);
+				transform: translateY(0.35rem);
+			}
+
+			#sakana-widget .sakana-widget-ctrl-item {
+				width: 30px;
+				height: 28px;
+				border-radius: 0.55rem;
+				color: var(--btn-content);
+				transition:
+					color 150ms ease,
+					background-color 150ms ease,
+					transform 150ms ease;
+			}
+
+			#sakana-widget .sakana-widget-ctrl-item:hover {
+				color: var(--primary);
+				background: var(--btn-card-bg-hover);
+			}
+
+			#sakana-widget .sakana-widget-ctrl-item:active {
+				transform: scale(0.92);
+			}
+
+			#sakana-widget .sakana-widget-icon {
+				width: 1.15rem;
+				height: 1.15rem;
+			}
+
+			#sakana-repo-confirm {
+				position: fixed;
+				right: 48px;
+				bottom: 104px;
+				z-index: 10000;
+				max-width: min(18rem, calc(100vw - 2rem));
+				color: black;
+			}
+
+			.dark #sakana-repo-confirm {
+				color: white;
+			}
+
+			#sakana-repo-confirm .sakana-confirm-card {
+				padding: 1rem;
+				border: 1px solid var(--line-color);
+				border-radius: var(--radius-large);
+				background: color-mix(in oklch, var(--card-bg) 94%, transparent);
+				box-shadow: 0 1rem 2.5rem rgba(0, 0, 0, 0.16);
+				backdrop-filter: blur(16px);
+			}
+
+			#sakana-repo-confirm .sakana-confirm-title {
+				font-size: 0.95rem;
+				font-weight: 700;
+				margin-bottom: 0.35rem;
+			}
+
+			#sakana-repo-confirm .sakana-confirm-text {
+				font-size: 0.82rem;
+				line-height: 1.6;
+				color: color-mix(in oklch, currentColor 70%, transparent);
+				margin-bottom: 0.85rem;
+			}
+
+			#sakana-repo-confirm .sakana-confirm-actions {
+				display: flex;
+				justify-content: flex-end;
+				gap: 0.5rem;
+			}
+
+			#sakana-repo-confirm button {
+				min-width: 4rem;
+				height: 2rem;
+				border: 0;
+				border-radius: 0.6rem;
+				font-size: 0.82rem;
+				font-weight: 700;
+				cursor: pointer;
+				transition:
+					background-color 150ms ease,
+					color 150ms ease,
+					transform 150ms ease;
+			}
+
+			#sakana-repo-confirm button:active {
+				transform: scale(0.95);
+			}
+
+			#sakana-repo-confirm [data-action="cancel"] {
+				color: var(--btn-content);
+				background: var(--btn-card-bg-hover);
+			}
+
+			#sakana-repo-confirm [data-action="open"] {
+				color: white;
+				background: var(--primary);
+			}
+		</style>
+
+		<script is:inline define:vars={{ characterImageUrl }}>
+			(() => {
+				const mountId = "sakana-widget";
+				const characterName = "starshadow";
+				const originalRepositoryUrl =
+					"https://github.com/dsrkafuu/sakana-widget";
+				const desktopQuery = "(min-width: 769px)";
+				const initialState = {
+					i: 0.08,
+					s: 0.1,
+					d: 0.988,
+					r: 0,
+					y: 0,
+					t: 0,
+					w: 0,
+				};
+
+				const getWidgetClass = () => window.SakanaWidget;
+				const isDesktop = () => window.matchMedia(desktopQuery).matches;
+
+				const unmountWidget = () => {
+					try {
+						window.__sakanaWidgetInstance?.unmount?.();
+					} catch {
+						document.getElementById(mountId)?.remove();
+					}
+					window.__sakanaWidgetInstance = null;
+					document.getElementById(mountId)?.remove();
+				};
+
+				const closeRepositoryConfirm = () => {
+					document.getElementById("sakana-repo-confirm")?.remove();
+				};
+
+				const showRepositoryConfirm = () => {
+					closeRepositoryConfirm();
+
+					const dialog = document.createElement("div");
+					dialog.id = "sakana-repo-confirm";
+					dialog.innerHTML = `
+						<div class="sakana-confirm-card" role="dialog" aria-modal="false" aria-labelledby="sakana-confirm-title">
+							<div id="sakana-confirm-title" class="sakana-confirm-title">打开原作者仓库？</div>
+							<div class="sakana-confirm-text">将跳转到 Sakana Widget 原作者的 GitHub 仓库。</div>
+							<div class="sakana-confirm-actions">
+								<button type="button" data-action="cancel">取消</button>
+								<button type="button" data-action="open">打开</button>
+							</div>
+						</div>
+					`;
+
+					dialog.addEventListener("click", (event) => {
+						const target = event.target;
+						if (!(target instanceof HTMLElement)) return;
+						const action = target.dataset.action;
+						if (action === "cancel") {
+							closeRepositoryConfirm();
+						}
+						if (action === "open") {
+							window.open(originalRepositoryUrl, "_blank", "noopener,noreferrer");
+							closeRepositoryConfirm();
+						}
+					});
+
+					document.addEventListener("keydown", (event) => {
+						if (event.key === "Escape") closeRepositoryConfirm();
+					}, { once: true });
+
+					document.body.appendChild(dialog);
+				};
+
+				const polishControls = () => {
+					const controls = document.querySelector(`#${mountId} .sakana-widget-ctrl`);
+					if (!(controls instanceof HTMLElement)) return;
+
+					const [person, magic, repo, close] = Array.from(controls.children);
+					if (!person || !magic || !repo || !close) return;
+
+					controls.append(person, repo, magic, close);
+
+					person.setAttribute("aria-label", "切换角色");
+					person.setAttribute("title", "切换角色");
+					repo.setAttribute("aria-label", "打开原作者仓库");
+					repo.setAttribute("title", "原作者仓库");
+					magic.setAttribute("aria-label", "自动跳动");
+					magic.setAttribute("title", "自动跳动");
+					close.setAttribute("aria-label", "临时关闭");
+					close.setAttribute("title", "临时关闭");
+
+					if (repo instanceof HTMLAnchorElement) {
+						repo.href = originalRepositoryUrl;
+						repo.target = "_blank";
+						repo.rel = "noopener noreferrer";
+						repo.addEventListener("click", (event) => {
+							event.preventDefault();
+							showRepositoryConfirm();
+						});
+					}
+
+					close.addEventListener("click", () => {
+						window.__sakanaWidgetDismissed = true;
+						closeRepositoryConfirm();
+						window.setTimeout(unmountWidget, 0);
+					});
+				};
+
+				const registerCharacter = (SakanaWidget) => {
+					SakanaWidget.getCharacters();
+					SakanaWidget.registerCharacter(characterName, {
+						image: characterImageUrl,
+						initialState,
+					});
+				};
+
+				const mountWidget = () => {
+					if (!document.body || !isDesktop() || window.__sakanaWidgetDismissed) {
+						unmountWidget();
+						return;
+					}
+
+					const SakanaWidget = getWidgetClass();
+					if (!SakanaWidget) return;
+
+					if (
+						window.__sakanaWidgetInstance &&
+						document.getElementById(mountId)
+					) {
+						return;
+					}
+
+					unmountWidget();
+					registerCharacter(SakanaWidget);
+
+					const mountPoint = document.createElement("div");
+					mountPoint.id = mountId;
+					mountPoint.className = "sakana-float";
+					document.body.appendChild(mountPoint);
+
+					try {
+						window.__sakanaWidgetInstance = new SakanaWidget({
+							size: 200,
+							character: characterName,
+							controls: true,
+							rod: true,
+							draggable: true,
+							title: false,
+						}).mount(`#${mountId}`);
+						polishControls();
+					} catch (error) {
+						mountPoint.remove();
+						window.__sakanaWidgetInstance = null;
+						console.warn("Failed to mount Sakana widget.", error);
+					}
+				};
+
+				const scheduleMount = () => window.requestAnimationFrame(mountWidget);
+
+				if (!window.__sakanaWidgetResizeBound) {
+					window.__sakanaWidgetResizeBound = true;
+					const mediaQuery = window.matchMedia(desktopQuery);
+					mediaQuery.addEventListener("change", scheduleMount);
+				}
+
+				const setupSwup = () => {
+					if (window.__sakanaWidgetSwupHooked || !window.swup?.hooks) return;
+					window.__sakanaWidgetSwupHooked = true;
+					window.swup.hooks.on("page:view", scheduleMount);
+				};
+
+				if (window.swup?.hooks) {
+					setupSwup();
+				} else if (!window.__sakanaWidgetSwupSetupPending) {
+					window.__sakanaWidgetSwupSetupPending = true;
+					document.addEventListener("swup:enable", setupSwup, { once: true });
+				}
+
+				if (document.readyState === "loading") {
+					document.addEventListener("DOMContentLoaded", scheduleMount, {
+						once: true,
+					});
+				} else {
+					scheduleMount();
+				}
+			})();
+		</script>
+	</>
+)}

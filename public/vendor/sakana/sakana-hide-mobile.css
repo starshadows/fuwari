@@ -1,0 +1,6 @@
+/* 窗口过窄（如移动端）不显示sakana-float类 */
+@media screen and (max-width: 768px) {
+  .sakana-float {
+    display: none !important;
+  }
+}
