@@ -11,22 +11,135 @@ const links = Astro.props.links;
 ---
 <div id="nav-menu-panel" class:list={["float-panel float-panel-closed absolute transition-all fixed right-4 px-2 py-2"]}>
     {links.map((link) => (
-        <a href={link.external ? link.url : url(link.url)} class="group flex justify-between items-center py-2 pl-3 pr-1 rounded-lg gap-8
-            hover:bg-[var(--btn-plain-bg-hover)] active:bg-[var(--btn-plain-bg-active)] transition
-        "
-           target={link.external ? "_blank" : null}
-        >
-            <div class="transition text-black/75 dark:text-white/75 font-bold group-hover:text-[var(--primary)] group-active:text-[var(--primary)]">
-                {link.name}
-            </div>
-            {!link.external && <Icon name="material-symbols:chevron-right-rounded"
-                  class="transition text-[1.25rem] text-[var(--primary)]"
+        <>
+            <a href={link.external ? link.url : url(link.url)} class="group flex justify-between items-center py-2 pl-3 pr-1 rounded-lg gap-8
+                hover:bg-[var(--btn-plain-bg-hover)] active:bg-[var(--btn-plain-bg-active)] transition
+            "
+               target={link.external ? "_blank" : null}
             >
-            </Icon>}
-            {link.external && <Icon name="fa6-solid:arrow-up-right-from-square"
-                  class="transition text-[0.75rem] text-black/25 dark:text-white/25 -translate-x-1"
-            >
-            </Icon>}
-        </a>
+                <div class="transition text-black/75 dark:text-white/75 font-bold group-hover:text-[var(--primary)] group-active:text-[var(--primary)]">
+                    {link.name}
+                </div>
+                {!link.external && <Icon name="material-symbols:chevron-right-rounded"
+                      class="transition text-[1.25rem] text-[var(--primary)]"
+                >
+                </Icon>}
+                {link.external && <Icon name="fa6-solid:arrow-up-right-from-square"
+                      class="transition text-[0.75rem] text-black/25 dark:text-white/25 -translate-x-1"
+                >
+                </Icon>}
+            </a>
+            {!link.external && link.url === "/about/" && (
+                <button
+                    id="sakana-mobile-toggle"
+                    type="button"
+                    aria-label="Live2D widget"
+                    aria-pressed="false"
+                    data-state="off"
+                    class="group md:hidden w-full flex justify-between items-center py-2 pl-3 pr-1 rounded-lg gap-8
+                        hover:bg-[var(--btn-plain-bg-hover)] active:bg-[var(--btn-plain-bg-active)] transition"
+                >
+                    <div class="transition text-black/75 dark:text-white/75 font-bold group-hover:text-[var(--primary)] group-active:text-[var(--primary)]">
+                        Live2D
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span id="sakana-mobile-toggle-state" class="text-xs font-bold text-black/40 dark:text-white/40">Off</span>
+                        <span class="sakana-mobile-switch">
+                            <span class="sakana-mobile-switch-knob"></span>
+                        </span>
+                    </div>
+                </button>
+            )}
+        </>
     ))}
 </div>
+
+<style>
+#sakana-mobile-toggle .sakana-mobile-switch {
+    position: relative;
+    display: inline-flex;
+    width: 2.35rem;
+    height: 1.35rem;
+    align-items: center;
+    border-radius: 999px;
+    background: var(--btn-regular-bg);
+    transition: background-color 150ms ease;
+}
+
+#sakana-mobile-toggle .sakana-mobile-switch-knob {
+    position: absolute;
+    left: 0.18rem;
+    width: 0.98rem;
+    height: 0.98rem;
+    border-radius: 999px;
+    background: var(--card-bg);
+    box-shadow: 0 0.2rem 0.5rem rgba(0, 0, 0, 0.18);
+    transition: transform 150ms ease;
+}
+
+#sakana-mobile-toggle[data-state="on"] .sakana-mobile-switch {
+    background: var(--primary);
+}
+
+#sakana-mobile-toggle[data-state="on"] .sakana-mobile-switch-knob {
+    transform: translateX(1rem);
+}
+</style>
+
+<script is:inline>
+(() => {
+    const storageKey = "sakana-mobile-enabled";
+
+    const getEnabled = () => {
+        try {
+            return localStorage.getItem(storageKey) === "true";
+        } catch {
+            return false;
+        }
+    };
+
+    const setButtonState = (enabled) => {
+        const button = document.getElementById("sakana-mobile-toggle");
+        const state = document.getElementById("sakana-mobile-toggle-state");
+        if (!button) return;
+
+        button.dataset.state = enabled ? "on" : "off";
+        button.setAttribute("aria-pressed", String(enabled));
+        if (state) {
+            state.textContent = enabled ? "On" : "Off";
+        }
+    };
+
+    const bindToggle = () => {
+        const button = document.getElementById("sakana-mobile-toggle");
+        if (!button || button.dataset.bound === "true") return;
+
+        button.dataset.bound = "true";
+        setButtonState(getEnabled());
+        button.addEventListener("click", () => {
+            const enabled = !getEnabled();
+            try {
+                localStorage.setItem(storageKey, String(enabled));
+            } catch {
+                // Ignore private-mode storage failures.
+            }
+            setButtonState(enabled);
+            document.dispatchEvent(
+                new CustomEvent("sakana-mobile-toggle", {
+                    detail: { enabled },
+                }),
+            );
+        });
+    };
+
+    document.addEventListener("sakana-mobile-state", (event) => {
+        setButtonState(Boolean(event.detail?.enabled));
+    });
+
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", bindToggle, { once: true });
+    } else {
+        bindToggle();
+    }
+})();
+</script>

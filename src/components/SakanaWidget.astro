@@ -4,7 +4,6 @@ import { url } from "../utils/url-utils";
 const enabled = import.meta.env.PUBLIC_SAKANA_WIDGET_ENABLED !== "false";
 
 const sakanaCssUrl = url("/vendor/sakana/sakana.min.css");
-const sakanaMobileCssUrl = url("/vendor/sakana/sakana-hide-mobile.css");
 const sakanaScriptUrl = url("/vendor/sakana/sakana.min.js");
 const characterImageUrl = url("/sakana/starshadow.webp");
 ---
@@ -12,22 +11,25 @@ const characterImageUrl = url("/sakana/starshadow.webp");
 {enabled && (
 	<>
 		<link rel="stylesheet" href={sakanaCssUrl} />
-		<link rel="stylesheet" href={sakanaMobileCssUrl} />
 		<script is:inline src={sakanaScriptUrl} defer></script>
 
 		<style is:global>
 			#sakana-widget.sakana-float {
 				position: fixed;
-				right: 64px;
+				right: 56px;
 				bottom: 52px;
-				width: 200px;
-				height: 200px;
+				width: var(--sakana-widget-size, 190px);
+				height: var(--sakana-widget-size, 190px);
 				z-index: 9999;
 				pointer-events: none;
 			}
 
 			#sakana-widget .sakana-widget-img {
 				background-size: contain;
+			}
+
+			#sakana-widget .sakana-widget-canvas {
+				filter: drop-shadow(0 0.15rem 0.45rem rgba(14, 165, 233, 0.18));
 			}
 
 			#sakana-widget .sakana-widget-ctrl {
@@ -137,15 +139,56 @@ const characterImageUrl = url("/sakana/starshadow.webp");
 				color: white;
 				background: var(--primary);
 			}
+
+			@media (max-width: 768px) {
+				#sakana-widget.sakana-float {
+					right: 0.75rem;
+					bottom: calc(env(safe-area-inset-bottom, 0px) + 4.75rem);
+				}
+
+				#sakana-widget .sakana-widget-ctrl {
+					width: 124px;
+					height: 32px;
+					border-radius: 0.7rem;
+					transform: translateY(0.25rem);
+				}
+
+				#sakana-widget .sakana-widget-ctrl-item {
+					width: 27px;
+					height: 26px;
+				}
+
+				#sakana-widget .sakana-widget-icon {
+					width: 1rem;
+					height: 1rem;
+				}
+
+				#sakana-repo-confirm {
+					right: 0.75rem;
+					bottom: calc(env(safe-area-inset-bottom, 0px) + 9rem);
+					max-width: calc(100vw - 1.5rem);
+				}
+			}
 		</style>
 
 		<script is:inline define:vars={{ characterImageUrl }}>
 			(() => {
 				const mountId = "sakana-widget";
-				const characterName = "starshadow";
+				const mobileStorageKey = "sakana-mobile-enabled";
+				const desktopQuery = "(min-width: 769px)";
 				const originalRepositoryUrl =
 					"https://github.com/dsrkafuu/sakana-widget";
-				const desktopQuery = "(min-width: 769px)";
+				const uiText = {
+					confirmTitle: "\u6253\u5f00\u539f\u4f5c\u8005\u4ed3\u5e93\uff1f",
+					confirmBody:
+						"\u5c06\u8df3\u8f6c\u5230 Sakana Widget \u539f\u4f5c\u8005\u7684 GitHub \u4ed3\u5e93\u3002",
+					cancel: "\u53d6\u6d88",
+					open: "\u6253\u5f00",
+					switchCharacter: "\u5207\u6362\u89d2\u8272\uff08\u5f85\u6dfb\u52a0\uff09",
+					openRepository: "\u6253\u5f00\u539f\u4f5c\u8005\u4ed3\u5e93",
+					autoMode: "\u81ea\u52a8\u8df3\u52a8",
+					close: "\u4e34\u65f6\u5173\u95ed",
+				};
 				const initialState = {
 					i: 0.08,
 					s: 0.1,
@@ -155,9 +198,51 @@ const characterImageUrl = url("/sakana/starshadow.webp");
 					t: 0,
 					w: 0,
 				};
+				const customCharacters = [
+					{
+						name: "starshadow",
+						image: characterImageUrl,
+						initialState,
+					},
+				];
 
 				const getWidgetClass = () => window.SakanaWidget;
 				const isDesktop = () => window.matchMedia(desktopQuery).matches;
+				const isMobile = () => !isDesktop();
+				const getMode = () => (isDesktop() ? "desktop" : "mobile");
+				const getWidgetSize = () => (isDesktop() ? 190 : 136);
+
+				const getMobileEnabled = () => {
+					try {
+						return localStorage.getItem(mobileStorageKey) === "true";
+					} catch {
+						return false;
+					}
+				};
+
+				const setMobileEnabled = (enabled) => {
+					try {
+						localStorage.setItem(mobileStorageKey, String(enabled));
+					} catch {
+						// Ignore private-mode storage failures.
+					}
+					document.dispatchEvent(
+						new CustomEvent("sakana-mobile-state", {
+							detail: { enabled },
+						}),
+					);
+				};
+
+				const getStrokeColor = () => {
+					const hue =
+						getComputedStyle(document.documentElement)
+							.getPropertyValue("--hue")
+							.trim() || "220";
+					const lightness = document.documentElement.classList.contains("dark")
+						? 76
+						: 82;
+					return `hsla(${hue}, 92%, ${lightness}%, 0.9)`;
+				};
 
 				const unmountWidget = () => {
 					try {
@@ -166,6 +251,7 @@ const characterImageUrl = url("/sakana/starshadow.webp");
 						document.getElementById(mountId)?.remove();
 					}
 					window.__sakanaWidgetInstance = null;
+					window.__sakanaWidgetMode = null;
 					document.getElementById(mountId)?.remove();
 				};
 
@@ -180,11 +266,11 @@ const characterImageUrl = url("/sakana/starshadow.webp");
 					dialog.id = "sakana-repo-confirm";
 					dialog.innerHTML = `
 						<div class="sakana-confirm-card" role="dialog" aria-modal="false" aria-labelledby="sakana-confirm-title">
-							<div id="sakana-confirm-title" class="sakana-confirm-title">打开原作者仓库？</div>
-							<div class="sakana-confirm-text">将跳转到 Sakana Widget 原作者的 GitHub 仓库。</div>
+							<div id="sakana-confirm-title" class="sakana-confirm-title">${uiText.confirmTitle}</div>
+							<div class="sakana-confirm-text">${uiText.confirmBody}</div>
 							<div class="sakana-confirm-actions">
-								<button type="button" data-action="cancel">取消</button>
-								<button type="button" data-action="open">打开</button>
+								<button type="button" data-action="cancel">${uiText.cancel}</button>
+								<button type="button" data-action="open">${uiText.open}</button>
 							</div>
 						</div>
 					`;
@@ -202,15 +288,45 @@ const characterImageUrl = url("/sakana/starshadow.webp");
 						}
 					});
 
-					document.addEventListener("keydown", (event) => {
-						if (event.key === "Escape") closeRepositoryConfirm();
-					}, { once: true });
+					document.addEventListener(
+						"keydown",
+						(event) => {
+							if (event.key === "Escape") closeRepositoryConfirm();
+						},
+						{ once: true },
+					);
 
 					document.body.appendChild(dialog);
 				};
 
+				const registerCharacters = (SakanaWidget) => {
+					SakanaWidget.getCharacters();
+					for (const character of customCharacters) {
+						SakanaWidget.registerCharacter(character.name, character);
+					}
+
+					const fallbackCharacter = customCharacters[0];
+					for (const reservedName of ["chisato", "takina"]) {
+						SakanaWidget.registerCharacter(reservedName, fallbackCharacter);
+					}
+				};
+
+				const switchToNextCustomCharacter = () => {
+					const widget = window.__sakanaWidgetInstance;
+					if (!widget || customCharacters.length < 2) return;
+
+					const index = customCharacters.findIndex(
+						(character) => character.name === widget._char,
+					);
+					const nextCharacter =
+						customCharacters[(index + 1) % customCharacters.length];
+					widget.setCharacter(nextCharacter.name);
+				};
+
 				const polishControls = () => {
-					const controls = document.querySelector(`#${mountId} .sakana-widget-ctrl`);
+					const controls = document.querySelector(
+						`#${mountId} .sakana-widget-ctrl`,
+					);
 					if (!(controls instanceof HTMLElement)) return;
 
 					const [person, magic, repo, close] = Array.from(controls.children);
@@ -218,14 +334,24 @@ const characterImageUrl = url("/sakana/starshadow.webp");
 
 					controls.append(person, repo, magic, close);
 
-					person.setAttribute("aria-label", "切换角色");
-					person.setAttribute("title", "切换角色");
-					repo.setAttribute("aria-label", "打开原作者仓库");
-					repo.setAttribute("title", "原作者仓库");
-					magic.setAttribute("aria-label", "自动跳动");
-					magic.setAttribute("title", "自动跳动");
-					close.setAttribute("aria-label", "临时关闭");
-					close.setAttribute("title", "临时关闭");
+					person.setAttribute("aria-label", uiText.switchCharacter);
+					person.setAttribute("title", uiText.switchCharacter);
+					repo.setAttribute("aria-label", uiText.openRepository);
+					repo.setAttribute("title", uiText.openRepository);
+					magic.setAttribute("aria-label", uiText.autoMode);
+					magic.setAttribute("title", uiText.autoMode);
+					close.setAttribute("aria-label", uiText.close);
+					close.setAttribute("title", uiText.close);
+
+					person.addEventListener(
+						"click",
+						(event) => {
+							event.preventDefault();
+							event.stopImmediatePropagation();
+							switchToNextCustomCharacter();
+						},
+						{ capture: true },
+					);
 
 					if (repo instanceof HTMLAnchorElement) {
 						repo.href = originalRepositoryUrl;
@@ -238,57 +364,73 @@ const characterImageUrl = url("/sakana/starshadow.webp");
 					}
 
 					close.addEventListener("click", () => {
-						window.__sakanaWidgetDismissed = true;
+						if (isMobile()) {
+							setMobileEnabled(false);
+						} else {
+							window.__sakanaWidgetDismissed = true;
+						}
 						closeRepositoryConfirm();
 						window.setTimeout(unmountWidget, 0);
 					});
 				};
 
-				const registerCharacter = (SakanaWidget) => {
-					SakanaWidget.getCharacters();
-					SakanaWidget.registerCharacter(characterName, {
-						image: characterImageUrl,
-						initialState,
-					});
+				const shouldMount = () => {
+					if (!document.body) return false;
+					if (isDesktop()) return !window.__sakanaWidgetDismissed;
+					return getMobileEnabled();
 				};
 
 				const mountWidget = () => {
-					if (!document.body || !isDesktop() || window.__sakanaWidgetDismissed) {
+					if (!shouldMount()) {
 						unmountWidget();
+						if (isMobile()) setMobileEnabled(false);
 						return;
 					}
 
 					const SakanaWidget = getWidgetClass();
-					if (!SakanaWidget) return;
+					if (!SakanaWidget) {
+						window.setTimeout(mountWidget, 100);
+						return;
+					}
 
+					const mode = getMode();
 					if (
 						window.__sakanaWidgetInstance &&
+						window.__sakanaWidgetMode === mode &&
 						document.getElementById(mountId)
 					) {
 						return;
 					}
 
 					unmountWidget();
-					registerCharacter(SakanaWidget);
+					registerCharacters(SakanaWidget);
 
+					const widgetSize = getWidgetSize();
 					const mountPoint = document.createElement("div");
 					mountPoint.id = mountId;
 					mountPoint.className = "sakana-float";
+					mountPoint.style.setProperty("--sakana-widget-size", `${widgetSize}px`);
 					document.body.appendChild(mountPoint);
 
 					try {
 						window.__sakanaWidgetInstance = new SakanaWidget({
-							size: 200,
-							character: characterName,
+							size: widgetSize,
+							character: customCharacters[0].name,
 							controls: true,
 							rod: true,
 							draggable: true,
+							stroke: {
+								color: getStrokeColor(),
+								width: isDesktop() ? 7 : 5,
+							},
 							title: false,
 						}).mount(`#${mountId}`);
+						window.__sakanaWidgetMode = mode;
 						polishControls();
 					} catch (error) {
 						mountPoint.remove();
 						window.__sakanaWidgetInstance = null;
+						window.__sakanaWidgetMode = null;
 						console.warn("Failed to mount Sakana widget.", error);
 					}
 				};
@@ -299,6 +441,16 @@ const characterImageUrl = url("/sakana/starshadow.webp");
 					window.__sakanaWidgetResizeBound = true;
 					const mediaQuery = window.matchMedia(desktopQuery);
 					mediaQuery.addEventListener("change", scheduleMount);
+				}
+
+				if (!window.__sakanaWidgetMobileToggleBound) {
+					window.__sakanaWidgetMobileToggleBound = true;
+					document.addEventListener("sakana-mobile-toggle", (event) => {
+						const enabled = Boolean(event.detail?.enabled);
+						setMobileEnabled(enabled);
+						window.__sakanaWidgetDismissed = false;
+						scheduleMount();
+					});
 				}
 
 				const setupSwup = () => {
@@ -313,6 +465,12 @@ const characterImageUrl = url("/sakana/starshadow.webp");
 					window.__sakanaWidgetSwupSetupPending = true;
 					document.addEventListener("swup:enable", setupSwup, { once: true });
 				}
+
+				document.dispatchEvent(
+					new CustomEvent("sakana-mobile-state", {
+						detail: { enabled: getMobileEnabled() },
+					}),
+				);
 
 				if (document.readyState === "loading") {
 					document.addEventListener("DOMContentLoaded", scheduleMount, {

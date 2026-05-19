@@ -46,6 +46,8 @@ Node version: 20
 - `src/assets/images/`: committed images used by the site.
 - `src/components/misc/ImageWrapper.astro`: image rendering. Banner images use a special two-layer display: blurred cover background plus contained foreground image.
 - `src/layouts/Layout.astro`: page title, global layout behavior, banner height behavior.
+- `src/components/SakanaWidget.astro`: site-wide Sakana/Live2D-style floating widget, including desktop/mobile mounting behavior and the GitHub confirmation dialog.
+- `src/components/widget/NavMenuPanel.astro`: mobile navigation menu. It includes the mobile-only Live2D toggle below the About link.
 - `src/plugins/rehype-component-github-card.mjs`: currently keeps GitHub cards static and reliable. Avoid restoring runtime GitHub API fetching unless explicitly requested.
 - `BLOG_GUIDE.md`: Chinese beginner guide for maintaining this blog.
 
@@ -62,6 +64,18 @@ Node version: 20
 - The active banner is `src/assets/images/beijing1.png`.
 - `src/assets/images/beijing2.png` is intentionally ignored for now because it is not used by the site.
 - `博客素材/` is local-only source material and should not be committed.
+
+## Sakana / Live2D Widget
+
+- The blog has a Sakana Widget integration adapted from `Lentinel/plugin-Sakana-widget-Halo` and the upstream `dsrkafuu/sakana-widget`.
+- Static widget runtime files live under `public/vendor/sakana/`. The optimized default character image is `public/sakana/starshadow.webp`; the original large source image is kept outside the repo and should not be committed.
+- The global integration is `src/components/SakanaWidget.astro`, imported by `src/layouts/Layout.astro`.
+- `PUBLIC_SAKANA_WIDGET_ENABLED=false` disables the integration. Any other value, including unset, enables it.
+- Desktop behavior: the widget is enabled by default, fixed near the bottom-right, and should not add a desktop navbar toggle.
+- Mobile behavior: the widget is disabled by default. The mobile menu has a `Live2D` toggle below About; it stores state in `localStorage` key `sakana-mobile-enabled`.
+- The bottom controls are ordered as character, upstream repository, auto mode, close. The repository button must show an in-site confirmation dialog before opening the upstream repo in a new tab.
+- The character button is intentionally a no-op while only one custom character exists. Do not let it switch to the bundled Sakana characters; when adding future custom characters, extend the local custom character list first.
+- The rod color should stay aligned with the blog theme, currently using a blue/white HSL value derived from `--hue`.
 
 ## Content Rules
 
