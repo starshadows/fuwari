@@ -16,8 +16,8 @@ const characterImageUrl = url("/sakana/starshadow.webp");
 		<style is:global>
 			#sakana-widget.sakana-float {
 				position: fixed;
-				right: 56px;
-				bottom: 52px;
+				right: 32px;
+				bottom: 36px;
 				width: var(--sakana-widget-size, 190px);
 				height: var(--sakana-widget-size, 190px);
 				z-index: 9999;
@@ -73,8 +73,8 @@ const characterImageUrl = url("/sakana/starshadow.webp");
 
 			#sakana-repo-confirm {
 				position: fixed;
-				right: 48px;
-				bottom: 104px;
+				right: 32px;
+				bottom: 88px;
 				z-index: 10000;
 				max-width: min(18rem, calc(100vw - 2rem));
 				color: black;
@@ -143,29 +143,30 @@ const characterImageUrl = url("/sakana/starshadow.webp");
 			@media (max-width: 768px) {
 				#sakana-widget.sakana-float {
 					right: 0.75rem;
-					bottom: calc(env(safe-area-inset-bottom, 0px) + 2.25rem);
+					bottom: calc(env(safe-area-inset-bottom, 0px) + 0.75rem);
 				}
 
 				#sakana-widget .sakana-widget-ctrl {
-					width: 124px;
-					height: 32px;
-					border-radius: 0.7rem;
-					transform: translateY(0.25rem);
+					width: 112px;
+					height: 29px;
+					padding: 2px 3px;
+					border-radius: 0.6rem;
+					transform: translateY(0.2rem);
 				}
 
 				#sakana-widget .sakana-widget-ctrl-item {
-					width: 27px;
-					height: 26px;
+					width: 24px;
+					height: 24px;
 				}
 
 				#sakana-widget .sakana-widget-icon {
-					width: 1rem;
-					height: 1rem;
+					width: 0.9rem;
+					height: 0.9rem;
 				}
 
 				#sakana-repo-confirm {
 					right: 0.75rem;
-					bottom: calc(env(safe-area-inset-bottom, 0px) + 6.5rem);
+					bottom: calc(env(safe-area-inset-bottom, 0px) + 5rem);
 					max-width: calc(100vw - 1.5rem);
 				}
 			}
