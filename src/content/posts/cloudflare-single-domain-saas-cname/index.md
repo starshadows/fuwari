@@ -39,19 +39,9 @@ Cloudflare for SaaS 在默认回退源和自定义源服务器之间，对 `SNI`
 - `bot.starshadow.cc`：正常黄云，直接回源。
 - `bot1.starshadow.cc`：准备走优选。
 
-后端都是同一个服务，Caddy 里大概是这样：
+后端都是同一个服务，Caddy 里配置了这两个域名。
 
-```text
-bot.starshadow.cc {
-  import cf_mtls_cc
-  reverse_proxy astrbot:6185
-}
-
-bot1.starshadow.cc {
-  import cf_mtls_cc
-  reverse_proxy astrbot:6185
-}
-```
+这里截图里的 `reverse_proxy astrbot:6185` 只是我的 AstrBot 容器地址，不是通用配置。实际使用时要换成你自己的服务地址，不要照抄。
 
 ![Caddy 中已经配置 bot 和 bot1 两个域名](./step-01-caddy-config.png)
 
@@ -125,12 +115,12 @@ Caddy 校验不通过，于是直接返回 `421`。这个报错一开始看着�
 我这里的解决办法是关闭 Caddy 的 `SNI` 和 `Host` 严格校验：
 
 ```text
-servers {
-  strict_sni_host insecure_off
+{
+  servers {
+    strict_sni_host insecure_off
+  }
 }
 ```
-
-![关闭 Caddy 的 strict_sni_host 校验](./step-10-caddy-insecure-off.png)
 
 这个名字已经把风险写脸上了：`insecure_off`。
 
