@@ -1,15 +1,17 @@
 ---
-title: 用 Cloudflare 单域名 SaaS + CNAME 优选普通网站
+title: 用 Cloudflare SaaS + CNAME 优选普通网站：单域名和双域名方案
 published: 2026-05-20
-description: 记录一次用 Cloudflare 单域名 SaaS、自定义主机名和 CNAME 做普通网站优选的过程，以及 SNI/Host 不一致导致的 1000、421 问题。
+description: 记录一次用 Cloudflare SaaS、自定义主机名和 CNAME 做普通网站优选的过程，包含单域名和双域名两种做法，以及 SNI/Host 不一致导致的 1000、421 问题。
 image: 'cover.png'
-tags: [Cloudflare, SaaS, CNAME, 优选 IP, Caddy]
+tags: [Cloudflare, SaaS, CNAME, 优选 IP, Caddy, 双域名]
 category: 折腾记录
 draft: false
 lang: ''
 ---
 
-这篇记录一下用 Cloudflare 单域名 SaaS + CNAME 给普通网站做优选的过程。
+这篇记录一下用 Cloudflare SaaS + CNAME 给普通网站做优选的过程。
+
+前半部分是单域名方案，能跑，但要处理 `SNI` 和 `Host` 不一致的问题。后半部分是双域名方案，配置多一点，不过逻辑更顺，也不用为了跑通去放松 Caddy 的校验。
 
 先说结论：这套东西对电信比较明显。移动还是算了，我这边测出来依然很拉。联通的国际出口带宽大，虽然延迟高一点，但不怎么丢包，其实可以不优选。
 
@@ -21,9 +23,11 @@ lang: ''
 
 听起来绕了一圈，但目的很简单：正常访问还是走 Cloudflare，只是入口不直接用 Cloudflare 默认分配的边缘节点，而是借 CNAME 指到一个更适合当前线路的节点。
 
-这里最麻烦的地方是单域名。
+单域名里最麻烦的地方是 `SNI` 和 `Host`。
 
 Cloudflare for SaaS 在默认回退源和自定义源服务器之间，对 `SNI` 和 `Host` 的处理不一样。单域名配置时很容易出现 `SNI` 和 `Host` 不一致。Caddy 默认会校验这个东西，于是后面会遇到 `1000` 和 `421`。
+
+双域名方案的思路是多准备一组辅助域名。主域名 CNAME 到辅助域名，辅助域名再 CNAME 到优选域名；回源用另一个辅助记录指向源站，并把它作为 SaaS 回退源。这样走默认回源时，Cloudflare 会处理 `SNI` 和 `Host`，Caddy 可以继续严格校验。
 
 ## 我的环境
 
@@ -130,6 +134,37 @@ Caddy 校验不通过，于是直接返回 `421`。这个报错一开始看着�
 
 ![重启 Caddy 后网站正常访问](./step-11-astrbot-login.png)
 
+这就是单域名方案。适合先验证思路，或者手头确实只想用一个域名折腾。但如果能接受多一组辅助域名，我更建议用下面的双域名方案。
+
+## 双域名方案：让 SNI 和 Host 对齐
+
+双域名方案不用关闭 Caddy 的 `SNI/Host` 校验。
+
+先删掉原本给主域名配置的 SaaS 回源和自定义主机名，避免旧配置混在一起。主域名本身不需要再做 SaaS 回源记录。
+
+我这里改成了这条链路：
+
+- `bot1.starshadow.cc` CNAME 到 `cdn.454849.xyz`。
+- `cdn.454849.xyz` 再 CNAME 到选好的优选域名。
+- `origin.454849.xyz` 指向源站 IP，作为 SaaS 回退源。
+- 自定义主机名仍然添加 `bot1.starshadow.cc`，回源方式选择默认回源。
+
+![主域名 CNAME 到辅助域名](./double-domain-main-cname.png)
+
+![origin 辅助记录指向源站](./double-domain-origin-record.png)
+
+然后把 `origin.454849.xyz` 设置成回退源，再添加 `bot1.starshadow.cc` 这个自定义主机名。
+
+![双域名方案下的回退源和自定义主机名](./double-domain-custom-hostname.png)
+
+这时不用再指定自定义源服务器，选择默认回源就行。Cloudflare 会把 `SNI` 和 `Host` 处理到一致，Caddy 那边可以继续严格校验。
+
+Caddy 只要用了 TLS，默认就会做这类校验。我本地额外写 `strict_sni_host on` 只是为了演示它处在严格校验状态，不是每个人都必须加这一段。
+
+重启 Caddy 后访问 `bot1.starshadow.cc`，页面可以正常打开。
+
+![双域名方案访问正常](./double-domain-access-ok.png)
+
 ## 优选前后对比
 
 下面是电信线路的对比。
@@ -148,6 +183,12 @@ Caddy 校验不通过，于是直接返回 `421`。这个报错一开始看着�
 
 ![不走优选时的网页测速](./step-15-direct-speedtest.png)
 
+双域名方案跑通后，我也测了一次，结果同样正常。
+
+![双域名方案测速结果](./double-domain-speedtest.png)
+
 移动这边我测下来还是不太行，优选了也没救回来多少。联通反而不用太折腾，延迟虽然高，但不怎么丢包。
 
 所以这套方案更适合电信线路明显抽风、又想继续用 Cloudflare 的情况。要是你本地线路本来就稳，可能折腾完也没什么惊喜。
+
+如果只看后续维护，我现在更倾向双域名。单域名能跑，但要接受 Caddy 校验放松；双域名多配几条 DNS，换来的是 `SNI` 和 `Host` 对齐，心里会舒服一点。
