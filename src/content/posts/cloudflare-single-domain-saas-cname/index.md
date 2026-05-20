@@ -81,8 +81,6 @@ DNS 里需要加两条 `CNAME` 和一条源站记录。
 
 也就是说，这里有两条 `CNAME`：业务入口先到自己的 `cdn` 中转记录，`cdn` 再到 `cf.090227.xyz` 提供的优选入口。
 
-![cdn CNAME 到 youxuan.cf.090227.xyz](./step-05b-cdn-to-youxuan.png)
-
 ## 自定义主机名和 1000 错误
 
 接着添加自定义主机名。
@@ -156,6 +154,8 @@ Caddy 校验不通过，于是直接返回 `421`。这个报错一开始看着�
 - 自定义主机名仍然添加 `bot1.starshadow.cc`，回源方式选择默认回源。
 
 ![主域名 CNAME 到辅助域名](./double-domain-main-cname.png)
+
+![cdn.454849.xyz CNAME 到 youxuan.cf.090227.xyz](./step-05b-cdn-to-youxuan.png)
 
 ![origin 辅助记录指向源站](./double-domain-origin-record.png)
 
