@@ -11,23 +11,25 @@ lang: ''
 
 这篇记录一下用 Cloudflare SaaS + CNAME 给普通网站做优选的过程。
 
-前半部分是单域名方案，能跑，但要处理 `SNI` 和 `Host` 不一致的问题。后半部分是双域名方案，配置多一点，不过逻辑更顺，也不用为了跑通去放松 Caddy 的校验。
+前半部分是单域名方案，能跑，但要处理 `SNI` 和 `Host` 不一致的问题。后半部分是双域名方案，DNS 数量差不多，只是把入口和回源拆得更清楚，也不用为了跑通去放松 Caddy 的校验。
 
 先说结论：这套东西对电信比较明显。移动还是算了，我这边测出来依然很拉。联通的国际出口带宽大，虽然延迟高一点，但不怎么丢包，其实可以不优选。
 
-优选域名我用的是 <a href="https://cf.090227.xyz" target="_blank" rel="noopener noreferrer">cf.090227.xyz</a> 里挑出来的结果。IP 和域名都不打码，反正这篇就是折腾记录。
+优选入口我用的是 <a href="https://cf.090227.xyz" target="_blank" rel="noopener noreferrer">cf.090227.xyz</a> 提供的域名。不是在里面挑一个 IP，而是把 CNAME 指到它的优选入口，比如 `youxuan.cf.090227.xyz`，就能走它那边的优选效果。
 
 ## 原理先说一下
 
-单域名加速的核心思路是：让用户访问 `bot1.starshadow.cc`，这条记录先 CNAME 到一个优选域名，再由 Cloudflare for SaaS 的自定义主机名把请求转回自己的源站。
+单域名加速的核心思路是：让用户访问 `bot1.starshadow.cc`，先让 `bot1.starshadow.cc` CNAME 到 `cdn.starshadow.cc`，再让 `cdn.starshadow.cc` CNAME 到 `youxuan.cf.090227.xyz` 这类优选入口。请求进入 Cloudflare 后，再由 Cloudflare for SaaS 的自定义主机名把它转回自己的源站。
 
 听起来绕了一圈，但目的很简单：正常访问还是走 Cloudflare，只是入口不直接用 Cloudflare 默认分配的边缘节点，而是借 CNAME 指到一个更适合当前线路的节点。
+
+![单域名 SaaS + CNAME 优选原理图](./single-domain-flow.png)
 
 单域名里最麻烦的地方是 `SNI` 和 `Host`。
 
 Cloudflare for SaaS 在默认回退源和自定义源服务器之间，对 `SNI` 和 `Host` 的处理不一样。单域名配置时很容易出现 `SNI` 和 `Host` 不一致。Caddy 默认会校验这个东西，于是后面会遇到 `1000` 和 `421`。
 
-双域名方案的思路是多准备一组辅助域名。主域名 CNAME 到辅助域名，辅助域名再 CNAME 到优选域名；回源用另一个辅助记录指向源站，并把它作为 SaaS 回退源。这样走默认回源时，Cloudflare 会处理 `SNI` 和 `Host`，Caddy 可以继续严格校验。
+双域名方案的思路是把入口和回源拆开。主域名 CNAME 到辅助入口域名，辅助入口域名再 CNAME 到优选入口；回源用另一个辅助记录指向源站，并把它作为 SaaS 回退源。这样走默认回源时，Cloudflare 会处理 `SNI` 和 `Host`，Caddy 可以继续严格校验。
 
 ## 我的环境
 
@@ -74,10 +76,12 @@ DNS 里需要加两条 `CNAME` 和一条源站记录。
 我的链路是：
 
 - `bot1.starshadow.cc` 指向 `cdn.starshadow.cc`。
-- `cdn.starshadow.cc` 指向选好的优选域名。
+- `cdn.starshadow.cc` 指向 `youxuan.cf.090227.xyz`。
 - `bot.starshadow.cc` 直接指向源站，保持黄云。
 
-优选域名可以自己在 `cf.090227.xyz` 里挑。不同地区结果差很多，别只看一个测速点。
+也就是说，这里有两条 `CNAME`：业务入口先到自己的 `cdn` 中转记录，`cdn` 再到 `cf.090227.xyz` 提供的优选入口。
+
+![cdn CNAME 到 youxuan.cf.090227.xyz](./step-05b-cdn-to-youxuan.png)
 
 ## 自定义主机名和 1000 错误
 
@@ -140,12 +144,14 @@ Caddy 校验不通过，于是直接返回 `421`。这个报错一开始看着�
 
 双域名方案不用关闭 Caddy 的 `SNI/Host` 校验。
 
+![双域名 SaaS + CNAME 优选原理图](./double-domain-flow.png)
+
 先删掉原本给主域名配置的 SaaS 回源和自定义主机名，避免旧配置混在一起。主域名本身不需要再做 SaaS 回源记录。
 
 我这里改成了这条链路：
 
 - `bot1.starshadow.cc` CNAME 到 `cdn.454849.xyz`。
-- `cdn.454849.xyz` 再 CNAME 到选好的优选域名。
+- `cdn.454849.xyz` 再 CNAME 到 `youxuan.cf.090227.xyz`。
 - `origin.454849.xyz` 指向源站 IP，作为 SaaS 回退源。
 - 自定义主机名仍然添加 `bot1.starshadow.cc`，回源方式选择默认回源。
 
@@ -160,6 +166,8 @@ Caddy 校验不通过，于是直接返回 `421`。这个报错一开始看着�
 这时不用再指定自定义源服务器，选择默认回源就行。Cloudflare 会把 `SNI` 和 `Host` 处理到一致，Caddy 那边可以继续严格校验。
 
 Caddy 只要用了 TLS，默认就会做这类校验。我本地额外写 `strict_sni_host on` 只是为了演示它处在严格校验状态，不是每个人都必须加这一段。
+
+![双域名方案下保持 Caddy 严格校验](./double-domain-strict-sni-host.png)
 
 重启 Caddy 后访问 `bot1.starshadow.cc`，页面可以正常打开。
 
@@ -191,4 +199,4 @@ Caddy 只要用了 TLS，默认就会做这类校验。我本地额外写 `stric
 
 所以这套方案更适合电信线路明显抽风、又想继续用 Cloudflare 的情况。要是你本地线路本来就稳，可能折腾完也没什么惊喜。
 
-如果只看后续维护，我现在更倾向双域名。单域名能跑，但要接受 Caddy 校验放松；双域名多配几条 DNS，换来的是 `SNI` 和 `Host` 对齐，心里会舒服一点。
+如果只看后续维护，我现在更倾向双域名。单域名能跑，但要接受 Caddy 校验放松；双域名的 DNS 数量其实差不多，只是把入口域名和回源域名分开了，`SNI` 和 `Host` 能对齐，也更好理解。
