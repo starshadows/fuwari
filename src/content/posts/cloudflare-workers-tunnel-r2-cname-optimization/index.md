@@ -39,7 +39,7 @@ Tunnel 场景里，我用的是 File Browser。这里需要两个主机名：
 
 ![Tunnel 里给同一个服务创建 file 和 file1 两条路由](./step-01-tunnel-routes.png)
 
-回到 DNS 后，先看原本的 Tunnel 解析。默认情况下，`file` 会是 Cloudflare 自动生成的隧道记录。
+回到 DNS 后，先看原本的 Tunnel 解析。默认情况下，`file` 和 `file1` 都会生成指向 Cloudflare Tunnel 的解析记录。这里保留回源用的 `file`，把准备给用户访问的 `file1` 删除，后面改成走优选入口。
 
 ![file 域名保留为 Tunnel 默认解析](./step-02-tunnel-original-dns.png)
 

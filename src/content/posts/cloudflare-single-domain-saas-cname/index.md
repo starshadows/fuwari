@@ -1,7 +1,7 @@
 ---
 title: 用 Cloudflare SaaS + CNAME 优选普通网站：单域名和双域名方案
 published: 2026-05-20
-description: 记录一次用 Cloudflare SaaS、自定义主机名和 CNAME 做普通网站优选的过程，包含单域名和双域名两种做法，以及 SNI/Host 不一致导致的 1000、421 问题。
+description: 记录一次用 Cloudflare SaaS、自定义主机名和 CNAME 做普通网站优选的过程，包含单域名和双域名两种做法，以及默认回退源触发 1000、自定义源服务器触发 421 的排查。
 image: 'cover.png'
 tags: [Cloudflare, SaaS, CNAME, 优选 IP, Caddy, 双域名]
 category: 折腾记录
@@ -27,7 +27,7 @@ lang: ''
 
 单域名里最麻烦的地方是 `SNI` 和 `Host`。
 
-Cloudflare for SaaS 在默认回退源和自定义源服务器之间，对 `SNI` 和 `Host` 的处理不一样。单域名配置时很容易出现 `SNI` 和 `Host` 不一致。Caddy 默认会校验这个东西，于是后面会遇到 `1000` 和 `421`。
+Cloudflare for SaaS 在默认回退源和自定义源服务器之间，回源逻辑不一样。单域名配置里先会遇到默认回退源触发的 `1000`；改成自定义源服务器后，又容易出现 `SNI` 和 `Host` 不一致，Caddy 默认会校验这个东西，于是后面会遇到 `421`。
 
 双域名方案的思路是把入口和回源拆开。主域名 CNAME 到辅助入口域名，辅助入口域名再 CNAME 到优选入口；回源用另一个辅助记录指向源站，并把它作为 SaaS 回退源。这样走默认回源时，Cloudflare 会处理 `SNI` 和 `Host`，Caddy 可以继续严格校验。
 
