@@ -201,22 +201,27 @@ music/my-song.mp3
 
 1. 创建 D1 数据库 `fuwari-data`。
 2. 创建 R2 存储桶 `fuwari-media`。
-3. 把 D1 返回的 `database_id` 填到 `wrangler.jsonc` 的 `d1_databases[0].database_id`。
-4. 设置生产后台口令：
+3. 在 D1 的控制台里执行 `migrations/0001_create_social_features.sql` 里的 SQL，创建 `friend_links` 和 `music_tracks` 两张表。
+4. 在 Worker 的绑定设置里手动绑定：
+   - D1 数据库绑定名填 `DB`，选择 `fuwari-data`。
+   - R2 存储桶绑定名填 `MEDIA_BUCKET`，选择 `fuwari-media`。
+5. 设置生产后台口令，Secret 名称填 `ADMIN_TOKEN`。
 
-```powershell
-corepack pnpm exec wrangler secret put ADMIN_TOKEN
+仓库里的 `wrangler.jsonc` 不需要填写 D1 的 `database_id`，只保留绑定名和资源名。只要控制台绑定名对上，代码就会通过 `env.DB` 和 `env.MEDIA_BUCKET` 使用这些资源。
+
+Cloudflare Workers 连接 GitHub 自动部署时，表单可以这样填：
+
+```text
+Project name: fuwari
+Build command: corepack enable && corepack pnpm install --frozen-lockfile && corepack pnpm build
+Deploy command: corepack pnpm exec wrangler deploy
+Root directory: /
 ```
 
-5. 应用远程 D1 表结构：
+如果在本地命令行部署，也可以运行：
 
 ```powershell
-corepack pnpm d1:migrate:remote
-```
-
-6. 构建并部署 Worker：
-
-```powershell
+corepack pnpm build
 corepack pnpm worker:deploy
 ```
 
