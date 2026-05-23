@@ -1,0 +1,8 @@
+---
+import FriendLinksPanel from "@components/friends/FriendLinksPanel.svelte";
+import MainGridLayout from "@layouts/MainGridLayout.astro";
+---
+
+<MainGridLayout title="申请友链" description="申请加入星影博客的友链">
+    <FriendLinksPanel showList={false} client:load />
+</MainGridLayout>

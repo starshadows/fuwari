@@ -13,8 +13,10 @@
 - `src/components/`：页面零件。导航栏、文章卡片、侧边栏、搜索等都在这里。
 - `src/layouts/`：页面大布局。决定页面整体骨架。
 - `src/styles/`：全局样式。想深入改视觉风格时再看。
+- `src/worker/index.ts`：Cloudflare Worker 后台接口，负责友链、音乐和 R2 文件访问。
+- `migrations/`：D1 数据库表结构，友链和音乐列表都靠它初始化。
 
-先记住一句话：日常维护主要改 `src/config.ts`、`src/content/posts/`、`src/content/spec/about.md`。
+先记住一句话：日常维护主要改 `src/config.ts`、`src/content/posts/`、`src/content/spec/about.md`。关于页里的外部链接用 HTML 写法并加 `target="_blank"`，这样不会覆盖当前博客页面。
 
 ## 2. 本地运行
 
@@ -31,6 +33,26 @@ http://localhost:4321
 ```
 
 如果命令提示找不到 `pnpm`，就用 `corepack pnpm ...` 这种写法。
+
+如果要同时测试友链、音乐、后台这些 Cloudflare 功能，先构建并初始化本地 D1：
+
+```powershell
+corepack pnpm build
+corepack pnpm d1:migrate:local
+corepack pnpm worker:dev
+```
+
+然后打开：
+
+```text
+http://localhost:8787
+```
+
+本地后台口令在 `.dev.vars` 里，当前默认是：
+
+```text
+local-admin-token
+```
 
 ## 3. 新建文章
 
@@ -145,28 +167,68 @@ dist/
 
 Cloudflare Pages 发布的就是这个目录。
 
-## 7. Cloudflare Pages 发布
+## 7. 友链和音乐
+
+顶部导航的 `友链` 会在鼠标悬停时展开三个入口：
+
+```text
+/friends/
+/friends/apply/
+/friends/admin/
+```
+
+`/friends/` 只展示已审核的友链，`/friends/apply/` 是访客申请入口。访客提交后不会立刻展示，会进入待审核状态。
+
+`/friends/admin/` 是友链和音乐后台，可以额外用 Cloudflare Access 保护；后台 API 仍然需要 `ADMIN_TOKEN`。后台可以做这些事：
+
+- 审核、拒绝、删除友链。
+- 控制友链是否展示。
+- 调整友链排序。
+- 上传头像到 R2，得到 `/media/avatars/...` 这样的公开地址。
+- 添加和维护音乐列表。
+
+音乐文件需要你手动上传到 R2 的 `music/` 目录，例如：
+
+```text
+music/my-song.mp3
+```
+
+然后到后台添加歌曲，把 R2 对象 Key 填成 `music/my-song.mp3`。播放器会显示在左侧个人简介下面，默认不会自动播放。
+
+## 8. Cloudflare Workers 发布
 
 在 Cloudflare 控制台：
 
-1. 进入 Workers & Pages。
-2. Create application。
-3. 选择 Pages。
-4. Import an existing Git repository。
-5. 选择 `C12335/fuwari`。
-6. Production branch 填 `main`。
-7. Build command 填 `pnpm build`。
-8. Build output directory 填 `dist`。
+1. 创建 D1 数据库 `fuwari-data`。
+2. 创建 R2 存储桶 `fuwari-media`。
+3. 把 D1 返回的 `database_id` 填到 `wrangler.jsonc` 的 `d1_databases[0].database_id`。
+4. 设置生产后台口令：
 
-如果 Cloudflare 没有自动使用 pnpm，先在项目设置里确认 Node 版本至少是 20，并让它按仓库里的 `packageManager: pnpm@9.14.4` 安装。
-
-首次发布后，把 Cloudflare 给你的正式域名写回 `astro.config.mjs` 的 `site` 字段，例如：
-
-```js
-site: "https://你的项目名.pages.dev/",
+```powershell
+corepack pnpm exec wrangler secret put ADMIN_TOKEN
 ```
 
-## 8. 日常更新流程
+5. 应用远程 D1 表结构：
+
+```powershell
+corepack pnpm d1:migrate:remote
+```
+
+6. 构建并部署 Worker：
+
+```powershell
+corepack pnpm worker:deploy
+```
+
+如果 Cloudflare 没有自动使用 pnpm，先确认 Node 版本至少是 20，并让它按仓库里的 `packageManager: pnpm@9.14.4` 安装。
+
+正式域名仍然要保持写在 `astro.config.mjs` 的 `site` 字段里：
+
+```js
+site: "https://blog.starshadow.cc/",
+```
+
+## 9. 日常更新流程
 
 每次写完文章或改完主题：
 
@@ -177,9 +239,11 @@ git commit -m "Update blog"
 git push
 ```
 
-推送后 Cloudflare Pages 会自动重新部署。
+如果你配置了 Git 自动部署，推送后 Cloudflare 会自动重新部署。
 
-## 9. 学习顺序
+友链和音乐通过 D1/R2 实时生效，不需要为了审核友链或改歌单重新构建博客。
+
+## 10. 学习顺序
 
 建议按这个顺序学：
 

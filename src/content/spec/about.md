@@ -13,6 +13,6 @@
 
 ## 站点源码
 
-这个博客基于 [Fuwari](https://github.com/saicaca/fuwari) 主题改造。
+这个博客基于 <a href="https://github.com/saicaca/fuwari" target="_blank" rel="noopener noreferrer">Fuwari</a> 主题改造。
 
 <a href="https://github.com/starshadows/fuwari" target="_blank" rel="noopener noreferrer">查看我的博客源码：starshadows/fuwari</a>

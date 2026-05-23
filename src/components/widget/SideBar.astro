@@ -1,8 +1,13 @@
 ---
 import type { MarkdownHeading } from "astro";
+import { siteConfig } from "../../config";
+import { url } from "../../utils/url-utils";
 import Categories from "./Categories.astro";
+import MusicPlayer from "./MusicPlayer.svelte";
 import Profile from "./Profile.astro";
 import Tag from "./Tags.astro";
+import TOC from "./TOC.astro";
+import WidgetLayout from "./WidgetLayout.astro";
 
 interface Props {
 	class?: string;
@@ -10,13 +15,91 @@ interface Props {
 }
 
 const className = Astro.props.class;
+const headings = Astro.props.headings ?? [];
+const showToc =
+	siteConfig.toc.enable &&
+	Astro.url.pathname.startsWith(url("/posts/")) &&
+	headings.length > 0;
+const tocEnabled = siteConfig.toc.enable;
 ---
 <div id="sidebar" class:list={[className, "w-full"]}>
     <div class="flex flex-col w-full gap-4 mb-4">
         <Profile></Profile>
+        <MusicPlayer client:load />
     </div>
     <div id="sidebar-sticky" class="transition-all duration-700 flex flex-col w-full gap-4 top-4 sticky top-4">
         <Categories class="onload-animation" style="animation-delay: 150ms"></Categories>
         <Tag class="onload-animation" style="animation-delay: 200ms"></Tag>
+        <div id="toc-sidebar-widget" class:list={[{"hidden": !showToc}]}>
+            <WidgetLayout name="目录" id="article-toc" class="onload-animation" style="animation-delay: 250ms">
+                <div id="toc-sidebar-scroll" data-toc-scroll class="overflow-y-auto overflow-x-hidden hide-scrollbar">
+                    <div id="toc" class="relative w-full transition-swup-fade">
+                        {tocEnabled && <TOC headings={headings}></TOC>}
+                    </div>
+                </div>
+            </WidgetLayout>
+        </div>
     </div>
 </div>
+
+<style>
+    #sidebar-sticky {
+        max-height: calc(100vh - 1rem);
+        overflow-y: auto;
+        overflow-x: hidden;
+        padding-bottom: 1rem;
+        scrollbar-width: none;
+    }
+
+    #sidebar-sticky::-webkit-scrollbar {
+        display: none;
+    }
+
+    #toc-sidebar-scroll {
+        max-height: min(28rem, calc(100vh - 24rem));
+        min-height: 10rem;
+    }
+
+    @media (max-width: 1023px) {
+        #sidebar-sticky {
+            max-height: none;
+            overflow: visible;
+        }
+
+        #toc-sidebar-scroll {
+            max-height: none;
+        }
+    }
+</style>
+
+<script is:inline define:vars={{ tocEnabled }}>
+function toggleSidebarToc() {
+    const widget = document.getElementById("toc-sidebar-widget");
+    const toc = document.getElementById("toc");
+    if (!widget || !toc) return;
+
+    const hasEntries = tocEnabled && !!toc.querySelector("a[href^='#']");
+    widget.classList.toggle("hidden", !hasEntries);
+}
+
+function scheduleSidebarTocToggle() {
+    requestAnimationFrame(toggleSidebarToc);
+}
+
+if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", scheduleSidebarTocToggle, { once: true });
+} else {
+    scheduleSidebarTocToggle();
+}
+
+const setupSidebarTocSwup = () => {
+    window.swup?.hooks?.on("page:view", scheduleSidebarTocToggle);
+    window.swup?.hooks?.on("content:replace", scheduleSidebarTocToggle);
+};
+
+if (window.swup?.hooks) {
+    setupSidebarTocSwup();
+} else {
+    document.addEventListener("swup:enable", setupSidebarTocSwup, { once: true });
+}
+</script>

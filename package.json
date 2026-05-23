@@ -8,6 +8,10 @@
     "check": "astro check",
     "build": "astro build && pagefind --site dist",
     "preview": "astro preview",
+    "worker:dev": "wrangler dev --port 8787",
+    "worker:deploy": "pnpm build && wrangler deploy",
+    "d1:migrate:local": "wrangler d1 migrations apply fuwari-data --local",
+    "d1:migrate:remote": "wrangler d1 migrations apply fuwari-data --remote",
     "astro": "astro",
     "type-check": "tsc --noEmit --isolatedDeclarations",
     "new-post": "node scripts/new-post.js",
@@ -64,13 +68,15 @@
   "devDependencies": {
     "@astrojs/ts-plugin": "^1.10.6",
     "@biomejs/biome": "2.2.5",
+    "@cloudflare/workers-types": "^4.20260523.1",
     "@rollup/plugin-yaml": "^4.1.2",
     "@types/hast": "^3.0.4",
     "@types/markdown-it": "^14.1.2",
     "@types/mdast": "^4.0.4",
     "@types/sanitize-html": "^2.16.0",
     "postcss-import": "^16.1.1",
-    "postcss-nesting": "^13.0.2"
+    "postcss-nesting": "^13.0.2",
+    "wrangler": "^4.94.0"
   },
   "packageManager": "pnpm@9.14.4"
 }

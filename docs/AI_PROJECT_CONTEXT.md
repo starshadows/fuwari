@@ -15,7 +15,8 @@ The owner is not deeply technical, so future AI assistants should keep changes s
 - Styling: Tailwind CSS, Stylus, and project CSS files
 - Package manager: pnpm 9.14.4
 - Static search: Pagefind, generated during `pnpm build`
-- Deployment target: Cloudflare Pages
+- Deployment target: Cloudflare Workers with Static Assets
+- Runtime data: Cloudflare D1 for friend links and music metadata; Cloudflare R2 for avatars and audio files
 
 ## Important Commands
 
@@ -27,15 +28,17 @@ corepack pnpm dev
 corepack pnpm check
 corepack pnpm build
 corepack pnpm new-post post-file-name
+corepack pnpm d1:migrate:local
+corepack pnpm worker:dev
 ```
 
-Cloudflare Pages should use:
+Cloudflare Workers local preview should use:
 
 ```text
-Build command: pnpm build
-Build output directory: dist
-Root directory: /
-Node version: 20
+Build first: pnpm build
+Apply local D1 migrations: pnpm d1:migrate:local
+Run Worker locally: pnpm worker:dev
+Local URL: http://localhost:8787
 ```
 
 ## Key Files
@@ -46,6 +49,9 @@ Node version: 20
 - `src/assets/images/`: committed images used by the site.
 - `src/components/misc/ImageWrapper.astro`: image rendering. Banner images use a special two-layer display: blurred cover background plus contained foreground image.
 - `src/layouts/Layout.astro`: page title, global layout behavior, banner height behavior.
+- `src/worker/index.ts`: Cloudflare Worker API and R2 media routing for `/api/*` and `/media/*`.
+- `migrations/`: D1 schema migrations for friend links and music tracks.
+- `.dev.vars.example`: local development secret example. Copy to `.dev.vars` or keep the existing ignored `.dev.vars`.
 - `src/components/SakanaWidget.astro`: site-wide Sakana/Live2D-style floating widget, including desktop/mobile mounting behavior and the GitHub confirmation dialog.
 - `src/components/widget/NavMenuPanel.astro`: mobile navigation menu. It includes the mobile-only Live2D toggle below the About link.
 - `src/plugins/rehype-component-github-card.mjs`: currently keeps GitHub cards static and reliable. Avoid restoring runtime GitHub API fetching unless explicitly requested.
@@ -58,10 +64,12 @@ Node version: 20
 - Canonical public domain is `https://blog.starshadow.cc/`.
 - `astro.config.mjs` `site` must stay set to `https://blog.starshadow.cc/`. This value drives `og:url`, `twitter:url`, RSS, sitemap, and post JSON-LD `author.url`; do not revert it to `fuwari.pages.dev` or the apex domain.
 - Contact email is shown as text in the profile bio: `admin@starshadow.cc`.
+- The navbar includes a hover dropdown under `友链` with `/friends/`, `/friends/apply/`, and `/friends/admin/`. The admin page may also be protected by Cloudflare Access; admin APIs still require `ADMIN_TOKEN`.
 - The old demo posts were removed.
 - The current first post is `src/content/posts/hello-fuwari.md`.
 - The active avatar is `src/assets/images/touxiang.png`.
 - The active banner is `src/assets/images/beijing1.png`.
+- On the about page, external attribution links such as `Fuwari` should open in a new tab with `target="_blank"` and `rel="noopener noreferrer"` so they do not replace the blog page.
 - `src/assets/images/beijing2.png` is intentionally ignored for now because it is not used by the site.
 - `博客素材/` is local-only source material and should not be committed.
 
@@ -76,6 +84,18 @@ Node version: 20
 - The bottom controls are ordered as character, upstream repository, auto mode, close. The repository button must show an in-site confirmation dialog before opening the upstream repo in a new tab.
 - The character button is intentionally a no-op while only one custom character exists. Do not let it switch to the bundled Sakana characters; when adding future custom characters, extend the local custom character list first.
 - The rod color should stay aligned with the blog theme, currently using a blue/white HSL value derived from `--hue`.
+
+## Friend Links And Music
+
+- Public friend links are shown at `/friends/` and loaded from `GET /api/friends`; submissions live at `/friends/apply/`, call `POST /api/friends`, and are stored as `pending`.
+- Admin actions use `Authorization: Bearer <ADMIN_TOKEN>` against `/api/admin/*`. Set the production token with `wrangler secret put ADMIN_TOKEN`.
+- Approved, active friend links appear immediately without rebuilding the Astro site.
+- R2 bucket binding is `MEDIA_BUCKET`; the planned bucket name is `fuwari-media`.
+- D1 binding is `DB`; the planned database name is `fuwari-data`.
+- Audio objects should be uploaded manually to R2 under `music/`, for example `music/song.mp3`; the music admin page stores that object key.
+- Public media is served by the Worker at `/media/music/<key>` and `/media/avatars/<key>`. Music responses support HTTP Range requests for seeking.
+- The sidebar music card is disabled by default in the sense that it never auto-plays; visitors must click play.
+- The article TOC now lives in the left sidebar below tags. Keep the `#toc` element present because Swup is configured to replace it.
 
 ## Content Rules
 
@@ -110,7 +130,7 @@ lang: ''
 
 ## Deployment Notes
 
-This site builds to static HTML/CSS/JS in `dist/`.
+This site builds to static HTML/CSS/JS in `dist/`, then Cloudflare Workers serves those assets and handles API/media routes.
 
 Do not commit:
 
@@ -125,6 +145,22 @@ Before pushing meaningful changes, run:
 ```powershell
 corepack pnpm check
 corepack pnpm build
+```
+
+For runtime features, also apply migrations and test through Wrangler:
+
+```powershell
+corepack pnpm d1:migrate:local
+corepack pnpm worker:dev
+```
+
+For production setup, create the Cloudflare resources and update `wrangler.jsonc` if Wrangler returns a real D1 database ID:
+
+```powershell
+corepack pnpm exec wrangler d1 create fuwari-data
+corepack pnpm exec wrangler r2 bucket create fuwari-media
+corepack pnpm exec wrangler d1 migrations apply fuwari-data --remote
+corepack pnpm exec wrangler secret put ADMIN_TOKEN
 ```
 
 ## Build Pitfalls Seen In Practice

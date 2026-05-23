@@ -45,6 +45,24 @@ export const navBarConfig: NavBarConfig = {
 		LinkPreset.Archive,
 		LinkPreset.About,
 		{
+			name: "友链",
+			url: "/friends/",
+			children: [
+				{
+					name: "友链",
+					url: "/friends/",
+				},
+				{
+					name: "友链申请",
+					url: "/friends/apply/",
+				},
+				{
+					name: "管理后台",
+					url: "/friends/admin/",
+				},
+			],
+		},
+		{
 			name: "导航站",
 			url: "https://home.starshadow.cc/",
 			external: true,

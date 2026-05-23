@@ -213,9 +213,9 @@ class TableOfContents extends HTMLElement {
     };
 
     init() {
-        this.tocEl = document.getElementById(
-            "toc-inner-wrapper"
-        );
+        this.tocEl =
+            this.closest<HTMLElement>("[data-toc-scroll]") ??
+            document.getElementById("toc-inner-wrapper");
 
         if (!this.tocEl) return;
 
