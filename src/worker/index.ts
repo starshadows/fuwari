@@ -15,12 +15,62 @@ type RangeResult =
 
 const FRIEND_STATUSES = new Set(["pending", "approved", "rejected"]);
 const MAX_AVATAR_SIZE = 3 * 1024 * 1024;
+const INIT_DB_STATEMENTS = [
+	`CREATE TABLE IF NOT EXISTS friend_links (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL,
+		description TEXT NOT NULL DEFAULT '',
+		url TEXT NOT NULL,
+		avatar_url TEXT NOT NULL,
+		status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+		is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+		sort_order INTEGER NOT NULL DEFAULT 0,
+		created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+		updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_friend_links_status_sort
+	ON friend_links (status, is_active, sort_order, created_at)`,
+	`CREATE TRIGGER IF NOT EXISTS trg_friend_links_updated_at
+	AFTER UPDATE ON friend_links
+	FOR EACH ROW
+	BEGIN
+		UPDATE friend_links
+		SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+		WHERE id = OLD.id;
+	END`,
+	`CREATE TABLE IF NOT EXISTS music_tracks (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		title TEXT NOT NULL,
+		artist TEXT NOT NULL DEFAULT '',
+		album TEXT NOT NULL DEFAULT '',
+		object_key TEXT NOT NULL,
+		cover_url TEXT NOT NULL DEFAULT '',
+		is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+		sort_order INTEGER NOT NULL DEFAULT 0,
+		created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+		updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_music_tracks_active_sort
+	ON music_tracks (is_active, sort_order, created_at)`,
+	`CREATE TRIGGER IF NOT EXISTS trg_music_tracks_updated_at
+	AFTER UPDATE ON music_tracks
+	FOR EACH ROW
+	BEGIN
+		UPDATE music_tracks
+		SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+		WHERE id = OLD.id;
+	END`,
+];
 
 export default {
 	async fetch(request: Request, env: Env): Promise<Response> {
 		const requestUrl = new URL(request.url);
 
 		try {
+			if (requestUrl.pathname.startsWith("/setup/init-db")) {
+				return await initializeDatabase(request, env, requestUrl);
+			}
+
 			if (requestUrl.pathname.startsWith("/api/")) {
 				return await handleApi(request, env, requestUrl);
 			}
@@ -44,6 +94,10 @@ async function handleApi(
 ): Promise<Response> {
 	const { pathname } = requestUrl;
 
+	if (pathname === "/api/setup/init-db") {
+		return initializeDatabase(request, env, requestUrl);
+	}
+
 	if (pathname === "/api/friends") {
 		if (request.method === "GET") return getApprovedFriends(env);
 		if (request.method === "POST") return submitFriendLink(request, env);
@@ -61,6 +115,32 @@ async function handleApi(
 	}
 
 	return json({ error: "接口不存在。" }, 404);
+}
+
+async function initializeDatabase(
+	request: Request,
+	env: Env,
+	requestUrl: URL,
+): Promise<Response> {
+	if (request.method !== "GET" && request.method !== "POST") {
+		return json({ error: "Method not allowed." }, 405);
+	}
+
+	if (!env.DB) {
+		return json({ error: "Missing D1 binding. Bind a D1 database as DB first." }, 503);
+	}
+
+	const auth = requireSetupToken(request, env, requestUrl);
+	if (auth) return auth;
+
+	const results = await env.DB.batch(
+		INIT_DB_STATEMENTS.map((statement) => env.DB.prepare(statement)),
+	);
+	return json({
+		ok: true,
+		message: "Database initialized. Existing data was kept.",
+		statements: results.length,
+	});
 }
 
 async function getApprovedFriends(env: Env): Promise<Response> {
@@ -507,6 +587,33 @@ function requireAdmin(request: Request, env: Env): Response | null {
 
 	if (authorization !== expected) {
 		return json({ error: "管理口令不正确。" }, 401);
+	}
+
+	return null;
+}
+
+function requireSetupToken(
+	request: Request,
+	env: Env,
+	requestUrl: URL,
+): Response | null {
+	if (!env.ADMIN_TOKEN) {
+		return json({ error: "ADMIN_TOKEN is not configured." }, 503);
+	}
+
+	const authorization = request.headers.get("authorization") ?? "";
+	const bearerToken = authorization.startsWith("Bearer ")
+		? authorization.slice("Bearer ".length)
+		: "";
+	const pathToken = requestUrl.pathname.startsWith("/setup/init-db/")
+		? decodeURIComponent(requestUrl.pathname.split("/").filter(Boolean)[2] ?? "")
+		: "";
+	const token = requestUrl.searchParams.get("token") || bearerToken || pathToken;
+
+	if (token !== env.ADMIN_TOKEN) {
+		return json({
+			error: "Invalid setup token. Use /api/setup/init-db?token=ADMIN_TOKEN.",
+		}, 401);
 	}
 
 	return null;

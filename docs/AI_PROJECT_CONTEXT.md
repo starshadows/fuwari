@@ -90,8 +90,10 @@ Local URL: http://localhost:8787
 - Public friend links are shown at `/friends/` and loaded from `GET /api/friends`; submissions live at `/friends/apply/`, call `POST /api/friends`, and are stored as `pending`.
 - Admin actions use `Authorization: Bearer <ADMIN_TOKEN>` against `/api/admin/*`. Set the production token with `wrangler secret put ADMIN_TOKEN`.
 - Approved, active friend links appear immediately without rebuilding the Astro site.
-- R2 bucket binding is `MEDIA_BUCKET`; bind it manually in Cloudflare to bucket `fuwari-media`.
-- D1 binding is `DB`; bind it manually in Cloudflare to database `fuwari-data`. Do not require committing a D1 `database_id` to `wrangler.jsonc`.
+- R2 bucket binding is `MEDIA_BUCKET`; bind it manually in Cloudflare. The bucket can have any Cloudflare-side name.
+- D1 binding is `DB`; bind it manually in Cloudflare. The database can have any Cloudflare-side name.
+- `wrangler.jsonc` intentionally does not commit D1/R2 resource names or UUIDs. Runtime code only depends on binding variable names.
+- Database tables can be initialized after deployment by visiting `GET /api/setup/init-db?token=<ADMIN_TOKEN>` or `GET /setup/init-db/<ADMIN_TOKEN>`. The setup route is idempotent and keeps existing data.
 - Audio objects should be uploaded manually to R2 under `music/`, for example `music/song.mp3`; the music admin page stores that object key.
 - Public media is served by the Worker at `/media/music/<key>` and `/media/avatars/<key>`. Music responses support HTTP Range requests for seeking.
 - The sidebar music card is disabled by default in the sense that it never auto-plays; visitors must click play.
@@ -154,16 +156,7 @@ corepack pnpm d1:migrate:local
 corepack pnpm worker:dev
 ```
 
-For production setup, create the Cloudflare resources, bind them in the Worker dashboard, and avoid committing Cloudflare resource UUIDs:
-
-```powershell
-corepack pnpm exec wrangler d1 create fuwari-data
-corepack pnpm exec wrangler r2 bucket create fuwari-media
-corepack pnpm exec wrangler d1 migrations apply fuwari-data --remote
-corepack pnpm exec wrangler secret put ADMIN_TOKEN
-```
-
-Dashboard-only setup is also supported: create D1/R2 in Cloudflare, paste the SQL from `migrations/0001_create_social_features.sql` into the D1 console, then bind `DB` to `fuwari-data` and `MEDIA_BUCKET` to `fuwari-media` in the Worker settings. `wrangler.jsonc` intentionally omits `database_id`.
+Dashboard-only production setup is preferred: create D1/R2 resources with any names, bind D1 as `DB`, bind R2 as `MEDIA_BUCKET`, set `ADMIN_TOKEN`, then visit `/api/setup/init-db?token=<ADMIN_TOKEN>`. Avoid committing Cloudflare resource names or UUIDs; `wrangler.jsonc` intentionally omits D1/R2 resource names and IDs.
 
 ## Build Pitfalls Seen In Practice
 

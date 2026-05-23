@@ -11,14 +11,12 @@
 	"d1_databases": [
 		{
 			"binding": "DB",
-			"database_name": "fuwari-data",
 			"migrations_dir": "./migrations"
 		}
 	],
 	"r2_buckets": [
 		{
-			"binding": "MEDIA_BUCKET",
-			"bucket_name": "fuwari-media"
+			"binding": "MEDIA_BUCKET"
 		}
 	]
 }

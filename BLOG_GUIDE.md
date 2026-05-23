@@ -199,15 +199,15 @@ music/my-song.mp3
 
 在 Cloudflare 控制台：
 
-1. 创建 D1 数据库 `fuwari-data`。
-2. 创建 R2 存储桶 `fuwari-media`。
-3. 在 D1 的控制台里执行 `migrations/0001_create_social_features.sql` 里的 SQL，创建 `friend_links` 和 `music_tracks` 两张表。
+1. 创建一个 D1 数据库，名字随便取。
+2. 创建一个 R2 存储桶，名字随便取。
+3. 创建或部署 Worker。
 4. 在 Worker 的绑定设置里手动绑定：
-   - D1 数据库绑定名填 `DB`，选择 `fuwari-data`。
-   - R2 存储桶绑定名填 `MEDIA_BUCKET`，选择 `fuwari-media`。
-5. 设置生产后台口令，Secret 名称填 `ADMIN_TOKEN`。
+   - D1 数据库绑定名必须填 `DB`，选择你刚创建的 D1。
+   - R2 存储桶绑定名必须填 `MEDIA_BUCKET`，选择你刚创建的 R2。
+5. 设置生产后台口令，Secret 名称必须填 `ADMIN_TOKEN`。
 
-仓库里的 `wrangler.jsonc` 不需要填写 D1 的 `database_id`，只保留绑定名和资源名。只要控制台绑定名对上，代码就会通过 `env.DB` 和 `env.MEDIA_BUCKET` 使用这些资源。
+仓库里的 `wrangler.jsonc` 不保存 D1/R2 的资源名或 UUID，只声明代码需要的绑定变量名。Cloudflare 里资源叫什么都可以，只要绑定变量名对上，代码就会通过 `env.DB` 和 `env.MEDIA_BUCKET` 使用它们。
 
 Cloudflare Workers 连接 GitHub 自动部署时，表单可以这样填：
 
@@ -217,6 +217,14 @@ Build command: corepack enable && corepack pnpm install --frozen-lockfile && cor
 Deploy command: corepack pnpm exec wrangler deploy
 Root directory: /
 ```
+
+部署成功并绑定好 `DB`、`MEDIA_BUCKET`、`ADMIN_TOKEN` 后，访问下面这个地址初始化数据库：
+
+```text
+https://你的域名/api/setup/init-db?token=你的ADMIN_TOKEN
+```
+
+看到 `ok: true` 就表示 `friend_links` 和 `music_tracks` 两张表已经建好。这个接口是幂等的，重复访问不会清空已有数据。
 
 如果在本地命令行部署，也可以运行：
 
