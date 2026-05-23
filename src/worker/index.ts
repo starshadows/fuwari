@@ -15,6 +15,7 @@ type RangeResult =
 
 const FRIEND_STATUSES = new Set(["pending", "approved", "rejected"]);
 const MAX_AVATAR_SIZE = 3 * 1024 * 1024;
+const ADMIN_TOKEN_SETTING_KEY = "admin_token_sha256";
 const INIT_DB_STATEMENTS = [
 	`CREATE TABLE IF NOT EXISTS friend_links (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,6 +61,11 @@ const INIT_DB_STATEMENTS = [
 		SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 		WHERE id = OLD.id;
 	END`,
+	`CREATE TABLE IF NOT EXISTS app_settings (
+		key TEXT PRIMARY KEY,
+		value TEXT NOT NULL,
+		updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+	)`,
 ];
 
 export default {
@@ -108,7 +114,7 @@ async function handleApi(
 	}
 
 	if (pathname.startsWith("/api/admin/")) {
-		const auth = requireAdmin(request, env);
+		const auth = await requireAdmin(request, env);
 		if (auth) return auth;
 
 		return handleAdminApi(request, env, requestUrl);
@@ -130,16 +136,17 @@ async function initializeDatabase(
 		return json({ error: "Missing D1 binding. Bind a D1 database as DB first." }, 503);
 	}
 
-	const auth = requireSetupToken(request, env, requestUrl);
-	if (auth) return auth;
-
 	const results = await env.DB.batch(
 		INIT_DB_STATEMENTS.map((statement) => env.DB.prepare(statement)),
 	);
+	const tokenResult = await setupAdminToken(request, env, requestUrl);
+	if (tokenResult instanceof Response) return tokenResult;
+
 	return json({
 		ok: true,
 		message: "Database initialized. Existing data was kept.",
 		statements: results.length,
+		adminTokenSource: tokenResult,
 	});
 }
 
@@ -577,46 +584,127 @@ function parseRange(rangeHeader: string, size: number): RangeResult {
 	return { ok: true, start, end, length: end - start + 1 };
 }
 
-function requireAdmin(request: Request, env: Env): Response | null {
-	if (!env.ADMIN_TOKEN) {
-		return json({ error: "ADMIN_TOKEN 尚未配置。" }, 503);
+async function requireAdmin(request: Request, env: Env): Promise<Response | null> {
+	const token = readBearerToken(request);
+
+	if (!token) {
+		return json({ error: "Missing admin token." }, 401);
 	}
 
-	const authorization = request.headers.get("authorization") ?? "";
-	const expected = `Bearer ${env.ADMIN_TOKEN}`;
-
-	if (authorization !== expected) {
-		return json({ error: "管理口令不正确。" }, 401);
+	if (env.ADMIN_TOKEN && token === env.ADMIN_TOKEN) {
+		return null;
 	}
 
-	return null;
+	if (env.DB && await verifyStoredAdminToken(env, token)) {
+		return null;
+	}
+
+	if (!env.ADMIN_TOKEN && env.DB && !(await getStoredAdminTokenHash(env))) {
+		return json({
+			error: "Admin token is not initialized. Visit /api/setup/init-db?token=your-token first.",
+		}, 503);
+	}
+
+	return json({ error: "Invalid admin token." }, 401);
 }
 
-function requireSetupToken(
+async function setupAdminToken(
 	request: Request,
 	env: Env,
 	requestUrl: URL,
-): Response | null {
-	if (!env.ADMIN_TOKEN) {
-		return json({ error: "ADMIN_TOKEN is not configured." }, 503);
-	}
+): Promise<Response | "env" | "database"> {
+	const token = readSetupToken(request, requestUrl);
 
-	const authorization = request.headers.get("authorization") ?? "";
-	const bearerToken = authorization.startsWith("Bearer ")
-		? authorization.slice("Bearer ".length)
-		: "";
-	const pathToken = requestUrl.pathname.startsWith("/setup/init-db/")
-		? decodeURIComponent(requestUrl.pathname.split("/").filter(Boolean)[2] ?? "")
-		: "";
-	const token = requestUrl.searchParams.get("token") || bearerToken || pathToken;
-
-	if (token !== env.ADMIN_TOKEN) {
+	if (!token) {
 		return json({
-			error: "Invalid setup token. Use /api/setup/init-db?token=ADMIN_TOKEN.",
+			error: "Missing setup token. Use /api/setup/init-db?token=your-token.",
 		}, 401);
 	}
 
-	return null;
+	if (env.ADMIN_TOKEN) {
+		if (token !== env.ADMIN_TOKEN) {
+			return json({
+				error: "Invalid setup token. Use the configured ADMIN_TOKEN.",
+			}, 401);
+		}
+		return "env";
+	}
+
+	const tokenHash = await hashToken(token);
+	const storedHash = await getStoredAdminTokenHash(env);
+
+	if (storedHash) {
+		if (storedHash !== tokenHash) {
+			return json({ error: "Invalid setup token." }, 401);
+		}
+		return "database";
+	}
+
+	await saveStoredAdminTokenHash(env, tokenHash);
+	return "database";
+}
+
+function readBearerToken(request: Request): string {
+	const authorization = request.headers.get("authorization") ?? "";
+	return authorization.startsWith("Bearer ")
+		? authorization.slice("Bearer ".length).trim()
+		: "";
+}
+
+function readSetupToken(request: Request, requestUrl: URL): string {
+	const pathToken = requestUrl.pathname.startsWith("/setup/init-db/")
+		? decodeURIComponent(requestUrl.pathname.split("/").filter(Boolean)[2] ?? "")
+		: "";
+	return (
+		requestUrl.searchParams.get("token")?.trim() ||
+		readBearerToken(request) ||
+		pathToken.trim()
+	);
+}
+
+async function verifyStoredAdminToken(env: Env, token: string): Promise<boolean> {
+	const storedHash = await getStoredAdminTokenHash(env);
+	if (!storedHash) return false;
+	return storedHash === await hashToken(token);
+}
+
+async function getStoredAdminTokenHash(env: Env): Promise<string | null> {
+	try {
+		const row = await env.DB.prepare(
+			"SELECT value FROM app_settings WHERE key = ?",
+		)
+			.bind(ADMIN_TOKEN_SETTING_KEY)
+			.first<{ value: string }>();
+		return row?.value ?? null;
+	} catch {
+		return null;
+	}
+}
+
+async function saveStoredAdminTokenHash(
+	env: Env,
+	tokenHash: string,
+): Promise<void> {
+	await env.DB.prepare(
+		`INSERT INTO app_settings (key, value, updated_at)
+		VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+		ON CONFLICT(key) DO UPDATE SET
+			value = excluded.value,
+			updated_at = excluded.updated_at`,
+	)
+		.bind(ADMIN_TOKEN_SETTING_KEY, tokenHash)
+		.run();
+}
+
+async function hashToken(token: string): Promise<string> {
+	const digest = await crypto.subtle.digest(
+		"SHA-256",
+		new TextEncoder().encode(token),
+	);
+
+	return Array.from(new Uint8Array(digest))
+		.map((byte) => byte.toString(16).padStart(2, "0"))
+		.join("");
 }
 
 async function readJson(request: Request): Promise<JsonRecord> {

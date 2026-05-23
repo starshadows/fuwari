@@ -88,12 +88,12 @@ Local URL: http://localhost:8787
 ## Friend Links And Music
 
 - Public friend links are shown at `/friends/` and loaded from `GET /api/friends`; submissions live at `/friends/apply/`, call `POST /api/friends`, and are stored as `pending`.
-- Admin actions use `Authorization: Bearer <ADMIN_TOKEN>` against `/api/admin/*`. Set the production token with `wrangler secret put ADMIN_TOKEN`.
+- Admin actions use `Authorization: Bearer <token>` against `/api/admin/*`. Prefer runtime `ADMIN_TOKEN`; if it is missing, the first successful setup request stores a SHA-256 token hash in D1 `app_settings`.
 - Approved, active friend links appear immediately without rebuilding the Astro site.
 - R2 bucket binding is `MEDIA_BUCKET`; bind it manually in Cloudflare. The bucket can have any Cloudflare-side name.
 - D1 binding is `DB`; bind it manually in Cloudflare. The database can have any Cloudflare-side name.
 - `wrangler.jsonc` intentionally does not commit D1/R2 resource names or UUIDs. Runtime code only depends on binding variable names.
-- Database tables can be initialized after deployment by visiting `GET /api/setup/init-db?token=<ADMIN_TOKEN>` or `GET /setup/init-db/<ADMIN_TOKEN>`. The setup route is idempotent and keeps existing data.
+- Database tables can be initialized after deployment by visiting `GET /api/setup/init-db?token=<token>` or `GET /setup/init-db/<token>`. The setup route is idempotent and keeps existing data. If no runtime `ADMIN_TOKEN` exists, the first setup token becomes the D1-backed admin token.
 - Audio objects should be uploaded manually to R2 under `music/`, for example `music/song.mp3`; the music admin page stores that object key.
 - Public media is served by the Worker at `/media/music/<key>` and `/media/avatars/<key>`. Music responses support HTTP Range requests for seeking.
 - The sidebar music card is disabled by default in the sense that it never auto-plays; visitors must click play.
@@ -156,7 +156,7 @@ corepack pnpm d1:migrate:local
 corepack pnpm worker:dev
 ```
 
-Dashboard-only production setup is preferred: create D1/R2 resources with any names, bind D1 as `DB`, bind R2 as `MEDIA_BUCKET`, set `ADMIN_TOKEN`, then visit `/api/setup/init-db?token=<ADMIN_TOKEN>`. Avoid committing Cloudflare resource names or UUIDs; `wrangler.jsonc` intentionally omits D1/R2 resource names and IDs.
+Dashboard-only production setup is preferred: create D1/R2 resources with any names, bind D1 as `DB`, bind R2 as `MEDIA_BUCKET`, optionally set `ADMIN_TOKEN`, then visit `/api/setup/init-db?token=<token>`. Avoid committing Cloudflare resource names or UUIDs; `wrangler.jsonc` intentionally omits D1/R2 resource names and IDs.
 
 ## Build Pitfalls Seen In Practice
 

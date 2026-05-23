@@ -205,7 +205,7 @@ music/my-song.mp3
 4. 在 Worker 的绑定设置里手动绑定：
    - D1 数据库绑定名必须填 `DB`，选择你刚创建的 D1。
    - R2 存储桶绑定名必须填 `MEDIA_BUCKET`，选择你刚创建的 R2。
-5. 设置生产后台口令，Secret 名称必须填 `ADMIN_TOKEN`。
+5. 可选：设置生产后台口令，Secret 名称填 `ADMIN_TOKEN`。
 
 仓库里的 `wrangler.jsonc` 不保存 D1/R2 的资源名或 UUID，只声明代码需要的绑定变量名。Cloudflare 里资源叫什么都可以，只要绑定变量名对上，代码就会通过 `env.DB` 和 `env.MEDIA_BUCKET` 使用它们。
 
@@ -218,13 +218,13 @@ Deploy command: corepack pnpm exec wrangler deploy
 Root directory: /
 ```
 
-部署成功并绑定好 `DB`、`MEDIA_BUCKET`、`ADMIN_TOKEN` 后，访问下面这个地址初始化数据库：
+部署成功并绑定好 `DB` 后，访问下面这个地址初始化数据库：
 
 ```text
 https://你的域名/api/setup/init-db?token=你的ADMIN_TOKEN
 ```
 
-看到 `ok: true` 就表示 `friend_links` 和 `music_tracks` 两张表已经建好。这个接口是幂等的，重复访问不会清空已有数据。
+如果 Worker 里已经设置了 `ADMIN_TOKEN`，这里的 token 必须和 `ADMIN_TOKEN` 一致。如果没有设置 `ADMIN_TOKEN`，第一次初始化会把 URL 里的 token 存进 D1，之后后台登录就用这个 token。看到 `ok: true` 就表示 `friend_links`、`music_tracks` 和后台设置表已经建好。这个接口是幂等的，重复访问不会清空已有数据。
 
 如果在本地命令行部署，也可以运行：
 
