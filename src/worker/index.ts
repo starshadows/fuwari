@@ -19,6 +19,11 @@ type MusicMetadata = {
 	album: string;
 };
 
+type EmbeddedCover = {
+	mimeType: string;
+	bytes: Uint8Array;
+};
+
 type MusicObjectInfo = MusicMetadata & {
 	key: string;
 	fileName: string;
@@ -26,6 +31,9 @@ type MusicObjectInfo = MusicMetadata & {
 	uploaded: string;
 	imported: boolean;
 	audioUrl: string;
+	coverUrl: string;
+	hasEmbeddedCover: boolean;
+	cover?: EmbeddedCover;
 };
 
 const FRIEND_STATUSES = new Set(["pending", "approved", "rejected"]);
@@ -33,7 +41,7 @@ const MAX_AVATAR_SIZE = 3 * 1024 * 1024;
 const ADMIN_TOKEN_SETTING_KEY = "admin_token_sha256";
 const MUSIC_PREFIX = "music/";
 const MUSIC_OBJECT_SCAN_LIMIT = 200;
-const MUSIC_METADATA_READ_BYTES = 256 * 1024;
+const MUSIC_METADATA_READ_BYTES = 1024 * 1024;
 const AUDIO_EXTENSIONS = new Set(["mp3", "m4a", "aac", "flac", "wav", "ogg", "opus", "webm"]);
 const INIT_DB_STATEMENTS = [
 	`CREATE TABLE IF NOT EXISTS friend_links (
@@ -227,8 +235,8 @@ async function getPublicMusicTracks(env: Env): Promise<Response> {
 			title: row.title,
 			artist: row.artist,
 			album: row.album,
-			coverUrl: row.coverUrl,
 			objectKey: row.objectKey,
+			coverUrl: row.coverUrl || embeddedCoverUrlForMusicKey(String(row.objectKey)),
 			audioUrl: `/media/music/${stripMediaPrefix(String(row.objectKey), "music")}`,
 		};
 	});
@@ -415,7 +423,7 @@ async function listR2MusicObjects(env: Env): Promise<Response> {
 	}
 
 	const objects = await scanR2MusicObjects(env);
-	return json({ objects });
+	return json({ objects: objects.map(stripCoverBytes) });
 }
 
 async function importR2MusicObjects(
@@ -451,16 +459,20 @@ async function importR2MusicObjects(
 	const imported: Record<string, unknown>[] = [];
 
 	for (const object of candidates) {
+		const coverUrl = object.cover
+			? await saveEmbeddedCover(env, object.key, object.cover)
+			: "";
 		const result = await env.DB.prepare(
 			`INSERT INTO music_tracks
 			(title, artist, album, object_key, cover_url, is_active, sort_order)
-			VALUES (?, ?, ?, ?, '', ?, ?)`,
+			VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		)
 			.bind(
 				object.title,
 				object.artist,
 				object.album,
 				object.key,
+				coverUrl,
 				isActive,
 				sortOrder,
 			)
@@ -472,6 +484,7 @@ async function importR2MusicObjects(
 			artist: object.artist,
 			album: object.album,
 			objectKey: object.key,
+			coverUrl,
 			isActive,
 			sortOrder,
 		});
@@ -499,6 +512,7 @@ async function scanR2MusicObjects(env: Env): Promise<MusicObjectInfo[]> {
 
 			const metadata = await readMusicMetadata(env, object.key);
 			const key = normalizeR2MusicKey(object.key);
+			const coverUrl = embeddedCoverUrlForMusicKey(key);
 			objects.push({
 				...metadata,
 				key,
@@ -509,6 +523,8 @@ async function scanR2MusicObjects(env: Env): Promise<MusicObjectInfo[]> {
 					: String(object.uploaded),
 				imported: existingKeys.has(key),
 				audioUrl: `/media/music/${stripMediaPrefix(key, "music")}`,
+				coverUrl,
+				hasEmbeddedCover: Boolean(metadata.cover),
 			});
 		}
 
@@ -516,6 +532,11 @@ async function scanR2MusicObjects(env: Env): Promise<MusicObjectInfo[]> {
 	} while (cursor && objects.length < MUSIC_OBJECT_SCAN_LIMIT);
 
 	return objects.sort((a, b) => a.fileName.localeCompare(b.fileName, "zh-Hans-CN"));
+}
+
+function stripCoverBytes(object: MusicObjectInfo): Omit<MusicObjectInfo, "cover"> {
+	const { cover: _cover, ...safeObject } = object;
+	return safeObject;
 }
 
 async function getExistingMusicKeys(env: Env): Promise<Set<string>> {
@@ -531,7 +552,10 @@ async function getExistingMusicKeys(env: Env): Promise<Set<string>> {
 	);
 }
 
-async function readMusicMetadata(env: Env, key: string): Promise<MusicMetadata> {
+async function readMusicMetadata(
+	env: Env,
+	key: string,
+): Promise<MusicMetadata & { cover?: EmbeddedCover }> {
 	const fallback = inferMusicMetadataFromKey(key);
 	if (!key.toLowerCase().endsWith(".mp3")) return fallback;
 
@@ -547,13 +571,14 @@ async function readMusicMetadata(env: Env, key: string): Promise<MusicMetadata> 
 			title: truncateText(metadata.title || fallback.title, 80),
 			artist: truncateText(metadata.artist || fallback.artist, 80),
 			album: truncateText(metadata.album || fallback.album, 80),
+			cover: metadata.cover,
 		};
 	} catch {
 		return fallback;
 	}
 }
 
-function parseId3Metadata(bytes: Uint8Array): Partial<MusicMetadata> {
+function parseId3Metadata(bytes: Uint8Array): Partial<MusicMetadata> & { cover?: EmbeddedCover } {
 	if (bytes.length < 10 || ascii(bytes, 0, 3) !== "ID3") return {};
 
 	const version = bytes[3];
@@ -577,7 +602,7 @@ function parseId3Metadata(bytes: Uint8Array): Partial<MusicMetadata> {
 		TPE1: "artist",
 		TALB: "album",
 	};
-	const metadata: Partial<MusicMetadata> = {};
+	const metadata: Partial<MusicMetadata> & { cover?: EmbeddedCover } = {};
 
 	while (offset + 10 <= end) {
 		const frameId = ascii(bytes, offset, 4);
@@ -594,6 +619,8 @@ function parseId3Metadata(bytes: Uint8Array): Partial<MusicMetadata> {
 		if (field && frameStart < frameEnd) {
 			const value = decodeId3Text(bytes.slice(frameStart, frameEnd));
 			if (value) metadata[field] = value;
+		} else if (frameId === "APIC" && frameStart < frameEnd && !metadata.cover) {
+			metadata.cover = parseApicFrame(bytes.slice(frameStart, frameEnd));
 		}
 
 		offset = frameEnd;
@@ -624,6 +651,72 @@ function decodeId3Text(bytes: Uint8Array): string {
 	}
 
 	return cleanMetadataText(decoder.decode(payload));
+}
+
+function parseApicFrame(bytes: Uint8Array): EmbeddedCover | undefined {
+	if (bytes.length < 5) return undefined;
+
+	const encoding = bytes[0];
+	let offset = 1;
+	const mimeEnd = indexOfTerminator(bytes, offset, 1);
+	if (mimeEnd < 0) return undefined;
+
+	const mimeType = cleanMetadataText(
+		new TextDecoder("iso-8859-1").decode(bytes.slice(offset, mimeEnd)),
+	).toLowerCase();
+	offset = mimeEnd + 1;
+
+	if (!mimeType.startsWith("image/") || offset >= bytes.length) return undefined;
+	offset += 1;
+
+	const descriptionTerminatorLength = encoding === 1 || encoding === 2 ? 2 : 1;
+	const descriptionEnd = indexOfTerminator(bytes, offset, descriptionTerminatorLength);
+	if (descriptionEnd < 0) return undefined;
+
+	const imageStart = descriptionEnd + descriptionTerminatorLength;
+	if (imageStart >= bytes.length) return undefined;
+
+	return {
+		mimeType: mimeType === "image/jpg" ? "image/jpeg" : mimeType,
+		bytes: bytes.slice(imageStart),
+	};
+}
+
+function indexOfTerminator(
+	bytes: Uint8Array,
+	start: number,
+	terminatorLength: 1 | 2,
+): number {
+	for (let index = start; index <= bytes.length - terminatorLength; index += 1) {
+		if (terminatorLength === 1 && bytes[index] === 0) return index;
+		if (terminatorLength === 2 && bytes[index] === 0 && bytes[index + 1] === 0) {
+			return index;
+		}
+	}
+	return -1;
+}
+
+async function saveEmbeddedCover(
+	env: Env,
+	musicKey: string,
+	cover: EmbeddedCover,
+): Promise<string> {
+	const extension = imageExtensionFromMimeType(cover.mimeType);
+	const baseName = sanitizeFileName(getFileNameFromKey(musicKey).replace(/\.[^.]+$/, ""));
+	const key = `covers/${baseName}-${crypto.randomUUID()}.${extension}`;
+
+	await env.MEDIA_BUCKET.put(key, cover.bytes, {
+		httpMetadata: { contentType: cover.mimeType },
+	});
+
+	return `/media/covers/${stripMediaPrefix(key, "covers")}`;
+}
+
+function imageExtensionFromMimeType(mimeType: string): string {
+	if (mimeType === "image/png") return "png";
+	if (mimeType === "image/gif") return "gif";
+	if (mimeType === "image/webp") return "webp";
+	return "jpg";
 }
 
 function inferMusicMetadataFromKey(key: string): MusicMetadata {
@@ -699,6 +792,12 @@ function readSyncSafeInteger(bytes: Uint8Array, offset: number): number {
 		(bytes[offset + 2] << 7) |
 		bytes[offset + 3]
 	);
+}
+
+function arrayBufferFromBytes(bytes: Uint8Array): ArrayBuffer {
+	const copy = new Uint8Array(bytes.byteLength);
+	copy.set(bytes);
+	return copy.buffer;
 }
 
 async function createMusicTrack(
@@ -804,12 +903,15 @@ async function handleMedia(
 	const kind = segments[1];
 	const rawKey = decodeURIComponent(segments.slice(2).join("/"));
 
-	if (kind !== "music" && kind !== "avatars") {
+	if (kind === "covers" && rawKey.startsWith("from-music/")) {
+		return getEmbeddedCoverResponse(request, env, rawKey.slice("from-music/".length));
+	}
+
+	if (kind !== "music" && kind !== "avatars" && kind !== "covers") {
 		return json({ error: "媒体类型不存在。" }, 404);
 	}
 
-	const prefix = kind === "music" ? "music" : "avatars";
-	const key = normalizeMediaKey(rawKey, prefix);
+	const key = normalizeMediaKey(rawKey, kind);
 	const head = await env.MEDIA_BUCKET.head(key);
 
 	if (!head) {
@@ -852,6 +954,28 @@ async function handleMedia(
 	const object = await env.MEDIA_BUCKET.get(key);
 	if (!object?.body) return new Response("Not found", { status: 404 });
 	return new Response(object.body, { headers });
+}
+
+async function getEmbeddedCoverResponse(
+	request: Request,
+	env: Env,
+	rawMusicKey: string,
+): Promise<Response> {
+	const key = normalizeMediaKey(rawMusicKey, "music");
+	const metadata = await readMusicMetadata(env, key);
+	if (!metadata.cover) return new Response("Not found", { status: 404 });
+
+	const headers = new Headers({
+		"content-type": metadata.cover.mimeType,
+		"cache-control": "public, max-age=86400",
+	});
+	headers.set("content-length", String(metadata.cover.bytes.byteLength));
+
+	if (request.method === "HEAD") {
+		return new Response(null, { headers });
+	}
+
+	return new Response(arrayBufferFromBytes(metadata.cover.bytes), { headers });
 }
 
 function mediaHeaders(object: R2Object): Headers {
@@ -1105,11 +1229,21 @@ function isHttpUrl(value: string): boolean {
 }
 
 function isAvatarUrl(value: string): boolean {
-	return isHttpUrl(value) || value.startsWith("/media/avatars/");
+	return (
+		isHttpUrl(value) ||
+		value.startsWith("/media/avatars/") ||
+		value.startsWith("/media/covers/")
+	);
 }
 
 function normalizeR2MusicKey(value: string): string {
 	return normalizeMediaKey(value, "music");
+}
+
+function embeddedCoverUrlForMusicKey(objectKey: string): string {
+	const key = normalizeR2MusicKey(objectKey);
+	if (!key.toLowerCase().endsWith(".mp3")) return "";
+	return `/media/covers/from-music/${stripMediaPrefix(key, "music")}`;
 }
 
 function normalizeMediaKey(value: string, prefix: string): string {
