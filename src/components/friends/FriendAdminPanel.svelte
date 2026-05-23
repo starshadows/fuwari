@@ -26,6 +26,18 @@ type Track = {
 	sortOrder: number;
 };
 
+type MusicObject = {
+	key: string;
+	fileName: string;
+	title: string;
+	artist: string;
+	album: string;
+	size: number;
+	uploaded: string;
+	imported: boolean;
+	audioUrl: string;
+};
+
 const tokenKey = "fuwari-admin-token";
 const statusOptions: FriendStatus[] = ["pending", "approved", "rejected", "all"];
 
@@ -36,9 +48,13 @@ let activeTab: "friends" | "music" = "friends";
 let friendStatus: FriendStatus = "pending";
 let friends: Friend[] = [];
 let tracks: Track[] = [];
+let musicObjects: MusicObject[] = [];
+let unimportedMusicObjects: MusicObject[] = [];
 let message = "";
 let error = "";
 let avatarFileInput: HTMLInputElement;
+let isScanningMusic = false;
+let isImportingMusic = false;
 
 let musicForm = {
 	title: "",
@@ -56,6 +72,8 @@ const statusLabels: Record<FriendStatus, string> = {
 	rejected: "已拒绝",
 	all: "全部",
 };
+
+$: unimportedMusicObjects = musicObjects.filter((object) => !object.imported);
 
 const setMessage = (value: string) => {
 	message = value;
@@ -118,6 +136,64 @@ const loadFriends = async () => {
 const loadMusic = async () => {
 	const data = await adminFetch("/api/admin/music");
 	tracks = data.tracks ?? [];
+};
+
+const loadMusicObjects = async () => {
+	isScanningMusic = true;
+	try {
+		const data = await adminFetch("/api/admin/music/objects");
+		musicObjects = data.objects ?? [];
+		const unimportedCount = musicObjects.filter((object) => !object.imported).length;
+		setMessage(`已扫描 R2：${musicObjects.length} 个音频，${unimportedCount} 个未导入。`);
+	} catch (err) {
+		setError(err instanceof Error ? err.message : "扫描 R2 音乐失败。");
+	} finally {
+		isScanningMusic = false;
+	}
+};
+
+const importMusicObjects = async (objectKeys?: string[]) => {
+	const keys = objectKeys ?? unimportedMusicObjects.map((object) => object.key);
+	if (keys.length === 0) {
+		setMessage("没有可导入的新音乐。");
+		return;
+	}
+
+	isImportingMusic = true;
+	try {
+		const data = await adminFetch("/api/admin/music/import", {
+			method: "POST",
+			body: JSON.stringify({ objectKeys: keys }),
+		});
+		await loadMusic();
+		await loadMusicObjects();
+		setMessage(`已导入 ${data.imported?.length ?? 0} 首音乐。`);
+	} catch (err) {
+		setError(err instanceof Error ? err.message : "导入 R2 音乐失败。");
+	} finally {
+		isImportingMusic = false;
+	}
+};
+
+const fillMusicFormFromObject = (object: MusicObject) => {
+	musicForm = {
+		...musicForm,
+		title: object.title,
+		artist: object.artist,
+		album: object.album,
+		objectKey: object.key,
+	};
+	setMessage("已填入识别结果，可以再微调后手动添加。");
+};
+
+const openMusicTab = async () => {
+	activeTab = "music";
+	if (musicObjects.length === 0) await loadMusicObjects();
+};
+
+const formatFileSize = (size: number) => {
+	if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+	return `${(size / 1024 / 1024).toFixed(2)} MB`;
 };
 
 const changeFriendStatusFilter = async (status: FriendStatus) => {
@@ -261,7 +337,7 @@ onMount(async () => {
                 </button>
                 <button
                     class={`btn-regular h-10 rounded-xl px-4 font-bold ${activeTab === "music" ? "!bg-[var(--btn-regular-bg-active)]" : ""}`}
-                    on:click={() => (activeTab = "music")}
+                    on:click={openMusicTab}
                 >
                     音乐
                 </button>
@@ -353,6 +429,61 @@ onMount(async () => {
                 {/each}
             </div>
         {:else}
+            <section class="mb-4 rounded-xl bg-[var(--btn-plain-bg-hover)] p-4">
+                <div class="mb-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div>
+                        <div class="font-bold text-75">智能扫描 R2 音乐</div>
+                        <div class="mt-1 text-sm text-50">{musicObjects.length} 个对象，{unimportedMusicObjects.length} 个未入库</div>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <button type="button" class="btn-regular h-10 rounded-xl px-4 font-bold" disabled={isScanningMusic} on:click={loadMusicObjects}>
+                            {isScanningMusic ? "扫描中" : "扫描 R2"}
+                        </button>
+                        <button
+                            type="button"
+                            class="btn-regular h-10 rounded-xl px-4 font-bold"
+                            disabled={isImportingMusic || unimportedMusicObjects.length === 0}
+                            on:click={() => importMusicObjects()}
+                        >
+                            {isImportingMusic ? "导入中" : `导入未入库 ${unimportedMusicObjects.length} 首`}
+                        </button>
+                    </div>
+                </div>
+
+                {#if musicObjects.length > 0}
+                    <div class="flex flex-col gap-2">
+                        {#each musicObjects as object}
+                            <div class="rounded-lg bg-[var(--card-bg)] px-3 py-3">
+                                <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                                    <div class="min-w-0">
+                                        <div class="truncate font-bold text-90">{object.title}</div>
+                                        <div class="truncate text-sm text-50">{object.artist || "未知艺术家"}{object.album ? ` · ${object.album}` : ""}</div>
+                                        <div class="mt-1 truncate text-xs text-30">{object.key} · {formatFileSize(object.size)}</div>
+                                    </div>
+                                    <div class="flex shrink-0 flex-wrap gap-2">
+                                        <span class={`rounded-lg px-3 py-2 text-sm font-bold ${object.imported ? "bg-[var(--btn-regular-bg)] text-50" : "bg-[var(--primary)] text-white"}`}>
+                                            {object.imported ? "已入库" : "未入库"}
+                                        </span>
+                                        {#if !object.imported}
+                                            <button type="button" class="btn-regular h-9 rounded-lg px-3 text-sm font-bold" on:click={() => importMusicObjects([object.key])}>
+                                                导入
+                                            </button>
+                                            <button type="button" class="btn-plain h-9 rounded-lg px-3 text-sm font-bold" on:click={() => fillMusicFormFromObject(object)}>
+                                                填入表单
+                                            </button>
+                                        {/if}
+                                    </div>
+                                </div>
+                            </div>
+                        {/each}
+                    </div>
+                {:else}
+                    <div class="rounded-lg bg-[var(--card-bg)] px-4 py-5 text-sm text-50">
+                        暂无扫描结果。
+                    </div>
+                {/if}
+            </section>
+
             <form class="mb-4 rounded-xl bg-[var(--btn-plain-bg-hover)] p-4" on:submit|preventDefault={createTrack}>
                 <div class="mb-3 font-bold text-75">添加音乐</div>
                 <div class="grid grid-cols-1 gap-3 md:grid-cols-2">

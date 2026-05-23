@@ -94,7 +94,8 @@ Local URL: http://localhost:8787
 - D1 binding is `DB`; bind it manually in Cloudflare. The database can have any Cloudflare-side name.
 - `wrangler.jsonc` intentionally does not commit D1/R2 resource names or UUIDs. Runtime code only depends on binding variable names.
 - Database tables can be initialized after deployment by visiting `GET /api/setup/init-db?token=<token>` or `GET /setup/init-db/<token>`. The setup route is idempotent and keeps existing data. If no runtime `ADMIN_TOKEN` exists, the first setup token becomes the D1-backed admin token.
-- Audio objects should be uploaded manually to R2 under `music/`, for example `music/song.mp3`; the music admin page stores that object key.
+- Audio objects should be uploaded manually to R2 under `music/`, for example `music/song.mp3`; the music admin page can scan R2 objects, read MP3 ID3 title/artist/album metadata when available, fall back to filename inference, and bulk-import untracked objects into D1.
+- Admin music scan API: `GET /api/admin/music/objects`; bulk import API: `POST /api/admin/music/import` with optional `objectKeys`.
 - Public media is served by the Worker at `/media/music/<key>` and `/media/avatars/<key>`. Music responses support HTTP Range requests for seeking.
 - The sidebar music card is disabled by default in the sense that it never auto-plays; visitors must click play.
 - The article TOC now lives in the left sidebar below tags. Keep the `#toc` element present because Swup is configured to replace it.

@@ -13,9 +13,28 @@ type RangeResult =
 	| { ok: true; start: number; end: number; length: number }
 	| { ok: false };
 
+type MusicMetadata = {
+	title: string;
+	artist: string;
+	album: string;
+};
+
+type MusicObjectInfo = MusicMetadata & {
+	key: string;
+	fileName: string;
+	size: number;
+	uploaded: string;
+	imported: boolean;
+	audioUrl: string;
+};
+
 const FRIEND_STATUSES = new Set(["pending", "approved", "rejected"]);
 const MAX_AVATAR_SIZE = 3 * 1024 * 1024;
 const ADMIN_TOKEN_SETTING_KEY = "admin_token_sha256";
+const MUSIC_PREFIX = "music/";
+const MUSIC_OBJECT_SCAN_LIMIT = 200;
+const MUSIC_METADATA_READ_BYTES = 256 * 1024;
+const AUDIO_EXTENSIONS = new Set(["mp3", "m4a", "aac", "flac", "wav", "ogg", "opus", "webm"]);
 const INIT_DB_STATEMENTS = [
 	`CREATE TABLE IF NOT EXISTS friend_links (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -236,6 +255,13 @@ async function handleAdminApi(
 	}
 
 	if (segments[2] === "music") {
+		if (segments[3] === "objects" && request.method === "GET") {
+			return listR2MusicObjects(env);
+		}
+		if (segments[3] === "import" && request.method === "POST") {
+			return importR2MusicObjects(request, env);
+		}
+
 		const id = segments[3] ? Number.parseInt(segments[3], 10) : null;
 		if (request.method === "GET" && !id) return listAdminMusic(env);
 		if (request.method === "POST" && !id) return createMusicTrack(request, env);
@@ -381,6 +407,298 @@ async function listAdminMusic(env: Env): Promise<Response> {
 	).all();
 
 	return json({ tracks: result.results ?? [] });
+}
+
+async function listR2MusicObjects(env: Env): Promise<Response> {
+	if (!env.MEDIA_BUCKET) {
+		return json({ error: "Missing R2 binding. Bind an R2 bucket as MEDIA_BUCKET first." }, 503);
+	}
+
+	const objects = await scanR2MusicObjects(env);
+	return json({ objects });
+}
+
+async function importR2MusicObjects(
+	request: Request,
+	env: Env,
+): Promise<Response> {
+	if (!env.MEDIA_BUCKET) {
+		return json({ error: "Missing R2 binding. Bind an R2 bucket as MEDIA_BUCKET first." }, 503);
+	}
+
+	const body = await readJson(request);
+	const requestedKeys = Array.isArray(body.objectKeys)
+		? body.objectKeys
+				.filter((key): key is string => typeof key === "string")
+				.map((key) => normalizeR2MusicKey(key))
+		: [];
+	const isActive = readBoolean(body.isActive, true) ? 1 : 0;
+	const objects = await scanR2MusicObjects(env);
+	const requestedKeySet = new Set(requestedKeys);
+	const candidates = objects.filter((object) => {
+		if (object.imported) return false;
+		return requestedKeySet.size === 0 || requestedKeySet.has(object.key);
+	});
+
+	if (candidates.length === 0) {
+		return json({ ok: true, imported: [], message: "没有可导入的新音乐。" });
+	}
+
+	const maxSortRow = await env.DB.prepare(
+		"SELECT COALESCE(MAX(sort_order), 0) AS maxSort FROM music_tracks",
+	).first<{ maxSort: number }>();
+	let sortOrder = readInteger(body.sortOrderStart, Number(maxSortRow?.maxSort ?? 0) + 10);
+	const imported: Record<string, unknown>[] = [];
+
+	for (const object of candidates) {
+		const result = await env.DB.prepare(
+			`INSERT INTO music_tracks
+			(title, artist, album, object_key, cover_url, is_active, sort_order)
+			VALUES (?, ?, ?, ?, '', ?, ?)`,
+		)
+			.bind(
+				object.title,
+				object.artist,
+				object.album,
+				object.key,
+				isActive,
+				sortOrder,
+			)
+			.run();
+
+		imported.push({
+			id: result.meta.last_row_id,
+			title: object.title,
+			artist: object.artist,
+			album: object.album,
+			objectKey: object.key,
+			isActive,
+			sortOrder,
+		});
+		sortOrder += 10;
+	}
+
+	return json({ ok: true, imported }, 201);
+}
+
+async function scanR2MusicObjects(env: Env): Promise<MusicObjectInfo[]> {
+	const existingKeys = await getExistingMusicKeys(env);
+	const objects: MusicObjectInfo[] = [];
+	let cursor: string | undefined;
+
+	do {
+		const listed = await env.MEDIA_BUCKET.list({
+			prefix: MUSIC_PREFIX,
+			cursor,
+			limit: Math.min(1000, MUSIC_OBJECT_SCAN_LIMIT - objects.length),
+		});
+
+		for (const object of listed.objects) {
+			if (objects.length >= MUSIC_OBJECT_SCAN_LIMIT) break;
+			if (!isAudioObjectKey(object.key)) continue;
+
+			const metadata = await readMusicMetadata(env, object.key);
+			const key = normalizeR2MusicKey(object.key);
+			objects.push({
+				...metadata,
+				key,
+				fileName: getFileNameFromKey(key),
+				size: object.size,
+				uploaded: object.uploaded instanceof Date
+					? object.uploaded.toISOString()
+					: String(object.uploaded),
+				imported: existingKeys.has(key),
+				audioUrl: `/media/music/${stripMediaPrefix(key, "music")}`,
+			});
+		}
+
+		cursor = listed.truncated ? listed.cursor : undefined;
+	} while (cursor && objects.length < MUSIC_OBJECT_SCAN_LIMIT);
+
+	return objects.sort((a, b) => a.fileName.localeCompare(b.fileName, "zh-Hans-CN"));
+}
+
+async function getExistingMusicKeys(env: Env): Promise<Set<string>> {
+	const result = await env.DB.prepare(
+		"SELECT object_key AS objectKey FROM music_tracks",
+	).all();
+
+	return new Set(
+		(result.results ?? [])
+			.map((row) => String((row as Record<string, unknown>).objectKey ?? ""))
+			.filter(Boolean)
+			.map(normalizeR2MusicKey),
+	);
+}
+
+async function readMusicMetadata(env: Env, key: string): Promise<MusicMetadata> {
+	const fallback = inferMusicMetadataFromKey(key);
+	if (!key.toLowerCase().endsWith(".mp3")) return fallback;
+
+	try {
+		const object = await env.MEDIA_BUCKET.get(key, {
+			range: { offset: 0, length: MUSIC_METADATA_READ_BYTES },
+		});
+		if (!object) return fallback;
+
+		const bytes = new Uint8Array(await object.arrayBuffer());
+		const metadata = parseId3Metadata(bytes);
+		return {
+			title: truncateText(metadata.title || fallback.title, 80),
+			artist: truncateText(metadata.artist || fallback.artist, 80),
+			album: truncateText(metadata.album || fallback.album, 80),
+		};
+	} catch {
+		return fallback;
+	}
+}
+
+function parseId3Metadata(bytes: Uint8Array): Partial<MusicMetadata> {
+	if (bytes.length < 10 || ascii(bytes, 0, 3) !== "ID3") return {};
+
+	const version = bytes[3];
+	if (version < 3 || version > 4) return {};
+
+	const flags = bytes[5];
+	const tagSize = readSyncSafeInteger(bytes, 6);
+	const end = Math.min(bytes.length, 10 + tagSize);
+	let offset = 10;
+
+	if (flags & 0x40) {
+		if (offset + 4 > end) return {};
+		const extendedSize = version === 4
+			? readSyncSafeInteger(bytes, offset)
+			: readUint32(bytes, offset);
+		offset += version === 4 ? extendedSize : extendedSize + 4;
+	}
+
+	const frameMap: Record<string, keyof MusicMetadata> = {
+		TIT2: "title",
+		TPE1: "artist",
+		TALB: "album",
+	};
+	const metadata: Partial<MusicMetadata> = {};
+
+	while (offset + 10 <= end) {
+		const frameId = ascii(bytes, offset, 4);
+		if (!/^[A-Z0-9]{4}$/.test(frameId)) break;
+
+		const frameSize = version === 4
+			? readSyncSafeInteger(bytes, offset + 4)
+			: readUint32(bytes, offset + 4);
+		if (frameSize <= 0) break;
+
+		const frameStart = offset + 10;
+		const frameEnd = Math.min(frameStart + frameSize, end);
+		const field = frameMap[frameId];
+		if (field && frameStart < frameEnd) {
+			const value = decodeId3Text(bytes.slice(frameStart, frameEnd));
+			if (value) metadata[field] = value;
+		}
+
+		offset = frameEnd;
+	}
+
+	return metadata;
+}
+
+function decodeId3Text(bytes: Uint8Array): string {
+	if (bytes.length === 0) return "";
+
+	const encoding = bytes[0];
+	let payload = bytes.slice(1);
+	let decoder = new TextDecoder("iso-8859-1");
+
+	if (encoding === 1) {
+		if (payload[0] === 0xfe && payload[1] === 0xff) {
+			decoder = new TextDecoder("utf-16be");
+			payload = payload.slice(2);
+		} else {
+			decoder = new TextDecoder("utf-16le");
+			if (payload[0] === 0xff && payload[1] === 0xfe) payload = payload.slice(2);
+		}
+	} else if (encoding === 2) {
+		decoder = new TextDecoder("utf-16be");
+	} else if (encoding === 3) {
+		decoder = new TextDecoder("utf-8");
+	}
+
+	return cleanMetadataText(decoder.decode(payload));
+}
+
+function inferMusicMetadataFromKey(key: string): MusicMetadata {
+	const fileName = getFileNameFromKey(key);
+	const baseName = fileName.replace(/\.[^.]+$/, "").replace(/[_]+/g, " ").trim();
+	const parts = baseName.split(/\s+-\s+/).map(cleanMetadataText).filter(Boolean);
+
+	if (parts.length >= 2) {
+		return {
+			title: truncateText(parts[0], 80),
+			artist: truncateText(parts.slice(1).join(" - "), 80),
+			album: "",
+		};
+	}
+
+	return {
+		title: truncateText(cleanMetadataText(baseName) || fileName, 80),
+		artist: "",
+		album: "",
+	};
+}
+
+function getFileNameFromKey(key: string): string {
+	const fileName = stripMediaPrefix(key, "music").split("/").pop() ?? key;
+	return safeDecodeURIComponent(fileName);
+}
+
+function isAudioObjectKey(key: string): boolean {
+	if (key.endsWith("/")) return false;
+	const extension = key.split(".").pop()?.toLowerCase() ?? "";
+	return AUDIO_EXTENSIONS.has(extension);
+}
+
+function cleanMetadataText(value: string): string {
+	return value
+		.replace(/\u0000+/g, " / ")
+		.replace(/\s+\/\s*$/g, "")
+		.replace(/\s+/g, " ")
+		.trim();
+}
+
+function truncateText(value: string, maxLength: number): string {
+	return value.trim().slice(0, maxLength);
+}
+
+function safeDecodeURIComponent(value: string): string {
+	try {
+		return decodeURIComponent(value);
+	} catch {
+		return value;
+	}
+}
+
+function ascii(bytes: Uint8Array, offset: number, length: number): string {
+	return Array.from(bytes.slice(offset, offset + length))
+		.map((byte) => String.fromCharCode(byte))
+		.join("");
+}
+
+function readUint32(bytes: Uint8Array, offset: number): number {
+	return (
+		(bytes[offset] << 24) |
+		(bytes[offset + 1] << 16) |
+		(bytes[offset + 2] << 8) |
+		bytes[offset + 3]
+	) >>> 0;
+}
+
+function readSyncSafeInteger(bytes: Uint8Array, offset: number): number {
+	return (
+		(bytes[offset] << 21) |
+		(bytes[offset + 1] << 14) |
+		(bytes[offset + 2] << 7) |
+		bytes[offset + 3]
+	);
 }
 
 async function createMusicTrack(
