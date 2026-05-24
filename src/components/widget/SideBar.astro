@@ -7,6 +7,7 @@ import MusicPlayer from "./MusicPlayer.svelte";
 import Profile from "./Profile.astro";
 import Tag from "./Tags.astro";
 import TOC from "./TOC.astro";
+import VisitorStats from "./VisitorStats.svelte";
 import WidgetLayout from "./WidgetLayout.astro";
 
 interface Props {
@@ -26,6 +27,7 @@ const tocEnabled = siteConfig.toc.enable;
     <div class="flex flex-col w-full gap-4 mb-4">
         <Profile></Profile>
         <MusicPlayer client:load />
+        <VisitorStats client:load />
     </div>
     <div id="sidebar-sticky" class="transition-all duration-700 flex flex-col w-full gap-4 top-4 sticky top-4">
         <Categories class="onload-animation" style="animation-delay: 150ms"></Categories>

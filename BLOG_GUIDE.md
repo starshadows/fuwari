@@ -13,8 +13,8 @@
 - `src/components/`：页面零件。导航栏、文章卡片、侧边栏、搜索等都在这里。
 - `src/layouts/`：页面大布局。决定页面整体骨架。
 - `src/styles/`：全局样式。想深入改视觉风格时再看。
-- `src/worker/index.ts`：Cloudflare Worker 后台接口，负责友链、音乐和 R2 文件访问。
-- `migrations/`：D1 数据库表结构，友链和音乐列表都靠它初始化。
+- `src/worker/index.ts`：Cloudflare Worker 后台接口，负责友链、音乐、访客统计和 R2 文件访问。
+- `migrations/`：D1 数据库表结构，友链、音乐列表和访客统计都靠它初始化。
 
 先记住一句话：日常维护主要改 `src/config.ts`、`src/content/posts/`、`src/content/spec/about.md`。关于页里的外部链接用 HTML 写法并加 `target="_blank"`，这样不会覆盖当前博客页面。
 
@@ -167,7 +167,7 @@ dist/
 
 Cloudflare Pages 发布的就是这个目录。
 
-## 7. 友链和音乐
+## 7. 友链、音乐和统计
 
 顶部导航的 `友链` 会在鼠标悬停时展开三个入口：
 
@@ -196,6 +196,15 @@ music/my-song.mp3
 进入后台的“音乐”页后点“扫描 R2”，后台会列出 `music/` 下的音频文件，并优先读取 MP3 的 ID3 标题、艺术家、专辑和内嵌封面；读不到时会按文件名推断。点“导入未入库”即可批量写入 D1，封面会存到 R2 的 `covers/` 目录。播放器会显示在左侧个人简介下面，默认不会自动播放，支持拖动进度、音量调节和歌单点击切歌。
 
 Cloudflare R2 控制台上传文件夹不是同步工具；批量上传被浏览器中断、单个文件失败或文件名/网络问题时，可能只成功一部分。上传完建议刷新 R2 的 `music/` 目录确认对象数量，缺的文件直接再次拖入这个目录即可。
+
+左侧侧边栏的“访客统计”来自 Worker + D1，不依赖 GitHub 重新构建。浏览器进入页面时会调用 `POST /api/stats/visit` 记录一次访问，停留时每分钟调用 `POST /api/stats/heartbeat` 更新实时在线人数，不会重复增加 PV。统计卡片展示：
+
+- 总访问、今日访问、总访客。
+- 实时在线访客数，按最近 5 分钟有心跳的浏览器计算。
+- 本页访问、本页今日、本页访客、本页今日访客。
+- 近 7 日 PV 趋势。
+
+访客识别使用本地浏览器随机 ID 加 Worker 里的 D1 随机盐做 SHA-256，只存 hash，不保存原始 IP。
 
 ## 8. Cloudflare Workers 发布
 
@@ -226,7 +235,7 @@ Root directory: /
 https://你的域名/api/setup/init-db?token=你的ADMIN_TOKEN
 ```
 
-如果 Worker 里已经设置了 `ADMIN_TOKEN`，这里的 token 必须和 `ADMIN_TOKEN` 一致。如果没有设置 `ADMIN_TOKEN`，第一次初始化会把 URL 里的 token 存进 D1，之后后台登录就用这个 token。看到 `ok: true` 就表示 `friend_links`、`music_tracks` 和后台设置表已经建好。这个接口是幂等的，重复访问不会清空已有数据。
+如果 Worker 里已经设置了 `ADMIN_TOKEN`，这里的 token 必须和 `ADMIN_TOKEN` 一致。如果没有设置 `ADMIN_TOKEN`，第一次初始化会把 URL 里的 token 存进 D1，之后后台登录就用这个 token。看到 `ok: true` 就表示友链、音乐、访客统计和后台设置表已经建好。这个接口是幂等的，重复访问不会清空已有数据。
 
 如果在本地命令行部署，也可以运行：
 
@@ -256,7 +265,7 @@ git push
 
 如果你配置了 Git 自动部署，推送后 Cloudflare 会自动重新部署。
 
-友链和音乐通过 D1/R2 实时生效，不需要为了审核友链或改歌单重新构建博客。
+友链、音乐和访客统计通过 D1/R2 实时生效，不需要为了审核友链、改歌单或更新统计重新构建博客。
 
 ## 10. 学习顺序
 

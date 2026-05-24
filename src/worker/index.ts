@@ -39,10 +39,68 @@ type MusicObjectInfo = MusicMetadata & {
 const FRIEND_STATUSES = new Set(["pending", "approved", "rejected"]);
 const MAX_AVATAR_SIZE = 3 * 1024 * 1024;
 const ADMIN_TOKEN_SETTING_KEY = "admin_token_sha256";
+const STATS_SALT_SETTING_KEY = "stats_salt";
+const STATS_ACTIVE_WINDOW_MS = 5 * 60 * 1000;
+const STATS_TIMEZONE_OFFSET_MINUTES = 8 * 60;
 const MUSIC_PREFIX = "music/";
 const MUSIC_OBJECT_SCAN_LIMIT = 200;
 const MUSIC_METADATA_READ_BYTES = 1024 * 1024;
 const AUDIO_EXTENSIONS = new Set(["mp3", "m4a", "aac", "flac", "wav", "ogg", "opus", "webm"]);
+const STATS_INIT_STATEMENTS = [
+	`CREATE TABLE IF NOT EXISTS app_settings (
+		key TEXT PRIMARY KEY,
+		value TEXT NOT NULL,
+		updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+	)`,
+	`CREATE TABLE IF NOT EXISTS stats_visitors (
+		visitor_hash TEXT PRIMARY KEY,
+		first_seen TEXT NOT NULL,
+		last_seen TEXT NOT NULL
+	)`,
+	`CREATE TABLE IF NOT EXISTS stats_page_visitors (
+		path TEXT NOT NULL,
+		visitor_hash TEXT NOT NULL,
+		first_seen TEXT NOT NULL,
+		last_seen TEXT NOT NULL,
+		PRIMARY KEY (path, visitor_hash)
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_stats_page_visitors_path
+	ON stats_page_visitors (path)`,
+	`CREATE TABLE IF NOT EXISTS stats_site_daily (
+		day TEXT PRIMARY KEY,
+		pv INTEGER NOT NULL DEFAULT 0,
+		uv INTEGER NOT NULL DEFAULT 0
+	)`,
+	`CREATE TABLE IF NOT EXISTS stats_page_daily (
+		path TEXT NOT NULL,
+		day TEXT NOT NULL,
+		pv INTEGER NOT NULL DEFAULT 0,
+		uv INTEGER NOT NULL DEFAULT 0,
+		PRIMARY KEY (path, day)
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_stats_page_daily_day
+	ON stats_page_daily (day)`,
+	`CREATE TABLE IF NOT EXISTS stats_daily_visitors (
+		day TEXT NOT NULL,
+		visitor_hash TEXT NOT NULL,
+		first_seen TEXT NOT NULL,
+		PRIMARY KEY (day, visitor_hash)
+	)`,
+	`CREATE TABLE IF NOT EXISTS stats_page_daily_visitors (
+		path TEXT NOT NULL,
+		day TEXT NOT NULL,
+		visitor_hash TEXT NOT NULL,
+		first_seen TEXT NOT NULL,
+		PRIMARY KEY (path, day, visitor_hash)
+	)`,
+	`CREATE TABLE IF NOT EXISTS stats_active_visitors (
+		visitor_hash TEXT PRIMARY KEY,
+		path TEXT NOT NULL,
+		last_seen TEXT NOT NULL
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_stats_active_visitors_last_seen
+	ON stats_active_visitors (last_seen)`,
+];
 const INIT_DB_STATEMENTS = [
 	`CREATE TABLE IF NOT EXISTS friend_links (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -93,7 +151,10 @@ const INIT_DB_STATEMENTS = [
 		value TEXT NOT NULL,
 		updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 	)`,
+	...STATS_INIT_STATEMENTS,
 ];
+let statsSchemaReady = false;
+let statsSaltCache: string | null = null;
 
 export default {
 	async fetch(request: Request, env: Env): Promise<Response> {
@@ -140,6 +201,18 @@ async function handleApi(
 		return getPublicMusicTracks(env);
 	}
 
+	if (pathname === "/api/stats/summary" && request.method === "GET") {
+		return getStatsSummaryResponse(env, requestUrl);
+	}
+
+	if (pathname === "/api/stats/visit" && request.method === "POST") {
+		return recordStatsVisit(request, env, false);
+	}
+
+	if (pathname === "/api/stats/heartbeat" && request.method === "POST") {
+		return recordStatsVisit(request, env, true);
+	}
+
 	if (pathname.startsWith("/api/admin/")) {
 		const auth = await requireAdmin(request, env);
 		if (auth) return auth;
@@ -168,6 +241,7 @@ async function initializeDatabase(
 	);
 	const tokenResult = await setupAdminToken(request, env, requestUrl);
 	if (tokenResult instanceof Response) return tokenResult;
+	await ensureStatsSalt(env);
 
 	return json({
 		ok: true,
@@ -242,6 +316,168 @@ async function getPublicMusicTracks(env: Env): Promise<Response> {
 	});
 
 	return json({ tracks });
+}
+
+async function getStatsSummaryResponse(env: Env, requestUrl: URL): Promise<Response> {
+	const readyError = await ensureStatsReady(env);
+	if (readyError) return readyError;
+
+	const path = normalizeStatsPath(requestUrl.searchParams.get("path") ?? "/");
+	return json(await getStatsSummary(env, path));
+}
+
+async function recordStatsVisit(
+	request: Request,
+	env: Env,
+	heartbeatOnly: boolean,
+): Promise<Response> {
+	const readyError = await ensureStatsReady(env);
+	if (readyError) return readyError;
+
+	const body = await readJson(request);
+	const path = normalizeStatsPath(readString(body.path, 400) || "/");
+	const visitorHash = await getStatsVisitorHash(request, env, readString(body.visitorId, 160));
+	const now = new Date().toISOString();
+	const day = getStatsDay();
+
+	if (!isLikelyBot(request)) {
+		await env.DB.prepare(
+			`INSERT INTO stats_active_visitors (visitor_hash, path, last_seen)
+			VALUES (?, ?, ?)
+			ON CONFLICT(visitor_hash) DO UPDATE SET
+				path = excluded.path,
+				last_seen = excluded.last_seen`,
+		)
+			.bind(visitorHash, path, now)
+			.run();
+
+		if (!heartbeatOnly) {
+			await env.DB.prepare(
+				`INSERT INTO stats_visitors (visitor_hash, first_seen, last_seen)
+				VALUES (?, ?, ?)
+				ON CONFLICT(visitor_hash) DO UPDATE SET last_seen = excluded.last_seen`,
+			)
+				.bind(visitorHash, now, now)
+				.run();
+
+			await env.DB.prepare(
+				`INSERT INTO stats_page_visitors (path, visitor_hash, first_seen, last_seen)
+				VALUES (?, ?, ?, ?)
+				ON CONFLICT(path, visitor_hash) DO UPDATE SET last_seen = excluded.last_seen`,
+			)
+				.bind(path, visitorHash, now, now)
+				.run();
+
+			await env.DB.prepare(
+				`INSERT OR IGNORE INTO stats_daily_visitors (day, visitor_hash, first_seen)
+				VALUES (?, ?, ?)`,
+			)
+				.bind(day, visitorHash, now)
+				.run();
+			await env.DB.prepare(
+				`INSERT OR IGNORE INTO stats_page_daily_visitors (path, day, visitor_hash, first_seen)
+				VALUES (?, ?, ?, ?)`,
+			)
+				.bind(path, day, visitorHash, now)
+				.run();
+
+			await env.DB.prepare(
+				`INSERT INTO stats_site_daily (day, pv, uv)
+				VALUES (?, 1, (SELECT COUNT(*) FROM stats_daily_visitors WHERE day = ?))
+				ON CONFLICT(day) DO UPDATE SET
+					pv = pv + 1,
+					uv = (SELECT COUNT(*) FROM stats_daily_visitors WHERE day = ?)`,
+			)
+				.bind(day, day, day)
+				.run();
+
+			await env.DB.prepare(
+				`INSERT INTO stats_page_daily (path, day, pv, uv)
+				VALUES (?, ?, 1, (SELECT COUNT(*) FROM stats_page_daily_visitors WHERE path = ? AND day = ?))
+				ON CONFLICT(path, day) DO UPDATE SET
+					pv = pv + 1,
+					uv = (SELECT COUNT(*) FROM stats_page_daily_visitors WHERE path = ? AND day = ?)`,
+			)
+				.bind(path, day, path, day, path, day)
+				.run();
+		}
+	}
+
+	return json(await getStatsSummary(env, path));
+}
+
+async function getStatsSummary(env: Env, path: string): Promise<JsonRecord> {
+	const day = getStatsDay();
+	const cutoff = new Date(Date.now() - STATS_ACTIVE_WINDOW_MS).toISOString();
+	await cleanupInactiveVisitors(env, cutoff);
+
+	const [
+		siteTotals,
+		siteToday,
+		siteVisitors,
+		activeVisitors,
+		pageTotals,
+		pageToday,
+		pageVisitors,
+	] = await Promise.all([
+		env.DB.prepare("SELECT COALESCE(SUM(pv), 0) AS totalPv FROM stats_site_daily").first<{ totalPv: number }>(),
+		env.DB.prepare("SELECT COALESCE(pv, 0) AS pv, COALESCE(uv, 0) AS uv FROM stats_site_daily WHERE day = ?")
+			.bind(day)
+			.first<{ pv: number; uv: number }>(),
+		env.DB.prepare("SELECT COUNT(*) AS totalUv FROM stats_visitors").first<{ totalUv: number }>(),
+		env.DB.prepare("SELECT COUNT(*) AS count FROM stats_active_visitors WHERE last_seen >= ?")
+			.bind(cutoff)
+			.first<{ count: number }>(),
+		env.DB.prepare("SELECT COALESCE(SUM(pv), 0) AS totalPv FROM stats_page_daily WHERE path = ?")
+			.bind(path)
+			.first<{ totalPv: number }>(),
+		env.DB.prepare("SELECT COALESCE(pv, 0) AS pv, COALESCE(uv, 0) AS uv FROM stats_page_daily WHERE path = ? AND day = ?")
+			.bind(path, day)
+			.first<{ pv: number; uv: number }>(),
+		env.DB.prepare("SELECT COUNT(*) AS totalUv FROM stats_page_visitors WHERE path = ?")
+			.bind(path)
+			.first<{ totalUv: number }>(),
+	]);
+
+	const trendDays = recentStatsDays(7);
+	const trendStart = trendDays[0] ?? day;
+	const trendResult = await env.DB.prepare(
+		`SELECT day, pv, uv
+		FROM stats_site_daily
+		WHERE day >= ?
+		ORDER BY day ASC`,
+	)
+		.bind(trendStart)
+		.all<{ day: string; pv: number; uv: number }>();
+	const trendByDay = new Map(
+		(trendResult.results ?? []).map((row) => [row.day, row]),
+	);
+
+	return {
+		site: {
+			totalPv: Number(siteTotals?.totalPv ?? 0),
+			todayPv: Number(siteToday?.pv ?? 0),
+			todayUv: Number(siteToday?.uv ?? 0),
+			totalUv: Number(siteVisitors?.totalUv ?? 0),
+			realtimeVisitors: Number(activeVisitors?.count ?? 0),
+		},
+		page: {
+			path,
+			totalPv: Number(pageTotals?.totalPv ?? 0),
+			todayPv: Number(pageToday?.pv ?? 0),
+			todayUv: Number(pageToday?.uv ?? 0),
+			totalUv: Number(pageVisitors?.totalUv ?? 0),
+		},
+		trend: trendDays.map((trendDay) => {
+			const row = trendByDay.get(trendDay);
+			return {
+				day: trendDay,
+				pv: Number(row?.pv ?? 0),
+				uv: Number(row?.uv ?? 0),
+			};
+		}),
+		windowSeconds: Math.round(STATS_ACTIVE_WINDOW_MS / 1000),
+	};
 }
 
 async function handleAdminApi(
@@ -1024,6 +1260,118 @@ function parseRange(rangeHeader: string, size: number): RangeResult {
 
 	end = Math.min(end, size - 1);
 	return { ok: true, start, end, length: end - start + 1 };
+}
+
+async function ensureStatsReady(env: Env): Promise<Response | null> {
+	if (!env.DB) {
+		return json({ error: "Missing D1 binding. Bind a D1 database as DB first." }, 503);
+	}
+
+	if (!statsSchemaReady) {
+		await env.DB.batch(
+			STATS_INIT_STATEMENTS.map((statement) => env.DB.prepare(statement)),
+		);
+		statsSchemaReady = true;
+	}
+
+	await ensureStatsSalt(env);
+	return null;
+}
+
+async function ensureStatsSalt(env: Env): Promise<string> {
+	if (statsSaltCache) return statsSaltCache;
+
+	const existing = await env.DB.prepare(
+		"SELECT value FROM app_settings WHERE key = ?",
+	)
+		.bind(STATS_SALT_SETTING_KEY)
+		.first<{ value: string }>();
+
+	if (existing?.value) {
+		statsSaltCache = existing.value;
+		return existing.value;
+	}
+
+	const salt = crypto.randomUUID();
+	await env.DB.prepare(
+		`INSERT INTO app_settings (key, value, updated_at)
+		VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+		ON CONFLICT(key) DO NOTHING`,
+	)
+		.bind(STATS_SALT_SETTING_KEY, salt)
+		.run();
+
+	const saved = await env.DB.prepare(
+		"SELECT value FROM app_settings WHERE key = ?",
+	)
+		.bind(STATS_SALT_SETTING_KEY)
+		.first<{ value: string }>();
+
+	statsSaltCache = saved?.value ?? salt;
+	return statsSaltCache;
+}
+
+async function getStatsVisitorHash(
+	request: Request,
+	env: Env,
+	clientVisitorId: string,
+): Promise<string> {
+	const salt = await ensureStatsSalt(env);
+	const userAgent = request.headers.get("user-agent") ?? "";
+	const ip =
+		request.headers.get("cf-connecting-ip") ??
+		request.headers.get("x-real-ip") ??
+		request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+		"";
+	const source = clientVisitorId
+		? `client:${clientVisitorId}:${userAgent}`
+		: `request:${ip}:${userAgent}`;
+	return hashToken(`${salt}:${source}`);
+}
+
+function normalizeStatsPath(value: string): string {
+	let path = value.trim();
+
+	if (!path) return "/";
+
+	try {
+		if (path.startsWith("http://") || path.startsWith("https://")) {
+			path = new URL(path).pathname;
+		}
+	} catch {
+		path = "/";
+	}
+
+	path = path.split("#")[0]?.split("?")[0] ?? "/";
+	if (!path.startsWith("/")) path = `/${path}`;
+	path = path.replace(/\/{2,}/g, "/").slice(0, 400);
+	if (path.length > 1) path = path.replace(/\/+$/, "/");
+
+	return path || "/";
+}
+
+function getStatsDay(timestamp = Date.now()): string {
+	const localTime = timestamp + STATS_TIMEZONE_OFFSET_MINUTES * 60 * 1000;
+	return new Date(localTime).toISOString().slice(0, 10);
+}
+
+function recentStatsDays(count: number): string[] {
+	const days: string[] = [];
+	for (let index = count - 1; index >= 0; index -= 1) {
+		days.push(getStatsDay(Date.now() - index * 24 * 60 * 60 * 1000));
+	}
+	return days;
+}
+
+async function cleanupInactiveVisitors(env: Env, cutoff: string): Promise<void> {
+	await env.DB.prepare("DELETE FROM stats_active_visitors WHERE last_seen < ?")
+		.bind(cutoff)
+		.run();
+}
+
+function isLikelyBot(request: Request): boolean {
+	const userAgent = request.headers.get("user-agent")?.toLowerCase() ?? "";
+	return /bot|crawler|spider|slurp|curl|wget|python|go-http-client|headless/.test(userAgent);
 }
 
 async function requireAdmin(request: Request, env: Env): Promise<Response | null> {

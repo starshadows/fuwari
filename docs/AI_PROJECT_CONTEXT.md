@@ -85,7 +85,7 @@ Local URL: http://localhost:8787
 - The character button is intentionally a no-op while only one custom character exists. Do not let it switch to the bundled Sakana characters; when adding future custom characters, extend the local custom character list first.
 - The rod color should stay aligned with the blog theme, currently using a blue/white HSL value derived from `--hue`.
 
-## Friend Links And Music
+## Friend Links, Music, And Visitor Stats
 
 - Public friend links are shown at `/friends/` and loaded from `GET /api/friends`; submissions live at `/friends/apply/`, call `POST /api/friends`, and are stored as `pending`.
 - Admin actions use `Authorization: Bearer <token>` against `/api/admin/*`. Prefer runtime `ADMIN_TOKEN`; if it is missing, the first successful setup request stores a SHA-256 token hash in D1 `app_settings`.
@@ -98,6 +98,9 @@ Local URL: http://localhost:8787
 - Admin music scan API: `GET /api/admin/music/objects`; bulk import API: `POST /api/admin/music/import` with optional `objectKeys`.
 - Public media is served by the Worker at `/media/music/<key>` and `/media/avatars/<key>`. Music responses support HTTP Range requests for seeking.
 - The sidebar music card is disabled by default in the sense that it never auto-plays; visitors must click play. It supports seeking, volume control, album art, and a compact track list for switching songs.
+- Visitor stats are implemented with Worker + D1. Public APIs are `POST /api/stats/visit`, `POST /api/stats/heartbeat`, and `GET /api/stats/summary?path=<path>`.
+- The sidebar visitor stats card records page views on first load and Swup page views, sends a heartbeat every minute, and shows total PV, today PV, total UV, realtime visitors, per-page PV/UV, and the last seven days of site PV/UV.
+- Realtime visitors are counted from `stats_active_visitors` entries seen within the last five minutes. Visitor identity uses a browser-generated local ID plus a D1 `stats_salt` hashed with SHA-256; raw IPs are not stored.
 - The article TOC now lives in the left sidebar below tags. Keep the `#toc` element present because Swup is configured to replace it.
 
 ## Content Rules
@@ -157,7 +160,7 @@ corepack pnpm d1:migrate:local
 corepack pnpm worker:dev
 ```
 
-Dashboard-only production setup is preferred: create D1/R2 resources with any names, bind D1 as `DB`, bind R2 as `MEDIA_BUCKET`, optionally set `ADMIN_TOKEN`, then visit `/api/setup/init-db?token=<token>`. Avoid committing Cloudflare resource names or UUIDs; `wrangler.jsonc` intentionally omits D1/R2 resource names and IDs.
+Dashboard-only production setup is preferred: create D1/R2 resources with any names, bind D1 as `DB`, bind R2 as `MEDIA_BUCKET`, optionally set `ADMIN_TOKEN`, then visit `/api/setup/init-db?token=<token>`. This also creates visitor stats tables and the stats salt. Avoid committing Cloudflare resource names or UUIDs; `wrangler.jsonc` intentionally omits D1/R2 resource names and IDs.
 
 ## Build Pitfalls Seen In Practice
 
