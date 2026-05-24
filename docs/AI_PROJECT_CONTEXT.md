@@ -88,6 +88,7 @@ Local URL: http://localhost:8787
 ## Friend Links, Music, And Visitor Stats
 
 - Public friend links are shown at `/friends/` and loaded from `GET /api/friends`; submissions live at `/friends/apply/`, call `POST /api/friends`, and are stored as `pending`.
+- Friend submissions require Cloudflare Turnstile. The frontend fetches `GET /api/turnstile/config`, renders the widget with `TURNSTILE_SITE_KEY`, sends `turnstileToken` in the request body, and the Worker validates it against Cloudflare Siteverify with `TURNSTILE_SECRET_KEY` before inserting a pending row. If Turnstile is missing, submissions are disabled and `POST /api/friends` returns 503.
 - Admin actions use `Authorization: Bearer <token>` against `/api/admin/*`. Prefer runtime `ADMIN_TOKEN`; if it is missing, the first successful setup request stores a SHA-256 token hash in D1 `app_settings`.
 - Approved, active friend links appear immediately without rebuilding the Astro site.
 - R2 bucket binding is `MEDIA_BUCKET`; bind it manually in Cloudflare. The bucket can have any Cloudflare-side name.
@@ -99,7 +100,7 @@ Local URL: http://localhost:8787
 - Public media is served by the Worker at `/media/music/<key>` and `/media/avatars/<key>`. Music responses support HTTP Range requests for seeking.
 - The sidebar music card is disabled by default in the sense that it never auto-plays; visitors must click play. It supports seeking, volume control, album art, and a compact track list for switching songs.
 - Visitor stats are implemented with Worker + D1. Public APIs are `POST /api/stats/visit`, `POST /api/stats/heartbeat`, and `GET /api/stats/summary?path=<path>`.
-- The sidebar visitor stats card records page views on first load and Swup page views, sends a heartbeat every minute, and shows total PV, today PV, total UV, realtime visitors, per-page PV/UV, and the last seven days of site PV/UV.
+- The sidebar visitor stats card records page views on first load and Swup page views, sends a heartbeat every minute, and keeps the UI to six metrics: current online, today visitors, today views, yesterday views, month views, and total views.
 - Realtime visitors are counted from `stats_active_visitors` entries seen within the last five minutes. Visitor identity uses a browser-generated local ID plus a D1 `stats_salt` hashed with SHA-256; raw IPs are not stored.
 - The article TOC now lives in the left sidebar below tags. Keep the `#toc` element present because Swup is configured to replace it.
 

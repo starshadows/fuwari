@@ -179,6 +179,8 @@ Cloudflare Pages 发布的就是这个目录。
 
 `/friends/` 只展示已审核的友链，`/friends/apply/` 是访客申请入口。访客提交后不会立刻展示，会进入待审核状态。
 
+友链申请启用了 Cloudflare Turnstile 人机验证。前台会先从 `/api/turnstile/config` 读取站点 key，再把验证 token 随申请一起提交；Worker 会用 Turnstile secret 调用 Cloudflare 校验，通过后才会写入 D1。没有配置 Turnstile 时，申请按钮会保持不可提交状态。
+
 `/friends/admin/` 是友链和音乐后台，可以额外用 Cloudflare Access 保护；后台 API 仍然需要 `ADMIN_TOKEN`。后台可以做这些事：
 
 - 审核、拒绝、删除友链。
@@ -217,6 +219,7 @@ Cloudflare R2 控制台上传文件夹不是同步工具；批量上传被浏览
    - D1 数据库绑定名必须填 `DB`，选择你刚创建的 D1。
    - R2 存储桶绑定名必须填 `MEDIA_BUCKET`，选择你刚创建的 R2。
 5. 可选：设置生产后台口令，Secret 名称填 `ADMIN_TOKEN`。
+6. 在 Cloudflare Turnstile 创建站点，域名填博客域名；Worker 变量填 `TURNSTILE_SITE_KEY`，Secret 填 `TURNSTILE_SECRET_KEY`。
 
 仓库里的 `wrangler.jsonc` 不保存 D1/R2 的资源名或 UUID，只声明代码需要的绑定变量名。Cloudflare 里资源叫什么都可以，只要绑定变量名对上，代码就会通过 `env.DB` 和 `env.MEDIA_BUCKET` 使用它们。
 

@@ -5,6 +5,8 @@ type Env = {
 	MEDIA_BUCKET: R2Bucket;
 	ASSETS: Fetcher;
 	ADMIN_TOKEN?: string;
+	TURNSTILE_SITE_KEY?: string;
+	TURNSTILE_SECRET_KEY?: string;
 };
 
 type JsonRecord = Record<string, unknown>;
@@ -22,6 +24,11 @@ type MusicMetadata = {
 type EmbeddedCover = {
 	mimeType: string;
 	bytes: Uint8Array;
+};
+
+type TurnstileVerifyResult = {
+	success?: boolean;
+	"error-codes"?: string[];
 };
 
 type MusicObjectInfo = MusicMetadata & {
@@ -192,6 +199,10 @@ async function handleApi(
 		return initializeDatabase(request, env, requestUrl);
 	}
 
+	if (pathname === "/api/turnstile/config" && request.method === "GET") {
+		return getTurnstileConfig(env);
+	}
+
 	if (pathname === "/api/friends") {
 		if (request.method === "GET") return getApprovedFriends(env);
 		if (request.method === "POST") return submitFriendLink(request, env);
@@ -262,6 +273,16 @@ async function getApprovedFriends(env: Env): Promise<Response> {
 	return json({ friends: result.results ?? [] });
 }
 
+function getTurnstileConfig(env: Env): Response {
+	const siteKey = env.TURNSTILE_SITE_KEY?.trim() ?? "";
+	const secretKey = env.TURNSTILE_SECRET_KEY?.trim() ?? "";
+
+	return json({
+		enabled: Boolean(siteKey && secretKey),
+		siteKey,
+	});
+}
+
 async function submitFriendLink(
 	request: Request,
 	env: Env,
@@ -271,6 +292,7 @@ async function submitFriendLink(
 	const description = readString(body.description, 120);
 	const linkUrl = readString(body.url, 400);
 	const avatarUrl = readString(body.avatarUrl, 600);
+	const turnstileToken = readString(body.turnstileToken, 2048);
 
 	if (!name || !description || !linkUrl || !avatarUrl) {
 		return json({ error: "请填写完整的名称、简介、链接和头像。" }, 400);
@@ -284,6 +306,9 @@ async function submitFriendLink(
 		return json({ error: "头像需要使用公网 http/https 地址或站内头像地址。" }, 400);
 	}
 
+	const turnstileError = await verifyTurnstile(request, env, turnstileToken);
+	if (turnstileError) return turnstileError;
+
 	await env.DB.prepare(
 		`INSERT INTO friend_links (name, description, url, avatar_url, status)
 		VALUES (?, ?, ?, ?, 'pending')`,
@@ -292,6 +317,48 @@ async function submitFriendLink(
 		.run();
 
 	return json({ ok: true, message: "申请已提交，审核通过后会自动展示。" }, 201);
+}
+
+async function verifyTurnstile(
+	request: Request,
+	env: Env,
+	token: string,
+): Promise<Response | null> {
+	const siteKey = env.TURNSTILE_SITE_KEY?.trim() ?? "";
+	const secretKey = env.TURNSTILE_SECRET_KEY?.trim() ?? "";
+
+	if (!siteKey || !secretKey) {
+		return json({ error: "人机验证尚未配置，暂时无法提交友链申请。" }, 503);
+	}
+
+	if (!token) {
+		return json({ error: "请先完成人机验证。" }, 400);
+	}
+
+	const form = new FormData();
+	form.append("secret", secretKey);
+	form.append("response", token);
+
+	const remoteIp = request.headers.get("cf-connecting-ip");
+	if (remoteIp) form.append("remoteip", remoteIp);
+
+	try {
+		const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+			method: "POST",
+			body: form,
+		});
+		const result = (await response.json()) as TurnstileVerifyResult;
+
+		if (!response.ok || !result.success) {
+			console.warn("Turnstile verification failed", result["error-codes"] ?? []);
+			return json({ error: "人机验证失败，请刷新后重试。" }, 400);
+		}
+	} catch (error) {
+		console.error("Turnstile verification request failed", error);
+		return json({ error: "人机验证暂时不可用，请稍后再试。" }, 503);
+	}
+
+	return null;
 }
 
 async function getPublicMusicTracks(env: Env): Promise<Response> {
