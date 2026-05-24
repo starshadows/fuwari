@@ -36,7 +36,19 @@ let heartbeatTimer: number | undefined;
 let lastTrackedPath = "";
 let lastTrackedAt = 0;
 
-$: maxTrendPv = Math.max(1, ...(stats?.trend ?? []).map((item) => item.pv));
+$: maxTrendValue = Math.max(1, ...(stats?.trend ?? []).flatMap((item) => [item.pv, item.uv]));
+$: statCards = stats
+	? [
+			{ label: "总访问", value: stats.site.totalPv },
+			{ label: "今日访问", value: stats.site.todayPv },
+			{ label: "总访客", value: stats.site.totalUv },
+			{ label: "实时在线", value: stats.site.realtimeVisitors },
+			{ label: "本页访问", value: stats.page.totalPv },
+			{ label: "本页今日", value: stats.page.todayPv },
+			{ label: "本页访客", value: stats.page.totalUv },
+			{ label: "今日访客", value: stats.site.todayUv },
+		]
+	: [];
 
 const numberFormatter = new Intl.NumberFormat("zh-CN", {
 	notation: "compact",
@@ -132,69 +144,49 @@ onDestroy(() => {
 </script>
 
 <div class="card-base p-4">
-	<div class="mb-3 flex items-center justify-between gap-3">
+	<div class="mb-4 flex items-center justify-between gap-3">
 		<div class="relative pl-4 text-lg font-bold text-90 before:absolute before:left-0 before:top-[5.5px] before:h-4 before:w-1 before:rounded-md before:bg-[var(--primary)]">
 			访客统计
 		</div>
-		<Icon icon="material-symbols:bar-chart-rounded" class="text-xl text-[var(--primary)]" />
+		<Icon icon="material-symbols:bar-chart-rounded" class="text-2xl text-[var(--primary)]" />
 	</div>
 
 	{#if isLoading}
-		<div class="rounded-xl bg-[var(--btn-plain-bg-hover)] px-3 py-4 text-center text-sm text-50">
+		<div class="rounded-xl bg-[var(--btn-regular-bg)] px-3 py-4 text-center text-sm font-bold text-50">
 			加载中...
 		</div>
 	{:else if error}
-		<div class="rounded-xl bg-[var(--btn-plain-bg-hover)] px-3 py-4 text-center text-sm text-50">
+		<div class="rounded-xl bg-[var(--btn-regular-bg)] px-3 py-4 text-center text-sm font-bold text-50">
 			{error}
 		</div>
 	{:else if stats}
 		<div class="stats-grid">
-			<div class="stat-cell">
-				<div class="stat-value">{formatNumber(stats.site.totalPv)}</div>
-				<div class="stat-label">总访问</div>
-			</div>
-			<div class="stat-cell">
-				<div class="stat-value">{formatNumber(stats.site.todayPv)}</div>
-				<div class="stat-label">今日访问</div>
-			</div>
-			<div class="stat-cell">
-				<div class="stat-value">{formatNumber(stats.site.totalUv)}</div>
-				<div class="stat-label">总访客</div>
-			</div>
-			<div class="stat-cell">
-				<div class="stat-value">{formatNumber(stats.site.realtimeVisitors)}</div>
-				<div class="stat-label">实时在线</div>
-			</div>
-			<div class="stat-cell">
-				<div class="stat-value">{formatNumber(stats.page.totalPv)}</div>
-				<div class="stat-label">本页访问</div>
-			</div>
-			<div class="stat-cell">
-				<div class="stat-value">{formatNumber(stats.page.todayPv)}</div>
-				<div class="stat-label">本页今日</div>
-			</div>
-			<div class="stat-cell">
-				<div class="stat-value">{formatNumber(stats.page.totalUv)}</div>
-				<div class="stat-label">本页访客</div>
-			</div>
-			<div class="stat-cell">
-				<div class="stat-value">{formatNumber(stats.page.todayUv)}</div>
-				<div class="stat-label">今日访客</div>
-			</div>
+			{#each statCards as card}
+				<div class="stat-card">
+					<div class="stat-value">{formatNumber(card.value)}</div>
+					<div class="stat-label">{card.label}</div>
+				</div>
+			{/each}
 		</div>
 
-		<div class="mt-4 rounded-xl bg-[var(--btn-plain-bg-hover)] px-3 py-3">
-			<div class="mb-2 flex items-center justify-between text-xs font-bold text-30">
+		<div class="trend-card mt-4">
+			<div class="mb-2 flex items-center justify-between text-sm font-bold text-40">
 				<span>近 7 日趋势</span>
-				<span>PV / UV</span>
+				<span>访问 / 访客</span>
 			</div>
 			<div class="trend-bars" aria-label="近 7 日访问趋势">
 				{#each stats.trend as item}
-					<div class="trend-item" title={`${item.day}: ${item.pv} PV / ${item.uv} UV`}>
-						<div
-							class="trend-bar"
-							style={`height: ${Math.max(10, (item.pv / maxTrendPv) * 100)}%`}
-						></div>
+					<div class="trend-item" title={`${item.day}: ${item.pv} 访问 / ${item.uv} 访客`}>
+						<div class="trend-stack">
+							<div
+								class="trend-bar trend-bar-uv"
+								style={`height: ${Math.max(8, (item.uv / maxTrendValue) * 100)}%`}
+							></div>
+							<div
+								class="trend-bar trend-bar-pv"
+								style={`height: ${Math.max(10, (item.pv / maxTrendValue) * 100)}%`}
+							></div>
+						</div>
 						<div class="trend-day">{item.day.slice(5).replace("-", "/")}</div>
 					</div>
 				{/each}
@@ -207,37 +199,45 @@ onDestroy(() => {
 	.stats-grid {
 		display: grid;
 		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 0.5rem;
+		gap: 0.65rem;
 	}
 
-	.stat-cell {
+	.stat-card {
 		min-width: 0;
-		border-radius: 0.875rem;
-		background: var(--btn-plain-bg-hover);
-		padding: 0.7rem 0.75rem;
+		min-height: 5.25rem;
+		border-radius: 1rem;
+		background: var(--btn-regular-bg);
+		padding: 0.85rem 0.95rem;
 	}
 
 	.stat-value {
 		color: var(--primary);
-		font-size: 1.15rem;
-		font-weight: 800;
-		line-height: 1.2;
+		font-size: 1.65rem;
+		font-weight: 900;
+		line-height: 1;
 		overflow-wrap: anywhere;
 	}
 
 	.stat-label {
-		margin-top: 0.25rem;
-		color: rgb(0 0 0 / 0.45);
-		font-size: 0.75rem;
-		font-weight: 700;
+		margin-top: 0.85rem;
+		color: rgb(0 0 0 / 0.5);
+		font-size: 0.95rem;
+		font-weight: 800;
+		line-height: 1.2;
+	}
+
+	.trend-card {
+		border-radius: 1rem;
+		background: var(--btn-regular-bg);
+		padding: 0.85rem 0.95rem;
 	}
 
 	.trend-bars {
 		display: grid;
 		grid-template-columns: repeat(7, minmax(0, 1fr));
 		align-items: end;
-		gap: 0.35rem;
-		height: 4.25rem;
+		gap: 0.42rem;
+		height: 5.15rem;
 	}
 
 	.trend-item {
@@ -246,29 +246,45 @@ onDestroy(() => {
 		height: 100%;
 		flex-direction: column;
 		justify-content: end;
-		gap: 0.3rem;
+		gap: 0.35rem;
+	}
+
+	.trend-stack {
+		position: relative;
+		height: 3.8rem;
 	}
 
 	.trend-bar {
-		width: 100%;
+		position: absolute;
+		bottom: 0;
+		width: calc(50% - 0.05rem);
 		min-height: 0.45rem;
 		border-radius: 999px 999px 0.35rem 0.35rem;
+	}
+
+	.trend-bar-pv {
+		left: 0;
 		background: var(--primary);
 		opacity: 0.72;
 	}
 
+	.trend-bar-uv {
+		right: 0;
+		background: var(--primary);
+		opacity: 0.38;
+	}
+
 	.trend-day {
 		overflow: hidden;
-		color: rgb(0 0 0 / 0.36);
-		font-size: 0.62rem;
-		font-weight: 700;
+		color: rgb(0 0 0 / 0.42);
+		font-size: 0.66rem;
+		font-weight: 800;
 		text-align: center;
-		text-overflow: clip;
 		white-space: nowrap;
 	}
 
 	:global(.dark) .stat-label,
 	:global(.dark) .trend-day {
-		color: rgb(255 255 255 / 0.42);
+		color: rgb(255 255 255 / 0.46);
 	}
 </style>
