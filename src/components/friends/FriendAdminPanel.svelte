@@ -294,6 +294,31 @@ const deleteTrack = async (track: Track) => {
 	}
 };
 
+const normalizeTrackSort = async () => {
+	if (tracks.length === 0) {
+		setMessage("没有需要整理的歌曲。");
+		return;
+	}
+
+	const orderedTracks = [...tracks].sort((left, right) => {
+		if (left.sortOrder !== right.sortOrder) return left.sortOrder - right.sortOrder;
+		return left.id - right.id;
+	});
+
+	try {
+		for (const [index, track] of orderedTracks.entries()) {
+			await adminFetch(`/api/admin/music/${track.id}`, {
+				method: "PATCH",
+				body: JSON.stringify({ sortOrder: index + 1 }),
+			});
+		}
+		await loadMusic();
+		setMessage("排序已整理为 1、2、3...");
+	} catch (err) {
+		setError(err instanceof Error ? err.message : "整理排序失败。");
+	}
+};
+
 onMount(async () => {
 	tokenInput = sessionStorage.getItem(tokenKey) ?? "";
 	if (tokenInput) {
@@ -502,6 +527,13 @@ onMount(async () => {
                     添加
                 </button>
             </form>
+
+            <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <div class="font-bold text-75">已入库音乐</div>
+                <button type="button" class="btn-plain h-10 rounded-xl px-4 font-bold" on:click={normalizeTrackSort}>
+                    整理排序
+                </button>
+            </div>
 
             <div class="flex flex-col gap-3">
                 {#each tracks as track}

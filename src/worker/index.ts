@@ -455,7 +455,7 @@ async function importR2MusicObjects(
 	const maxSortRow = await env.DB.prepare(
 		"SELECT COALESCE(MAX(sort_order), 0) AS maxSort FROM music_tracks",
 	).first<{ maxSort: number }>();
-	let sortOrder = readInteger(body.sortOrderStart, Number(maxSortRow?.maxSort ?? 0) + 10);
+	let sortOrder = readInteger(body.sortOrderStart, Number(maxSortRow?.maxSort ?? 0) + 1);
 	const imported: Record<string, unknown>[] = [];
 
 	for (const object of candidates) {
@@ -488,7 +488,7 @@ async function importR2MusicObjects(
 			isActive,
 			sortOrder,
 		});
-		sortOrder += 10;
+		sortOrder += 1;
 	}
 
 	return json({ ok: true, imported }, 201);

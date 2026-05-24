@@ -221,32 +221,66 @@ onDestroy(() => {
                     on:input={changeVolume}
                 />
                 <button
-                    class={`btn-plain h-9 w-9 rounded-lg active:scale-90 ${isPlaylistOpen ? "!bg-[var(--btn-regular-bg)]" : ""}`}
+                    class={`btn-plain h-11 w-12 rounded-xl active:scale-90 ${isPlaylistOpen ? "!bg-[var(--btn-regular-bg)]" : ""}`}
                     aria-label="歌曲列表"
                     aria-expanded={isPlaylistOpen}
                     on:click={() => (isPlaylistOpen = !isPlaylistOpen)}
                 >
-                    <Icon icon="material-symbols:queue-music-rounded" class="text-xl" />
+                    <Icon icon="material-symbols:queue-music-rounded" class="text-2xl" />
                 </button>
             </div>
         </div>
-
-        {#if isPlaylistOpen}
-            <div class="playlist mt-3 flex flex-col gap-1">
-                {#each tracks as track, index}
-                    <button
-                        type="button"
-                        class={`playlist-item ${index === activeIndex ? "playlist-item-active" : ""}`}
-                        on:click={() => switchTrackTo(index, true)}
-                    >
-                        <span class="min-w-0 flex-1 truncate text-left">{track.title}</span>
-                        <span class="shrink-0 truncate text-right text-xs text-30">{track.artist || "Starshadow"}</span>
-                    </button>
-                {/each}
-            </div>
-        {/if}
     {/if}
 </div>
+
+{#if isPlaylistOpen && tracks.length > 0}
+    <button
+        type="button"
+        class="playlist-backdrop"
+        aria-label="关闭歌曲列表"
+        on:click={() => (isPlaylistOpen = false)}
+    ></button>
+    <div class="playlist-panel" role="dialog" aria-modal="true" aria-label="歌曲列表">
+        <div class="mb-3 flex items-center justify-between gap-3">
+            <div class="relative pl-4 text-lg font-bold text-90 before:absolute before:left-0 before:top-[5.5px] before:h-4 before:w-1 before:rounded-md before:bg-[var(--primary)]">
+                歌曲列表
+            </div>
+            <div class="text-xs font-bold text-30">{tracks.length} 首</div>
+        </div>
+
+        <div class="playlist-list">
+            {#each tracks as track, index}
+                <button
+                    type="button"
+                    class={`playlist-item ${index === activeIndex ? "playlist-item-active" : ""}`}
+                    on:click={() => {
+                        switchTrackTo(index, true);
+                        isPlaylistOpen = false;
+                    }}
+                >
+                    <div class="playlist-cover">
+                        {#if track.coverUrl && !hiddenCoverUrls.has(track.coverUrl)}
+                            <img
+                                src={track.coverUrl}
+                                alt={track.title}
+                                class="h-full w-full object-cover"
+                                on:error={() => hideCover(track.coverUrl)}
+                            />
+                        {:else}
+                            <Icon icon="material-symbols:music-note-rounded" class="text-2xl" />
+                        {/if}
+                    </div>
+                    <div class="min-w-0 flex-1 text-left">
+                        <div class="playlist-title">{track.title}</div>
+                        <div class="playlist-meta">
+                            {track.artist || "Starshadow"}{track.album ? ` · ${track.album}` : ""}
+                        </div>
+                    </div>
+                </button>
+            {/each}
+        </div>
+    </div>
+{/if}
 
 <style>
     .music-range {
@@ -277,21 +311,74 @@ onDestroy(() => {
         background: var(--primary);
     }
 
-    .playlist {
-        max-height: 12rem;
+    .playlist-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 70;
+        background: rgb(0 0 0 / 0.18);
+    }
+
+    .playlist-panel {
+        position: fixed;
+        left: 50%;
+        top: 50%;
+        z-index: 71;
+        width: min(92vw, 34rem);
+        max-height: min(74vh, 36rem);
+        transform: translate(-50%, -50%);
+        overflow: hidden;
+        border-radius: 1.25rem;
+        background: var(--card-bg);
+        box-shadow: 0 1.5rem 4rem rgb(0 0 0 / 0.18);
+        padding: 1rem;
+    }
+
+    .playlist-list {
+        display: flex;
+        max-height: calc(min(74vh, 36rem) - 4.5rem);
+        flex-direction: column;
+        gap: 0.5rem;
         overflow: auto;
+        padding-right: 0.2rem;
     }
 
     .playlist-item {
         display: flex;
         align-items: center;
-        gap: 0.5rem;
+        gap: 0.75rem;
         width: 100%;
-        min-height: 2.35rem;
-        border-radius: 0.625rem;
-        padding: 0 0.75rem;
+        min-height: 4.6rem;
+        border-radius: 0.875rem;
+        padding: 0.6rem 0.75rem;
         color: rgb(0 0 0 / 0.75);
         transition: background-color 150ms ease, color 150ms ease;
+    }
+
+    .playlist-cover {
+        display: flex;
+        width: 3.25rem;
+        height: 3.25rem;
+        flex-shrink: 0;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        border-radius: 0.75rem;
+        background: var(--btn-regular-bg);
+        color: var(--btn-content);
+    }
+
+    .playlist-title {
+        font-weight: 700;
+        line-height: 1.35;
+        overflow-wrap: anywhere;
+    }
+
+    .playlist-meta {
+        margin-top: 0.25rem;
+        color: rgb(0 0 0 / 0.42);
+        font-size: 0.875rem;
+        line-height: 1.35;
+        overflow-wrap: anywhere;
     }
 
     .playlist-item:hover,
@@ -302,5 +389,13 @@ onDestroy(() => {
 
     :global(.dark) .playlist-item {
         color: rgb(255 255 255 / 0.75);
+    }
+
+    :global(.dark) .playlist-backdrop {
+        background: rgb(0 0 0 / 0.36);
+    }
+
+    :global(.dark) .playlist-meta {
+        color: rgb(255 255 255 / 0.42);
     }
 </style>
