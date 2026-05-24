@@ -114,6 +114,17 @@ const hideCover = (url: string) => {
 	hiddenCoverUrls = new Set([...hiddenCoverUrls, url]);
 };
 
+const portal = (node: HTMLElement) => {
+	if (typeof document === "undefined") return {};
+	document.body.appendChild(node);
+
+	return {
+		destroy() {
+			node.remove();
+		},
+	};
+};
+
 onMount(() => {
 	audio = new Audio();
 	audio.preload = "metadata";
@@ -234,50 +245,52 @@ onDestroy(() => {
 </div>
 
 {#if isPlaylistOpen && tracks.length > 0}
-    <button
-        type="button"
-        class="playlist-backdrop"
-        aria-label="关闭歌曲列表"
-        on:click={() => (isPlaylistOpen = false)}
-    ></button>
-    <div class="playlist-panel" role="dialog" aria-modal="true" aria-label="歌曲列表">
-        <div class="mb-3 flex items-center justify-between gap-3">
-            <div class="relative pl-4 text-lg font-bold text-90 before:absolute before:left-0 before:top-[5.5px] before:h-4 before:w-1 before:rounded-md before:bg-[var(--primary)]">
-                歌曲列表
+    <div class="playlist-portal" use:portal>
+        <button
+            type="button"
+            class="playlist-backdrop"
+            aria-label="关闭歌曲列表"
+            on:click={() => (isPlaylistOpen = false)}
+        ></button>
+        <div class="playlist-panel" role="dialog" aria-modal="true" aria-label="歌曲列表">
+            <div class="mb-3 flex items-center justify-between gap-3">
+                <div class="relative pl-4 text-lg font-bold text-90 before:absolute before:left-0 before:top-[5.5px] before:h-4 before:w-1 before:rounded-md before:bg-[var(--primary)]">
+                    歌曲列表
+                </div>
+                <div class="text-xs font-bold text-30">{tracks.length} 首</div>
             </div>
-            <div class="text-xs font-bold text-30">{tracks.length} 首</div>
-        </div>
 
-        <div class="playlist-list">
-            {#each tracks as track, index}
-                <button
-                    type="button"
-                    class={`playlist-item ${index === activeIndex ? "playlist-item-active" : ""}`}
-                    on:click={() => {
-                        switchTrackTo(index, true);
-                        isPlaylistOpen = false;
-                    }}
-                >
-                    <div class="playlist-cover">
-                        {#if track.coverUrl && !hiddenCoverUrls.has(track.coverUrl)}
-                            <img
-                                src={track.coverUrl}
-                                alt={track.title}
-                                class="h-full w-full object-cover"
-                                on:error={() => hideCover(track.coverUrl)}
-                            />
-                        {:else}
-                            <Icon icon="material-symbols:music-note-rounded" class="text-2xl" />
-                        {/if}
-                    </div>
-                    <div class="min-w-0 flex-1 text-left">
-                        <div class="playlist-title">{track.title}</div>
-                        <div class="playlist-meta">
-                            {track.artist || "Starshadow"}{track.album ? ` · ${track.album}` : ""}
+            <div class="playlist-list">
+                {#each tracks as track, index}
+                    <button
+                        type="button"
+                        class={`playlist-item ${index === activeIndex ? "playlist-item-active" : ""}`}
+                        on:click={() => {
+                            switchTrackTo(index, true);
+                            isPlaylistOpen = false;
+                        }}
+                    >
+                        <div class="playlist-cover">
+                            {#if track.coverUrl && !hiddenCoverUrls.has(track.coverUrl)}
+                                <img
+                                    src={track.coverUrl}
+                                    alt={track.title}
+                                    class="h-full w-full object-cover"
+                                    on:error={() => hideCover(track.coverUrl)}
+                                />
+                            {:else}
+                                <Icon icon="material-symbols:music-note-rounded" class="text-2xl" />
+                            {/if}
                         </div>
-                    </div>
-                </button>
-            {/each}
+                        <div class="min-w-0 flex-1 text-left">
+                            <div class="playlist-title">{track.title}</div>
+                            <div class="playlist-meta">
+                                {track.artist || "Starshadow"}{track.album ? ` · ${track.album}` : ""}
+                            </div>
+                        </div>
+                    </button>
+                {/each}
+            </div>
         </div>
     </div>
 {/if}
@@ -311,18 +324,28 @@ onDestroy(() => {
         background: var(--primary);
     }
 
-    .playlist-backdrop {
+    .playlist-portal {
         position: fixed;
         inset: 0;
-        z-index: 70;
+        z-index: 2147483000;
+    }
+
+    .playlist-backdrop {
+        position: absolute;
+        inset: 0;
+        z-index: 0;
+        width: 100%;
+        height: 100%;
+        border: 0;
+        padding: 0;
         background: rgb(0 0 0 / 0.18);
     }
 
     .playlist-panel {
-        position: fixed;
+        position: absolute;
         left: 50%;
         top: 50%;
-        z-index: 71;
+        z-index: 1;
         width: min(92vw, 34rem);
         max-height: min(74vh, 36rem);
         transform: translate(-50%, -50%);
