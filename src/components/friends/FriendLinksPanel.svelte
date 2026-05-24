@@ -14,6 +14,7 @@ let isLoading = true;
 let isSubmitting = false;
 let message = "";
 let error = "";
+let brokenAvatarUrls = new Set<string>();
 export let showList = true;
 export let showForm = true;
 
@@ -63,11 +64,8 @@ const submit = async () => {
 	}
 };
 
-const hideBrokenImage = (event: Event) => {
-	const image = event.currentTarget;
-	if (image instanceof HTMLImageElement) {
-		image.classList.add("hidden");
-	}
+const markBrokenAvatar = (url: string) => {
+	brokenAvatarUrls = new Set([...brokenAvatarUrls, url]);
 };
 
 onMount(loadFriends);
@@ -95,13 +93,16 @@ onMount(loadFriends);
                     class="group flex min-h-24 gap-4 rounded-xl bg-[var(--btn-plain-bg-hover)] p-4 transition hover:bg-[var(--btn-regular-bg-hover)] active:scale-[0.99]"
                 >
                     <div class="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[var(--btn-regular-bg)] text-xl font-bold text-[var(--btn-content)]">
-                        <img
-                            src={friend.avatarUrl}
-                            alt={friend.name}
-                            class="h-full w-full object-cover"
-                            on:error={hideBrokenImage}
-                        />
-                        <span>{friend.name.slice(0, 1)}</span>
+                        {#if friend.avatarUrl && !brokenAvatarUrls.has(friend.avatarUrl)}
+                            <img
+                                src={friend.avatarUrl}
+                                alt={friend.name}
+                                class="h-full w-full shrink-0 object-cover"
+                                on:error={() => markBrokenAvatar(friend.avatarUrl)}
+                            />
+                        {:else}
+                            <span>{friend.name.slice(0, 1)}</span>
+                        {/if}
                     </div>
                     <div class="min-w-0">
                         <div class="mb-1 truncate font-bold text-90 group-hover:text-[var(--primary)]">
