@@ -408,12 +408,16 @@ async function recordStatsVisit(
 
 async function getStatsSummary(env: Env, path: string): Promise<JsonRecord> {
 	const day = getStatsDay();
+	const yesterday = getStatsDay(Date.now() - 24 * 60 * 60 * 1000);
+	const monthStart = `${day.slice(0, 7)}-01`;
 	const cutoff = new Date(Date.now() - STATS_ACTIVE_WINDOW_MS).toISOString();
 	await cleanupInactiveVisitors(env, cutoff);
 
 	const [
 		siteTotals,
 		siteToday,
+		siteYesterday,
+		siteMonth,
 		siteVisitors,
 		activeVisitors,
 		pageTotals,
@@ -424,6 +428,12 @@ async function getStatsSummary(env: Env, path: string): Promise<JsonRecord> {
 		env.DB.prepare("SELECT COALESCE(pv, 0) AS pv, COALESCE(uv, 0) AS uv FROM stats_site_daily WHERE day = ?")
 			.bind(day)
 			.first<{ pv: number; uv: number }>(),
+		env.DB.prepare("SELECT COALESCE(pv, 0) AS pv FROM stats_site_daily WHERE day = ?")
+			.bind(yesterday)
+			.first<{ pv: number }>(),
+		env.DB.prepare("SELECT COALESCE(SUM(pv), 0) AS pv FROM stats_site_daily WHERE day >= ? AND day <= ?")
+			.bind(monthStart, day)
+			.first<{ pv: number }>(),
 		env.DB.prepare("SELECT COUNT(*) AS totalUv FROM stats_visitors").first<{ totalUv: number }>(),
 		env.DB.prepare("SELECT COUNT(*) AS count FROM stats_active_visitors WHERE last_seen >= ?")
 			.bind(cutoff)
@@ -458,6 +468,8 @@ async function getStatsSummary(env: Env, path: string): Promise<JsonRecord> {
 			totalPv: Number(siteTotals?.totalPv ?? 0),
 			todayPv: Number(siteToday?.pv ?? 0),
 			todayUv: Number(siteToday?.uv ?? 0),
+			yesterdayPv: Number(siteYesterday?.pv ?? 0),
+			monthPv: Number(siteMonth?.pv ?? 0),
 			totalUv: Number(siteVisitors?.totalUv ?? 0),
 			realtimeVisitors: Number(activeVisitors?.count ?? 0),
 		},
