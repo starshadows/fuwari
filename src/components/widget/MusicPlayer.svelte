@@ -20,13 +20,11 @@ let duration = 0;
 let error = "";
 let audio: HTMLAudioElement;
 let volume = 0.72;
-let isLooping = false;
 let isPlaylistOpen = false;
 let hiddenCoverUrls = new Set<string>();
 
 $: activeTrack = tracks[activeIndex];
 $: progress = duration > 0 ? (currentTime / duration) * 100 : 0;
-$: volumeProgress = Math.round(volume * 100);
 $: activeCoverUrl = activeTrack?.coverUrl && !hiddenCoverUrls.has(activeTrack.coverUrl)
 	? activeTrack.coverUrl
 	: "";
@@ -83,11 +81,6 @@ const togglePlay = () => {
 	play();
 };
 
-const toggleLoop = () => {
-	isLooping = !isLooping;
-	if (audio) audio.loop = isLooping;
-};
-
 const switchTrack = (offset: number, autoplay = isPlaying) => {
 	if (tracks.length === 0) return;
 	switchTrackTo((activeIndex + offset + tracks.length) % tracks.length, autoplay);
@@ -121,11 +114,21 @@ const hideCover = (url: string) => {
 	hiddenCoverUrls = new Set([...hiddenCoverUrls, url]);
 };
 
+const portal = (node: HTMLElement) => {
+	if (typeof document === "undefined") return {};
+	document.body.appendChild(node);
+
+	return {
+		destroy() {
+			node.remove();
+		},
+	};
+};
+
 onMount(() => {
 	audio = new Audio();
 	audio.preload = "metadata";
 	audio.volume = volume;
-	audio.loop = isLooping;
 	audio.addEventListener("timeupdate", () => {
 		currentTime = audio.currentTime;
 	});
@@ -153,330 +156,269 @@ onDestroy(() => {
 });
 </script>
 
-<div class="music-card card-base p-4">
-	<div class="mb-4 flex items-center justify-between">
-		<div class="relative pl-4 text-lg font-bold text-90 before:absolute before:left-0 before:top-[5.5px] before:h-4 before:w-1 before:rounded-md before:bg-[var(--primary)]">
-			音乐
-		</div>
-	</div>
+<div class="card-base p-4">
+    <div class="mb-3 flex items-center justify-between">
+        <div class="relative pl-4 text-lg font-bold text-90 before:absolute before:left-0 before:top-[5.5px] before:h-4 before:w-1 before:rounded-md before:bg-[var(--primary)]">
+            音乐
+        </div>
+        <div class="text-xs font-bold text-30">{tracks.length} 首</div>
+    </div>
 
-	{#if isLoading}
-		<div class="rounded-xl bg-[var(--btn-regular-bg)] px-3 py-4 text-center text-sm font-bold text-50">
-			加载中...
-		</div>
-	{:else if error}
-		<div class="rounded-xl bg-[var(--btn-regular-bg)] px-3 py-4 text-center text-sm font-bold text-50">
-			{error}
-		</div>
-	{:else if !activeTrack}
-		<div class="rounded-xl bg-[var(--btn-regular-bg)] px-3 py-4 text-center text-sm font-bold text-50">
-			暂无音乐
-		</div>
-	{:else}
-		<div class="track-row">
-			<div class="cover">
-				{#if activeCoverUrl}
-					<img
-						src={activeCoverUrl}
-						alt={activeTrack.title}
-						class="h-full w-full object-cover"
-						on:error={() => hideCover(activeCoverUrl)}
-					/>
-				{:else}
-					<Icon icon="material-symbols:music-note-rounded" class="text-4xl" />
-				{/if}
-			</div>
+    {#if isLoading}
+        <div class="rounded-xl bg-[var(--btn-plain-bg-hover)] px-3 py-4 text-center text-sm text-50">
+            加载中...
+        </div>
+    {:else if error}
+        <div class="rounded-xl bg-[var(--btn-plain-bg-hover)] px-3 py-4 text-center text-sm text-50">
+            {error}
+        </div>
+    {:else if !activeTrack}
+        <div class="rounded-xl bg-[var(--btn-plain-bg-hover)] px-3 py-4 text-center text-sm text-50">
+            暂无音乐
+        </div>
+    {:else}
+        <div class="flex gap-3">
+            <div class="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[var(--btn-regular-bg)] text-[var(--btn-content)]">
+                {#if activeCoverUrl}
+                    <img
+                        src={activeCoverUrl}
+                        alt={activeTrack.title}
+                        class="h-full w-full object-cover"
+                        on:error={() => hideCover(activeCoverUrl)}
+                    />
+                {:else}
+                    <Icon icon="material-symbols:music-note-rounded" class="text-4xl" />
+                {/if}
+            </div>
+            <div class="min-w-0 flex-1">
+                <div class="truncate font-bold text-75">{activeTrack.title}</div>
+                <div class="truncate text-sm text-30">{activeTrack.artist || "Starshadow"}</div>
+                <input
+                    aria-label="播放进度"
+                    class="music-range mt-3 w-full"
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="0.1"
+                    value={progress}
+                    on:input={seek}
+                />
+                <div class="mt-2 text-xs font-medium text-30">{formatTime(currentTime)} / {formatTime(duration)}</div>
+            </div>
+        </div>
 
-			<div class="min-w-0 flex-1">
-				<div class="truncate text-xl font-black leading-tight text-90">{activeTrack.title}</div>
-				<div class="mt-1 truncate text-sm font-bold text-50">{activeTrack.artist || "Starshadow"}</div>
-				<div class="mt-1 text-xs font-bold text-40">{formatTime(currentTime)} / {formatTime(duration)}</div>
-			</div>
-
-			<div class="volume-group">
-				<Icon icon={volume === 0 ? "material-symbols:volume-off-rounded" : "material-symbols:volume-up-rounded"} class="text-2xl text-40" />
-				<input
-					aria-label="音量"
-					class="music-range volume-range"
-					style={`--range-value: ${volumeProgress}%`}
-					type="range"
-					min="0"
-					max="100"
-					step="1"
-					value={volumeProgress}
-					on:input={changeVolume}
-				/>
-			</div>
-		</div>
-
-		<input
-			aria-label="播放进度"
-			class="music-range progress-range mt-4 w-full"
-			style={`--range-value: ${progress}%`}
-			type="range"
-			min="0"
-			max="100"
-			step="0.1"
-			value={progress}
-			on:input={seek}
-		/>
-
-		<div class="control-row mt-4">
-			<button
-				type="button"
-				class={`control-btn ${isLooping ? "is-active" : "is-muted"}`}
-				aria-label={isLooping ? "关闭单曲循环" : "单曲循环"}
-				on:click={toggleLoop}
-			>
-				<Icon icon="material-symbols:repeat-rounded" />
-			</button>
-			<button type="button" class="control-btn" aria-label="上一首" on:click={() => switchTrack(-1)}>
-				<Icon icon="material-symbols:skip-previous-rounded" />
-			</button>
-			<button type="button" class="play-btn" aria-label={isPlaying ? "暂停" : "播放"} on:click={togglePlay}>
-				<Icon icon={isPlaying ? "material-symbols:pause-rounded" : "material-symbols:play-arrow-rounded"} />
-			</button>
-			<button type="button" class="control-btn" aria-label="下一首" on:click={() => switchTrack(1)}>
-				<Icon icon="material-symbols:skip-next-rounded" />
-			</button>
-			<button
-				type="button"
-				class={`control-btn ${isPlaylistOpen ? "is-active" : ""}`}
-				aria-label="歌曲列表"
-				aria-expanded={isPlaylistOpen}
-				on:click={() => (isPlaylistOpen = !isPlaylistOpen)}
-			>
-				<Icon icon="material-symbols:queue-music-rounded" />
-			</button>
-		</div>
-
-		{#if isPlaylistOpen}
-			<div class="playlist">
-				{#each tracks as track, index}
-					<button
-						type="button"
-						class={`playlist-item ${index === activeIndex ? "playlist-item-active" : ""}`}
-						on:click={() => switchTrackTo(index, true)}
-					>
-						<div class="playlist-cover">
-							{#if track.coverUrl && !hiddenCoverUrls.has(track.coverUrl)}
-								<img
-									src={track.coverUrl}
-									alt={track.title}
-									class="h-full w-full object-cover"
-									on:error={() => hideCover(track.coverUrl)}
-								/>
-							{:else}
-								<Icon icon="material-symbols:music-note-rounded" class="text-xl" />
-							{/if}
-						</div>
-						<div class="min-w-0 flex-1 text-left">
-							<div class="playlist-title">{track.title}</div>
-							<div class="playlist-meta">{track.artist || "Starshadow"}</div>
-						</div>
-					</button>
-				{/each}
-			</div>
-		{/if}
-	{/if}
+        <div class="mt-3 flex items-center justify-between gap-3">
+            <div class="flex items-center gap-1">
+                <button class="btn-plain h-9 w-9 rounded-lg active:scale-90" aria-label="上一首" on:click={() => switchTrack(-1)}>
+                    <Icon icon="material-symbols:skip-previous-rounded" class="text-xl" />
+                </button>
+                <button class="btn-regular h-10 w-10 rounded-xl active:scale-90" aria-label={isPlaying ? "暂停" : "播放"} on:click={togglePlay}>
+                    <Icon icon={isPlaying ? "material-symbols:pause-rounded" : "material-symbols:play-arrow-rounded"} class="text-2xl" />
+                </button>
+                <button class="btn-plain h-9 w-9 rounded-lg active:scale-90" aria-label="下一首" on:click={() => switchTrack(1)}>
+                    <Icon icon="material-symbols:skip-next-rounded" class="text-xl" />
+                </button>
+            </div>
+            <div class="flex min-w-0 items-center gap-2">
+                <Icon icon={volume === 0 ? "material-symbols:volume-off-rounded" : "material-symbols:volume-up-rounded"} class="shrink-0 text-lg text-30" />
+                <input
+                    aria-label="音量"
+                    class="music-range volume-range"
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="1"
+                    value={Math.round(volume * 100)}
+                    on:input={changeVolume}
+                />
+                <button
+                    class={`btn-plain h-11 w-12 rounded-xl active:scale-90 ${isPlaylistOpen ? "!bg-[var(--btn-regular-bg)]" : ""}`}
+                    aria-label="歌曲列表"
+                    aria-expanded={isPlaylistOpen}
+                    on:click={() => (isPlaylistOpen = !isPlaylistOpen)}
+                >
+                    <Icon icon="material-symbols:queue-music-rounded" class="text-2xl" />
+                </button>
+            </div>
+        </div>
+    {/if}
 </div>
 
+{#if isPlaylistOpen && tracks.length > 0}
+    <div class="playlist-portal" use:portal>
+        <button
+            type="button"
+            class="playlist-backdrop"
+            aria-label="关闭歌曲列表"
+            on:click={() => (isPlaylistOpen = false)}
+        ></button>
+        <div class="playlist-panel" role="dialog" aria-modal="true" aria-label="歌曲列表">
+            <div class="mb-3 flex items-center justify-between gap-3">
+                <div class="relative pl-4 text-lg font-bold text-90 before:absolute before:left-0 before:top-[5.5px] before:h-4 before:w-1 before:rounded-md before:bg-[var(--primary)]">
+                    歌曲列表
+                </div>
+                <div class="text-xs font-bold text-30">{tracks.length} 首</div>
+            </div>
+
+            <div class="playlist-list">
+                {#each tracks as track, index}
+                    <button
+                        type="button"
+                        class={`playlist-item ${index === activeIndex ? "playlist-item-active" : ""}`}
+                        on:click={() => {
+                            switchTrackTo(index, true);
+                            isPlaylistOpen = false;
+                        }}
+                    >
+                        <div class="playlist-cover">
+                            {#if track.coverUrl && !hiddenCoverUrls.has(track.coverUrl)}
+                                <img
+                                    src={track.coverUrl}
+                                    alt={track.title}
+                                    class="h-full w-full object-cover"
+                                    on:error={() => hideCover(track.coverUrl)}
+                                />
+                            {:else}
+                                <Icon icon="material-symbols:music-note-rounded" class="text-2xl" />
+                            {/if}
+                        </div>
+                        <div class="min-w-0 flex-1 text-left">
+                            <div class="playlist-title">{track.title}</div>
+                            <div class="playlist-meta">
+                                {track.artist || "Starshadow"}{track.album ? ` · ${track.album}` : ""}
+                            </div>
+                        </div>
+                    </button>
+                {/each}
+            </div>
+        </div>
+    </div>
+{/if}
+
 <style>
-	.music-card {
-		--music-accent: var(--primary);
-	}
+    .music-range {
+        height: 0.35rem;
+        cursor: pointer;
+        appearance: none;
+        border-radius: 999px;
+        background: var(--btn-regular-bg);
+    }
 
-	.track-row {
-		display: grid;
-		grid-template-columns: 4.5rem minmax(0, 1fr);
-		gap: 0.85rem;
-		align-items: center;
-	}
+    .volume-range {
+        width: 4.6rem;
+    }
 
-	.cover {
-		display: flex;
-		width: 4.5rem;
-		height: 4.5rem;
-		align-items: center;
-		justify-content: center;
-		overflow: hidden;
-		border-radius: 999px;
-		background: var(--btn-regular-bg);
-		color: var(--btn-content);
-		box-shadow: 0 0.6rem 1.6rem rgb(0 0 0 / 0.12);
-	}
+    .music-range::-webkit-slider-thumb {
+        width: 0.9rem;
+        height: 0.9rem;
+        appearance: none;
+        border-radius: 999px;
+        background: var(--primary);
+    }
 
-	.volume-group {
-		grid-column: 2;
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		min-width: 0;
-	}
+    .music-range::-moz-range-thumb {
+        width: 0.9rem;
+        height: 0.9rem;
+        border: 0;
+        border-radius: 999px;
+        background: var(--primary);
+    }
 
-	.music-range {
-		height: 0.42rem;
-		cursor: pointer;
-		appearance: none;
-		border-radius: 999px;
-		background: linear-gradient(
-			to right,
-			var(--music-accent) 0%,
-			var(--music-accent) var(--range-value),
-			var(--btn-regular-bg) var(--range-value),
-			var(--btn-regular-bg) 100%
-		);
-	}
+    .playlist-portal {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483000;
+    }
 
-	.progress-range {
-		display: block;
-		height: 0.45rem;
-	}
+    .playlist-backdrop {
+        position: absolute;
+        inset: 0;
+        z-index: 0;
+        width: 100%;
+        height: 100%;
+        border: 0;
+        padding: 0;
+        background: rgb(0 0 0 / 0.18);
+    }
 
-	.volume-range {
-		width: min(6.2rem, 100%);
-	}
+    .playlist-panel {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        z-index: 1;
+        width: min(92vw, 34rem);
+        max-height: min(74vh, 36rem);
+        transform: translate(-50%, -50%);
+        overflow: hidden;
+        border-radius: 1.25rem;
+        background: var(--card-bg);
+        box-shadow: 0 1.5rem 4rem rgb(0 0 0 / 0.18);
+        padding: 1rem;
+    }
 
-	.music-range::-webkit-slider-thumb {
-		width: 0;
-		height: 0;
-		appearance: none;
-	}
+    .playlist-list {
+        display: flex;
+        max-height: calc(min(74vh, 36rem) - 4.5rem);
+        flex-direction: column;
+        gap: 0.5rem;
+        overflow: auto;
+        padding-right: 0.2rem;
+    }
 
-	.music-range::-moz-range-thumb {
-		width: 0;
-		height: 0;
-		border: 0;
-	}
+    .playlist-item {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        width: 100%;
+        min-height: 4.6rem;
+        border-radius: 0.875rem;
+        padding: 0.6rem 0.75rem;
+        color: rgb(0 0 0 / 0.75);
+        transition: background-color 150ms ease, color 150ms ease;
+    }
 
-	.control-row {
-		display: grid;
-		grid-template-columns: repeat(5, minmax(0, 1fr));
-		align-items: center;
-		justify-items: center;
-		gap: 0.25rem;
-	}
+    .playlist-cover {
+        display: flex;
+        width: 3.25rem;
+        height: 3.25rem;
+        flex-shrink: 0;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        border-radius: 0.75rem;
+        background: var(--btn-regular-bg);
+        color: var(--btn-content);
+    }
 
-	.control-btn,
-	.play-btn {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		border-radius: 999px;
-		transition: transform 150ms ease, color 150ms ease, background-color 150ms ease;
-	}
+    .playlist-title {
+        font-weight: 700;
+        line-height: 1.35;
+        overflow-wrap: anywhere;
+    }
 
-	.control-btn {
-		width: 2.35rem;
-		height: 2.35rem;
-		color: rgb(0 0 0 / 0.58);
-		font-size: 1.75rem;
-	}
+    .playlist-meta {
+        margin-top: 0.25rem;
+        color: rgb(0 0 0 / 0.42);
+        font-size: 0.875rem;
+        line-height: 1.35;
+        overflow-wrap: anywhere;
+    }
 
-	.control-btn:hover,
-	.control-btn.is-active {
-		color: var(--music-accent);
-		background: var(--btn-regular-bg);
-	}
+    .playlist-item:hover,
+    .playlist-item-active {
+        background: var(--btn-regular-bg);
+        color: var(--primary);
+    }
 
-	.control-btn.is-muted {
-		color: rgb(0 0 0 / 0.22);
-	}
+    :global(.dark) .playlist-item {
+        color: rgb(255 255 255 / 0.75);
+    }
 
-	.play-btn {
-		width: 4.3rem;
-		height: 4.3rem;
-		background: var(--music-accent);
-		color: var(--deep-text);
-		font-size: 2.45rem;
-		box-shadow: 0 0.75rem 1.8rem color-mix(in oklch, var(--music-accent), transparent 65%);
-	}
+    :global(.dark) .playlist-backdrop {
+        background: rgb(0 0 0 / 0.36);
+    }
 
-	.control-btn:active,
-	.play-btn:active {
-		transform: scale(0.92);
-	}
-
-	.playlist {
-		margin-top: 1rem;
-		max-height: 18rem;
-		overflow: auto;
-		border-top: 1px solid rgb(0 0 0 / 0.06);
-		padding-top: 0.75rem;
-	}
-
-	.playlist-item {
-		display: flex;
-		align-items: center;
-		gap: 0.75rem;
-		width: 100%;
-		min-height: 4.15rem;
-		border-radius: 0.9rem;
-		padding: 0.5rem 0.65rem;
-		color: rgb(0 0 0 / 0.72);
-		transition: background-color 150ms ease, color 150ms ease;
-	}
-
-	.playlist-item:hover,
-	.playlist-item-active {
-		background: var(--btn-regular-bg);
-		color: var(--music-accent);
-	}
-
-	.playlist-cover {
-		display: flex;
-		width: 2.9rem;
-		height: 2.9rem;
-		flex-shrink: 0;
-		align-items: center;
-		justify-content: center;
-		overflow: hidden;
-		border-radius: 0.7rem;
-		background: var(--btn-regular-bg);
-		color: var(--btn-content);
-	}
-
-	.playlist-title {
-		font-weight: 900;
-		line-height: 1.25;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.playlist-meta {
-		margin-top: 0.35rem;
-		color: rgb(0 0 0 / 0.42);
-		font-size: 0.86rem;
-		font-weight: 700;
-		line-height: 1.2;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	:global(.dark) .control-btn {
-		color: rgb(255 255 255 / 0.6);
-	}
-
-	:global(.dark) .control-btn.is-muted {
-		color: rgb(255 255 255 / 0.24);
-	}
-
-	:global(.dark) .control-btn:hover,
-	:global(.dark) .control-btn.is-active {
-		color: var(--music-accent);
-	}
-
-	:global(.dark) .playlist {
-		border-top-color: rgb(255 255 255 / 0.08);
-	}
-
-	:global(.dark) .playlist-item {
-		color: rgb(255 255 255 / 0.76);
-	}
-
-	:global(.dark) .playlist-meta {
-		color: rgb(255 255 255 / 0.42);
-	}
+    :global(.dark) .playlist-meta {
+        color: rgb(255 255 255 / 0.42);
+    }
 </style>
