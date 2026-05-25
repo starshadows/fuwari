@@ -398,7 +398,7 @@ onMount(async () => {
                     <input
                         bind:this={avatarFileInput}
                         type="file"
-                        accept="image/*"
+                        accept="image/avif,image/gif,image/jpeg,image/png,image/webp"
                         class="min-h-11 flex-1 rounded-xl bg-[var(--card-bg)] px-4 py-2 text-sm text-75"
                     />
                     <button class="btn-regular h-11 rounded-xl px-5 font-bold" on:click={uploadAvatar}>

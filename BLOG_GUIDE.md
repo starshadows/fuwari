@@ -179,7 +179,7 @@ Cloudflare Pages 发布的就是这个目录。
 
 `/friends/` 只展示已审核的友链，`/friends/apply/` 是访客申请入口。访客提交后不会立刻展示，会进入待审核状态。
 
-友链申请启用了 Cloudflare Turnstile 人机验证。前台会先从 `/api/turnstile/config` 读取站点 key，再把验证 token 随申请一起提交；Worker 会用 Turnstile secret 调用 Cloudflare 校验，通过后才会写入 D1。没有配置 Turnstile 时，申请按钮会保持不可提交状态。
+友链申请启用了 Cloudflare Turnstile 人机验证。前台会先从 `/api/turnstile/config` 读取站点 key，再把验证 token 随申请一起提交；Worker 会用 Turnstile secret 调用 Cloudflare 校验，通过后才会写入 D1。没有配置 Turnstile 时，申请按钮会保持不可提交状态。友链地址必须使用 `https://`，头像必须使用 `https://` 或站内 `/media/avatars/`、`/media/covers/` 地址；同一个站点重复申请会被拒绝。
 
 `/friends/admin/` 是友链和音乐后台，可以额外用 Cloudflare Access 保护；后台 API 仍然需要 `ADMIN_TOKEN`。后台可以做这些事：
 
@@ -206,7 +206,7 @@ Cloudflare R2 控制台上传文件夹不是同步工具；批量上传被浏览
 - 本页访问、本页今日、本页访客、本页今日访客。
 - 近 7 日 PV 趋势。
 
-访客识别使用本地浏览器随机 ID 加 Worker 里的 D1 随机盐做 SHA-256，只存 hash，不保存原始 IP。
+访客识别使用本地浏览器随机 ID 加 Worker 里的 D1 随机盐做 SHA-256，只存 hash，不保存原始 IP。统计写入接口会检查同源请求并做 D1 限流，避免被跨站脚本或高频请求刷统计。
 
 ## 8. Cloudflare Workers 发布
 
@@ -232,13 +232,17 @@ Deploy command: corepack pnpm exec wrangler deploy
 Root directory: /
 ```
 
-部署成功并绑定好 `DB` 后，访问下面这个地址初始化数据库：
+部署成功并绑定好 `DB` 后，用 `Authorization` 头初始化数据库，不要把口令放在 URL 里。PowerShell 示例：
 
-```text
-https://你的域名/api/setup/init-db?token=你的ADMIN_TOKEN
+```powershell
+$token = "你的ADMIN_TOKEN"
+Invoke-RestMethod `
+  -Method GET `
+  -Uri "https://你的域名/api/setup/init-db" `
+  -Headers @{ Authorization = "Bearer $token" }
 ```
 
-如果 Worker 里已经设置了 `ADMIN_TOKEN`，这里的 token 必须和 `ADMIN_TOKEN` 一致。如果没有设置 `ADMIN_TOKEN`，第一次初始化会把 URL 里的 token 存进 D1，之后后台登录就用这个 token。看到 `ok: true` 就表示友链、音乐、访客统计和后台设置表已经建好。这个接口是幂等的，重复访问不会清空已有数据。
+也可以使用 `POST /api/setup/init-db` 并提交 JSON：`{"token":"你的ADMIN_TOKEN"}`。如果 Worker 里已经设置了 `ADMIN_TOKEN`，这里的 token 必须和 `ADMIN_TOKEN` 一致。如果没有设置 `ADMIN_TOKEN`，第一次初始化会把 token 的 SHA-256 哈希存进 D1，之后后台登录就用这个 token。看到 `ok: true` 就表示友链、音乐、访客统计、限流表和后台设置表已经建好。这个接口是幂等的，重复访问不会清空已有数据。
 
 如果在本地命令行部署，也可以运行：
 

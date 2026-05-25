@@ -15,6 +15,12 @@ type RangeResult =
 	| { ok: true; start: number; end: number; length: number }
 	| { ok: false };
 
+type RateLimitConfig = {
+	scope: string;
+	limit: number;
+	windowSeconds: number;
+};
+
 type MusicMetadata = {
 	title: string;
 	artist: string;
@@ -45,6 +51,13 @@ type MusicObjectInfo = MusicMetadata & {
 
 const FRIEND_STATUSES = new Set(["pending", "approved", "rejected"]);
 const MAX_AVATAR_SIZE = 3 * 1024 * 1024;
+const ALLOWED_AVATAR_MIME_TYPES = new Set([
+	"image/avif",
+	"image/gif",
+	"image/jpeg",
+	"image/png",
+	"image/webp",
+]);
 const ADMIN_TOKEN_SETTING_KEY = "admin_token_sha256";
 const STATS_SALT_SETTING_KEY = "stats_salt";
 const STATS_ACTIVE_WINDOW_MS = 5 * 60 * 1000;
@@ -53,6 +66,35 @@ const MUSIC_PREFIX = "music/";
 const MUSIC_OBJECT_SCAN_LIMIT = 200;
 const MUSIC_METADATA_READ_BYTES = 1024 * 1024;
 const AUDIO_EXTENSIONS = new Set(["mp3", "m4a", "aac", "flac", "wav", "ogg", "opus", "webm"]);
+const RATE_LIMIT_MAX_AGE_SECONDS = 24 * 60 * 60;
+const RATE_LIMITS = {
+	friendSubmit: { scope: "friend-submit", limit: 5, windowSeconds: 10 * 60 },
+	statsWrite: { scope: "stats-write", limit: 240, windowSeconds: 10 * 60 },
+	adminFailure: { scope: "admin-auth-fail", limit: 6, windowSeconds: 5 * 60 },
+};
+const SECURITY_HEADERS = {
+	"content-security-policy": "base-uri 'self'; object-src 'none'; frame-ancestors 'none'",
+	"permissions-policy": "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
+	"referrer-policy": "strict-origin-when-cross-origin",
+	"x-content-type-options": "nosniff",
+};
+const RATE_LIMIT_INIT_STATEMENTS = [
+	`CREATE TABLE IF NOT EXISTS app_settings (
+		key TEXT PRIMARY KEY,
+		value TEXT NOT NULL,
+		updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+	)`,
+	`CREATE TABLE IF NOT EXISTS rate_limits (
+		scope TEXT NOT NULL,
+		actor_hash TEXT NOT NULL,
+		window_start INTEGER NOT NULL,
+		count INTEGER NOT NULL DEFAULT 0,
+		updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+		PRIMARY KEY (scope, actor_hash, window_start)
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_rate_limits_updated_at
+	ON rate_limits (updated_at)`,
+];
 const STATS_INIT_STATEMENTS = [
 	`CREATE TABLE IF NOT EXISTS app_settings (
 		key TEXT PRIMARY KEY,
@@ -107,6 +149,7 @@ const STATS_INIT_STATEMENTS = [
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_stats_active_visitors_last_seen
 	ON stats_active_visitors (last_seen)`,
+	...RATE_LIMIT_INIT_STATEMENTS,
 ];
 const INIT_DB_STATEMENTS = [
 	`CREATE TABLE IF NOT EXISTS friend_links (
@@ -162,25 +205,34 @@ const INIT_DB_STATEMENTS = [
 ];
 let statsSchemaReady = false;
 let statsSaltCache: string | null = null;
+let rateLimitSchemaReady = false;
 
 export default {
 	async fetch(request: Request, env: Env): Promise<Response> {
 		const requestUrl = new URL(request.url);
 
 		try {
+			let response: Response;
+
 			if (requestUrl.pathname.startsWith("/setup/init-db")) {
-				return await initializeDatabase(request, env, requestUrl);
+				response = json({
+					error: "Setup tokens are no longer accepted in URL paths. Use /api/setup/init-db with Authorization: Bearer <token> or a POST JSON body.",
+				}, 410);
+				return withSecurityHeaders(response);
 			}
 
 			if (requestUrl.pathname.startsWith("/api/")) {
-				return await handleApi(request, env, requestUrl);
+				response = await handleApi(request, env, requestUrl);
+				return withSecurityHeaders(response);
 			}
 
 			if (requestUrl.pathname.startsWith("/media/")) {
-				return await handleMedia(request, env, requestUrl);
+				response = await handleMedia(request, env, requestUrl);
+				return withSecurityHeaders(response);
 			}
 
-			return env.ASSETS.fetch(request);
+			response = await env.ASSETS.fetch(request);
+			return withSecurityHeaders(response);
 		} catch (error) {
 			console.error(error);
 			return json({ error: "服务器暂时开小差了，请稍后再试。" }, 500);
@@ -247,18 +299,26 @@ async function initializeDatabase(
 		return json({ error: "Missing D1 binding. Bind a D1 database as DB first." }, 503);
 	}
 
+	const tokenResult = await readSetupToken(request, requestUrl);
+	if (tokenResult instanceof Response) return tokenResult;
+	if (!tokenResult) {
+		return json({
+			error: "Missing setup token. Use Authorization: Bearer <token> or POST JSON { \"token\": \"...\" }.",
+		}, 401);
+	}
+
 	const results = await env.DB.batch(
 		INIT_DB_STATEMENTS.map((statement) => env.DB.prepare(statement)),
 	);
-	const tokenResult = await setupAdminToken(request, env, requestUrl);
-	if (tokenResult instanceof Response) return tokenResult;
+	const adminTokenSource = await setupAdminToken(env, tokenResult);
+	if (adminTokenSource instanceof Response) return adminTokenSource;
 	await ensureStatsSalt(env);
 
 	return json({
 		ok: true,
 		message: "Database initialized. Existing data was kept.",
 		statements: results.length,
-		adminTokenSource: tokenResult,
+		adminTokenSource,
 	});
 }
 
@@ -287,6 +347,9 @@ async function submitFriendLink(
 	request: Request,
 	env: Env,
 ): Promise<Response> {
+	const rateLimit = await enforceRateLimit(request, env, RATE_LIMITS.friendSubmit);
+	if (rateLimit) return rateLimit;
+
 	const body = await readJson(request);
 	const name = readString(body.name, 40);
 	const description = readString(body.description, 120);
@@ -298,12 +361,24 @@ async function submitFriendLink(
 		return json({ error: "请填写完整的名称、简介、链接和头像。" }, 400);
 	}
 
-	if (!isHttpUrl(linkUrl)) {
-		return json({ error: "链接必须是 http 或 https 地址。" }, 400);
+	if (!isHttpsUrl(linkUrl)) {
+		return json({ error: "链接必须是 https 地址。" }, 400);
 	}
 
 	if (!isAvatarUrl(avatarUrl)) {
-		return json({ error: "头像需要使用公网 http/https 地址或站内头像地址。" }, 400);
+		return json({ error: "头像需要使用公网 https 地址或站内头像地址。" }, 400);
+	}
+
+	const duplicate = await env.DB.prepare(
+		`SELECT id, status
+		FROM friend_links
+		WHERE url = ? AND status IN ('pending', 'approved')
+		LIMIT 1`,
+	)
+		.bind(linkUrl)
+		.first<{ id: number; status: string }>();
+	if (duplicate) {
+		return json({ error: "这个站点已经提交过申请或已经在友链中。" }, 409);
 	}
 
 	const turnstileError = await verifyTurnstile(request, env, turnstileToken);
@@ -398,6 +473,12 @@ async function recordStatsVisit(
 	env: Env,
 	heartbeatOnly: boolean,
 ): Promise<Response> {
+	const originError = rejectCrossSiteWrite(request);
+	if (originError) return originError;
+
+	const rateLimit = await enforceRateLimit(request, env, RATE_LIMITS.statsWrite);
+	if (rateLimit) return rateLimit;
+
 	const readyError = await ensureStatsReady(env);
 	if (readyError) return readyError;
 
@@ -641,7 +722,7 @@ async function updateFriend(
 
 	if (typeof body.url === "string") {
 		const value = readString(body.url, 400);
-		if (!isHttpUrl(value)) return json({ error: "链接必须是 http 或 https 地址。" }, 400);
+		if (!isHttpsUrl(value)) return json({ error: "链接必须是 https 地址。" }, 400);
 		fields.push("url = ?");
 		values.push(value);
 	}
@@ -704,8 +785,8 @@ async function uploadAvatar(request: Request, env: Env): Promise<Response> {
 		return json({ error: "请选择头像文件。" }, 400);
 	}
 
-	if (!file.type.startsWith("image/")) {
-		return json({ error: "头像必须是图片文件。" }, 400);
+	if (!ALLOWED_AVATAR_MIME_TYPES.has(file.type)) {
+		return json({ error: "头像必须是 JPG、PNG、WebP、AVIF 或 GIF 图片。" }, 400);
 	}
 
 	if (file.size > MAX_AVATAR_SIZE) {
@@ -753,7 +834,8 @@ async function importR2MusicObjects(
 	const requestedKeys = Array.isArray(body.objectKeys)
 		? body.objectKeys
 				.filter((key): key is string => typeof key === "string")
-				.map((key) => normalizeR2MusicKey(key))
+				.map((key) => safeNormalizeMediaKey(key, "music"))
+				.filter((key): key is string => Boolean(key))
 		: [];
 	const isActive = readBoolean(body.isActive, true) ? 1 : 0;
 	const objects = await scanR2MusicObjects(env);
@@ -825,8 +907,10 @@ async function scanR2MusicObjects(env: Env): Promise<MusicObjectInfo[]> {
 			if (objects.length >= MUSIC_OBJECT_SCAN_LIMIT) break;
 			if (!isAudioObjectKey(object.key)) continue;
 
-			const metadata = await readMusicMetadata(env, object.key);
-			const key = normalizeR2MusicKey(object.key);
+			const key = safeNormalizeMediaKey(object.key, "music");
+			if (!key) continue;
+
+			const metadata = await readMusicMetadata(env, key);
 			const coverUrl = embeddedCoverUrlForMusicKey(key);
 			objects.push({
 				...metadata,
@@ -862,8 +946,8 @@ async function getExistingMusicKeys(env: Env): Promise<Set<string>> {
 	return new Set(
 		(result.results ?? [])
 			.map((row) => String((row as Record<string, unknown>).objectKey ?? ""))
-			.filter(Boolean)
-			.map(normalizeR2MusicKey),
+			.map((key) => safeNormalizeMediaKey(key, "music"))
+			.filter((key): key is string => Boolean(key)),
 	);
 }
 
@@ -1123,7 +1207,7 @@ async function createMusicTrack(
 	const title = readString(body.title, 80);
 	const artist = readString(body.artist, 80);
 	const album = readString(body.album, 80);
-	const objectKey = normalizeR2MusicKey(readString(body.objectKey, 500));
+	const objectKey = safeNormalizeMediaKey(readString(body.objectKey, 500), "music");
 	const coverUrl = readString(body.coverUrl, 600);
 	const sortOrder = readInteger(body.sortOrder, 0);
 	const isActive = readBoolean(body.isActive, true) ? 1 : 0;
@@ -1163,8 +1247,10 @@ async function updateMusicTrack(
 	addStringUpdate(fields, values, body, "album", "album", 80);
 
 	if (typeof body.objectKey === "string") {
+		const value = safeNormalizeMediaKey(readString(body.objectKey, 500), "music");
+		if (!value) return json({ error: "R2 音频 Key 不正确。" }, 400);
 		fields.push("object_key = ?");
-		values.push(normalizeR2MusicKey(readString(body.objectKey, 500)));
+		values.push(value);
 	}
 
 	if (typeof body.coverUrl === "string") {
@@ -1216,7 +1302,7 @@ async function handleMedia(
 
 	const segments = requestUrl.pathname.split("/").filter(Boolean);
 	const kind = segments[1];
-	const rawKey = decodeURIComponent(segments.slice(2).join("/"));
+	const rawKey = safeDecodeURIComponent(segments.slice(2).join("/"));
 
 	if (kind === "covers" && rawKey.startsWith("from-music/")) {
 		return getEmbeddedCoverResponse(request, env, rawKey.slice("from-music/".length));
@@ -1226,7 +1312,10 @@ async function handleMedia(
 		return json({ error: "媒体类型不存在。" }, 404);
 	}
 
-	const key = normalizeMediaKey(rawKey, kind);
+	const key = safeNormalizeMediaKey(rawKey, kind);
+	if (!key) {
+		return json({ error: "媒体路径不正确。" }, 400);
+	}
 	const head = await env.MEDIA_BUCKET.head(key);
 
 	if (!head) {
@@ -1276,7 +1365,10 @@ async function getEmbeddedCoverResponse(
 	env: Env,
 	rawMusicKey: string,
 ): Promise<Response> {
-	const key = normalizeMediaKey(rawMusicKey, "music");
+	const key = safeNormalizeMediaKey(rawMusicKey, "music");
+	if (!key) {
+		return json({ error: "媒体路径不正确。" }, 400);
+	}
 	const metadata = await readMusicMetadata(env, key);
 	if (!metadata.cover) return new Response("Not found", { status: 404 });
 
@@ -1457,6 +1549,8 @@ async function requireAdmin(request: Request, env: Env): Promise<Response | null
 	const token = readBearerToken(request);
 
 	if (!token) {
+		const rateLimit = await enforceRateLimit(request, env, RATE_LIMITS.adminFailure);
+		if (rateLimit) return rateLimit;
 		return json({ error: "Missing admin token." }, 401);
 	}
 
@@ -1469,27 +1563,22 @@ async function requireAdmin(request: Request, env: Env): Promise<Response | null
 	}
 
 	if (!env.ADMIN_TOKEN && env.DB && !(await getStoredAdminTokenHash(env))) {
+		const rateLimit = await enforceRateLimit(request, env, RATE_LIMITS.adminFailure);
+		if (rateLimit) return rateLimit;
 		return json({
-			error: "Admin token is not initialized. Visit /api/setup/init-db?token=your-token first.",
+			error: "Admin token is not initialized. Call /api/setup/init-db with Authorization: Bearer <token> first.",
 		}, 503);
 	}
 
+	const rateLimit = await enforceRateLimit(request, env, RATE_LIMITS.adminFailure);
+	if (rateLimit) return rateLimit;
 	return json({ error: "Invalid admin token." }, 401);
 }
 
 async function setupAdminToken(
-	request: Request,
 	env: Env,
-	requestUrl: URL,
+	token: string,
 ): Promise<Response | "env" | "database"> {
-	const token = readSetupToken(request, requestUrl);
-
-	if (!token) {
-		return json({
-			error: "Missing setup token. Use /api/setup/init-db?token=your-token.",
-		}, 401);
-	}
-
 	if (env.ADMIN_TOKEN) {
 		if (token !== env.ADMIN_TOKEN) {
 			return json({
@@ -1520,15 +1609,29 @@ function readBearerToken(request: Request): string {
 		: "";
 }
 
-function readSetupToken(request: Request, requestUrl: URL): string {
-	const pathToken = requestUrl.pathname.startsWith("/setup/init-db/")
-		? decodeURIComponent(requestUrl.pathname.split("/").filter(Boolean)[2] ?? "")
-		: "";
-	return (
-		requestUrl.searchParams.get("token")?.trim() ||
-		readBearerToken(request) ||
-		pathToken.trim()
-	);
+async function readSetupToken(
+	request: Request,
+	requestUrl: URL,
+): Promise<string | Response> {
+	if (requestUrl.searchParams.has("token")) {
+		return json({
+			error: "Setup tokens are no longer accepted in URLs. Use Authorization: Bearer <token> or POST JSON { \"token\": \"...\" }.",
+		}, 400);
+	}
+
+	const bearerToken = readBearerToken(request);
+	if (bearerToken) return bearerToken;
+
+	if (request.method === "POST") {
+		const body = await readJson(request);
+		return (
+			readString(body.token, 512) ||
+			readString(body.adminToken, 512) ||
+			readString(body.setupToken, 512)
+		);
+	}
+
+	return "";
 }
 
 async function verifyStoredAdminToken(env: Env, token: string): Promise<boolean> {
@@ -1646,37 +1749,148 @@ function addNumberUpdate(
 	values.push(readInteger(body[fieldName], 0));
 }
 
-function isHttpUrl(value: string): boolean {
+async function ensureRateLimitReady(env: Env): Promise<Response | null> {
+	if (!env.DB) {
+		return json({ error: "Missing D1 binding. Bind a D1 database as DB first." }, 503);
+	}
+
+	if (!rateLimitSchemaReady) {
+		await env.DB.batch(
+			RATE_LIMIT_INIT_STATEMENTS.map((statement) => env.DB.prepare(statement)),
+		);
+		rateLimitSchemaReady = true;
+	}
+
+	await ensureStatsSalt(env);
+	return null;
+}
+
+async function enforceRateLimit(
+	request: Request,
+	env: Env,
+	config: RateLimitConfig,
+): Promise<Response | null> {
+	const readyError = await ensureRateLimitReady(env);
+	if (readyError) return readyError;
+
+	const nowSeconds = Math.floor(Date.now() / 1000);
+	const windowStart = Math.floor(nowSeconds / config.windowSeconds) * config.windowSeconds;
+	const retryAfterSeconds = Math.max(1, windowStart + config.windowSeconds - nowSeconds);
+	const actorHash = await getRateLimitActorHash(request, env, config.scope);
+
+	await env.DB.prepare(
+		`INSERT INTO rate_limits (scope, actor_hash, window_start, count, updated_at)
+		VALUES (?, ?, ?, 1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+		ON CONFLICT(scope, actor_hash, window_start) DO UPDATE SET
+			count = count + 1,
+			updated_at = excluded.updated_at`,
+	)
+		.bind(config.scope, actorHash, windowStart)
+		.run();
+
+	const row = await env.DB.prepare(
+		`SELECT count
+		FROM rate_limits
+		WHERE scope = ? AND actor_hash = ? AND window_start = ?`,
+	)
+		.bind(config.scope, actorHash, windowStart)
+		.first<{ count: number }>();
+
+	await env.DB.prepare("DELETE FROM rate_limits WHERE window_start < ?")
+		.bind(nowSeconds - RATE_LIMIT_MAX_AGE_SECONDS)
+		.run();
+
+	if (Number(row?.count ?? 0) <= config.limit) return null;
+
+	const response = json({ error: "请求过于频繁，请稍后再试。" }, 429);
+	response.headers.set("retry-after", String(retryAfterSeconds));
+	return response;
+}
+
+async function getRateLimitActorHash(
+	request: Request,
+	env: Env,
+	scope: string,
+): Promise<string> {
+	const salt = await ensureStatsSalt(env);
+	const userAgent = request.headers.get("user-agent") ?? "";
+	const ip =
+		request.headers.get("cf-connecting-ip") ??
+		request.headers.get("x-real-ip") ??
+		request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+		"";
+	return hashToken(`${salt}:rate:${scope}:${ip}:${userAgent}`);
+}
+
+function rejectCrossSiteWrite(request: Request): Response | null {
+	const origin = request.headers.get("origin");
+	if (origin && !isSameOrigin(origin, request.url)) {
+		return json({ error: "跨站请求已被拒绝。" }, 403);
+	}
+
+	const referer = request.headers.get("referer");
+	if (!origin && referer && !isSameOrigin(referer, request.url)) {
+		return json({ error: "跨站请求已被拒绝。" }, 403);
+	}
+
+	return null;
+}
+
+function isSameOrigin(value: string, requestUrl: string): boolean {
+	try {
+		return new URL(value).origin === new URL(requestUrl).origin;
+	} catch {
+		return false;
+	}
+}
+
+function isHttpsUrl(value: string): boolean {
 	try {
 		const parsed = new URL(value);
-		return parsed.protocol === "http:" || parsed.protocol === "https:";
+		return parsed.protocol === "https:";
 	} catch {
 		return false;
 	}
 }
 
 function isAvatarUrl(value: string): boolean {
-	return (
-		isHttpUrl(value) ||
-		value.startsWith("/media/avatars/") ||
-		value.startsWith("/media/covers/")
-	);
-}
+	if (isHttpsUrl(value)) return true;
 
-function normalizeR2MusicKey(value: string): string {
-	return normalizeMediaKey(value, "music");
+	if (value.startsWith("/media/avatars/")) {
+		return safeNormalizeMediaKey(value.slice("/media/avatars/".length), "avatars") !== null;
+	}
+
+	if (value.startsWith("/media/covers/")) {
+		return safeNormalizeMediaKey(value.slice("/media/covers/".length), "covers") !== null;
+	}
+
+	return false;
 }
 
 function embeddedCoverUrlForMusicKey(objectKey: string): string {
-	const key = normalizeR2MusicKey(objectKey);
+	const key = safeNormalizeMediaKey(objectKey, "music");
+	if (!key) return "";
 	if (!key.toLowerCase().endsWith(".mp3")) return "";
 	return `/media/covers/from-music/${stripMediaPrefix(key, "music")}`;
 }
 
-function normalizeMediaKey(value: string, prefix: string): string {
-	const clean = value.replace(/^\/+/, "").replace(/\.\./g, "");
-	if (clean.startsWith(`${prefix}/`)) return clean;
-	return `${prefix}/${clean}`;
+function safeNormalizeMediaKey(value: string, prefix: string): string | null {
+	const validPrefixes = new Set(["music", "avatars", "covers"]);
+	if (!validPrefixes.has(prefix)) return null;
+
+	let clean = safeDecodeURIComponent(value)
+		.replace(/\\/g, "/")
+		.replace(/^\/+/, "")
+		.trim();
+	if (clean.startsWith(`${prefix}/`)) {
+		clean = clean.slice(prefix.length + 1);
+	}
+
+	if (!clean || clean.length > 1024 || clean.includes("\0")) return null;
+	const parts = clean.split("/");
+	if (parts.some((part) => !part || part === "." || part === "..")) return null;
+
+	return `${prefix}/${parts.join("/")}`;
 }
 
 function stripMediaPrefix(value: string, prefix: string): string {
@@ -1688,11 +1902,21 @@ function sanitizeFileName(value: string): string {
 	return clean || "avatar";
 }
 
+function withSecurityHeaders(response: Response): Response {
+	const secured = new Response(response.body, response);
+	for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
+		if (!secured.headers.has(name)) {
+			secured.headers.set(name, value);
+		}
+	}
+	return secured;
+}
+
 function json(data: unknown, status = 200): Response {
-	return Response.json(data, {
+	return withSecurityHeaders(Response.json(data, {
 		status,
 		headers: {
 			"cache-control": "no-store",
 		},
-	});
+	}));
 }

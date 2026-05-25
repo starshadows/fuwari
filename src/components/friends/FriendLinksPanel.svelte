@@ -272,6 +272,7 @@ onDestroy(() => {
 			<input
 				bind:value={form.url}
 				type="url"
+				pattern="https://.*"
 				required
 				placeholder="https://example.com"
 				class="h-11 rounded-xl bg-[var(--btn-plain-bg-hover)] px-4 font-normal text-75 outline-none transition focus:bg-[var(--btn-regular-bg)]"
@@ -282,6 +283,7 @@ onDestroy(() => {
 			<input
 				bind:value={form.avatarUrl}
 				type="url"
+				pattern="https://.*"
 				required
 				placeholder="https://example.com/avatar.jpg"
 				class="h-11 rounded-xl bg-[var(--btn-plain-bg-hover)] px-4 font-normal text-75 outline-none transition focus:bg-[var(--btn-regular-bg)]"

@@ -88,20 +88,20 @@ Local URL: http://localhost:8787
 ## Friend Links, Music, And Visitor Stats
 
 - Public friend links are shown at `/friends/` and loaded from `GET /api/friends`; submissions live at `/friends/apply/`, call `POST /api/friends`, and are stored as `pending`.
-- Friend submissions require Cloudflare Turnstile. The frontend fetches `GET /api/turnstile/config`, renders the widget with `TURNSTILE_SITE_KEY`, sends `turnstileToken` in the request body, and the Worker validates it against Cloudflare Siteverify with `TURNSTILE_SECRET_KEY` before inserting a pending row. If Turnstile is missing, submissions are disabled and `POST /api/friends` returns 503.
+- Friend submissions require Cloudflare Turnstile. The frontend fetches `GET /api/turnstile/config`, renders the widget with `TURNSTILE_SITE_KEY`, sends `turnstileToken` in the request body, and the Worker validates it against Cloudflare Siteverify with `TURNSTILE_SECRET_KEY` before inserting a pending row. If Turnstile is missing, submissions are disabled and `POST /api/friends` returns 503. Friend URLs must be `https://`; avatar URLs must be `https://` or site media paths; duplicate pending/approved URLs are rejected.
 - Admin actions use `Authorization: Bearer <token>` against `/api/admin/*`. Prefer runtime `ADMIN_TOKEN`; if it is missing, the first successful setup request stores a SHA-256 token hash in D1 `app_settings`.
 - Approved, active friend links appear immediately without rebuilding the Astro site.
 - R2 bucket binding is `MEDIA_BUCKET`; bind it manually in Cloudflare. The bucket can have any Cloudflare-side name.
 - D1 binding is `DB`; bind it manually in Cloudflare. The database can have any Cloudflare-side name.
 - `wrangler.jsonc` intentionally does not commit D1/R2 resource names or UUIDs. Runtime code only depends on binding variable names.
-- Database tables can be initialized after deployment by visiting `GET /api/setup/init-db?token=<token>` or `GET /setup/init-db/<token>`. The setup route is idempotent and keeps existing data. If no runtime `ADMIN_TOKEN` exists, the first setup token becomes the D1-backed admin token.
+- Database tables can be initialized after deployment with `GET /api/setup/init-db` plus `Authorization: Bearer <token>`, or `POST /api/setup/init-db` with JSON `{ "token": "<token>" }`. Setup tokens in query strings or `/setup/init-db/<token>` are rejected. The setup route is idempotent and keeps existing data. If no runtime `ADMIN_TOKEN` exists, the first setup token becomes the D1-backed admin token.
 - Audio objects should be uploaded manually to R2 under `music/`, for example `music/song.mp3`; the music admin page can scan R2 objects, read MP3 ID3 title/artist/album/cover metadata when available, fall back to filename inference, and bulk-import untracked objects into D1. Embedded covers are saved to R2 under `covers/`; old tracks without a stored cover can still use `/media/covers/from-music/<key>` as a lazy embedded-cover endpoint.
 - Admin music scan API: `GET /api/admin/music/objects`; bulk import API: `POST /api/admin/music/import` with optional `objectKeys`.
 - Public media is served by the Worker at `/media/music/<key>` and `/media/avatars/<key>`. Music responses support HTTP Range requests for seeking.
 - The sidebar music card is disabled by default in the sense that it never auto-plays; visitors must click play. It supports seeking, volume control, album art, and a compact track list for switching songs.
-- Visitor stats are implemented with Worker + D1. Public APIs are `POST /api/stats/visit`, `POST /api/stats/heartbeat`, and `GET /api/stats/summary?path=<path>`.
+- Visitor stats are implemented with Worker + D1. Public APIs are `POST /api/stats/visit`, `POST /api/stats/heartbeat`, and `GET /api/stats/summary?path=<path>`. Stats writes reject obvious cross-origin `Origin`/`Referer` values and are rate-limited in D1.
 - The sidebar visitor stats card records page views on first load and Swup page views, sends a heartbeat every minute, and keeps the UI to six metrics: current online, today visitors, today views, yesterday views, month views, and total views.
-- Realtime visitors are counted from `stats_active_visitors` entries seen within the last five minutes. Visitor identity uses a browser-generated local ID plus a D1 `stats_salt` hashed with SHA-256; raw IPs are not stored.
+- Realtime visitors are counted from `stats_active_visitors` entries seen within the last five minutes. Visitor identity and rate-limit actors use a browser-generated/local request signal plus a D1 `stats_salt` hashed with SHA-256; raw IPs are not stored.
 - The article TOC now lives in the left sidebar below tags. Keep the `#toc` element present because Swup is configured to replace it.
 
 ## Content Rules
@@ -161,7 +161,7 @@ corepack pnpm d1:migrate:local
 corepack pnpm worker:dev
 ```
 
-Dashboard-only production setup is preferred: create D1/R2 resources with any names, bind D1 as `DB`, bind R2 as `MEDIA_BUCKET`, optionally set `ADMIN_TOKEN`, then visit `/api/setup/init-db?token=<token>`. This also creates visitor stats tables and the stats salt. Avoid committing Cloudflare resource names or UUIDs; `wrangler.jsonc` intentionally omits D1/R2 resource names and IDs.
+Dashboard-only production setup is preferred: create D1/R2 resources with any names, bind D1 as `DB`, bind R2 as `MEDIA_BUCKET`, optionally set `ADMIN_TOKEN`, then call `/api/setup/init-db` with `Authorization: Bearer <token>` or POST JSON. Do not put setup tokens in URLs. This also creates visitor stats tables, rate-limit tables, and the stats salt. Avoid committing Cloudflare resource names or UUIDs; `wrangler.jsonc` intentionally omits D1/R2 resource names and IDs.
 
 ## Build Pitfalls Seen In Practice
 
