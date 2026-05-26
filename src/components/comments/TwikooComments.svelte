@@ -15,6 +15,11 @@ type TwikooClient = {
 	}) => void;
 };
 
+type TwikooModule = Partial<TwikooClient> & {
+	default?: unknown;
+	twikoo?: unknown;
+};
+
 let enabled = true;
 let isLoadingConfig = true;
 let isCreatingSession = false;
@@ -66,8 +71,8 @@ const createSession = async (humanProof: HumanProofDetail) => {
 
 const loadTwikoo = async () => {
 	message = "正在加载评论...";
-	const module = await import("twikoo") as { default?: TwikooClient } & TwikooClient;
-	const twikoo = module.default ?? module;
+	const module = await import("twikoo") as TwikooModule;
+	const twikoo = resolveTwikooClient(module);
 
 	twikoo.init({
 		envId: "/api/twikoo",
@@ -78,6 +83,27 @@ const loadTwikoo = async () => {
 
 	isLoaded = true;
 	message = "";
+};
+
+const resolveTwikooClient = (module: TwikooModule): TwikooClient => {
+	const defaultModule = module.default as TwikooModule | undefined;
+	const candidates: unknown[] = [
+		module,
+		defaultModule,
+		defaultModule?.default,
+		module.twikoo,
+		defaultModule?.twikoo,
+	];
+	const client = candidates.find(
+		(candidate): candidate is TwikooClient =>
+			typeof (candidate as TwikooClient | undefined)?.init === "function",
+	);
+
+	if (!client) {
+		throw new Error("评论客户端加载失败，请刷新后重试。");
+	}
+
+	return client;
 };
 
 onMount(() => {
