@@ -122,6 +122,7 @@ src/worker/index.ts
 ```jsonc
 {
   "main": "src/worker/index.ts",
+  "keep_vars": true,
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
@@ -141,7 +142,7 @@ src/worker/index.ts
 }
 ```
 
-D1 和 R2 的实际资源名称可以在 Cloudflare 控制台随便取，但绑定变量名必须一致：
+D1 和 R2 的实际资源名称可以在 Cloudflare 控制台随便取，但绑定变量名必须一致。`keep_vars: true` 用来保护控制台里手动维护的纯文本变量，避免后续 `wrangler deploy` 把 `TURNSTILE_SITE_KEY` 这类 Dashboard 变量删除。
 
 ```text
 DB             D1 数据库绑定

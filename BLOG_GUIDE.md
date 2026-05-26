@@ -221,7 +221,7 @@ Cloudflare R2 控制台上传文件夹不是同步工具；批量上传被浏览
 5. 可选：设置生产后台口令，Secret 名称填 `ADMIN_TOKEN`。
 6. 在 Cloudflare Turnstile 创建站点，域名填博客域名；Worker 变量填 `TURNSTILE_SITE_KEY`，Secret 填 `TURNSTILE_SECRET_KEY`。
 
-仓库里的 `wrangler.jsonc` 不保存 D1/R2 的资源名或 UUID，只声明代码需要的绑定变量名。Cloudflare 里资源叫什么都可以，只要绑定变量名对上，代码就会通过 `env.DB` 和 `env.MEDIA_BUCKET` 使用它们。
+仓库里的 `wrangler.jsonc` 不保存 D1/R2 的资源名或 UUID，只声明代码需要的绑定变量名。Cloudflare 里资源叫什么都可以，只要绑定变量名对上，代码就会通过 `env.DB` 和 `env.MEDIA_BUCKET` 使用它们。`wrangler.jsonc` 已设置 `keep_vars: true`，这样下次 `wrangler deploy` 不会删除 Cloudflare 控制台里手动维护的纯文本变量，例如 `TURNSTILE_SITE_KEY`。
 
 Cloudflare Workers 连接 GitHub 自动部署时，表单可以这样填：
 

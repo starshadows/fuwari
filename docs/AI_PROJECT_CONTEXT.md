@@ -93,7 +93,7 @@ Local URL: http://localhost:8787
 - Approved, active friend links appear immediately without rebuilding the Astro site.
 - R2 bucket binding is `MEDIA_BUCKET`; bind it manually in Cloudflare. The bucket can have any Cloudflare-side name.
 - D1 binding is `DB`; bind it manually in Cloudflare. The database can have any Cloudflare-side name.
-- `wrangler.jsonc` intentionally does not commit D1/R2 resource names or UUIDs. Runtime code only depends on binding variable names.
+- `wrangler.jsonc` intentionally does not commit D1/R2 resource names or UUIDs. Runtime code only depends on binding variable names. It sets `keep_vars: true` so `wrangler deploy` preserves Dashboard-managed plain text vars like `TURNSTILE_SITE_KEY`.
 - Database tables can be initialized after deployment with `GET /api/setup/init-db` plus `Authorization: Bearer <token>`, or `POST /api/setup/init-db` with JSON `{ "token": "<token>" }`. Setup tokens in query strings or `/setup/init-db/<token>` are rejected. The setup route is idempotent and keeps existing data. If no runtime `ADMIN_TOKEN` exists, the first setup token becomes the D1-backed admin token.
 - Audio objects should be uploaded manually to R2 under `music/`, for example `music/song.mp3`; the music admin page can scan R2 objects, read MP3 ID3 title/artist/album/cover metadata when available, fall back to filename inference, and bulk-import untracked objects into D1. Embedded covers are saved to R2 under `covers/`; old tracks without a stored cover can still use `/media/covers/from-music/<key>` as a lazy embedded-cover endpoint.
 - Admin music scan API: `GET /api/admin/music/objects`; bulk import API: `POST /api/admin/music/import` with optional `objectKeys`.
@@ -161,7 +161,7 @@ corepack pnpm d1:migrate:local
 corepack pnpm worker:dev
 ```
 
-Dashboard-only production setup is preferred: create D1/R2 resources with any names, bind D1 as `DB`, bind R2 as `MEDIA_BUCKET`, optionally set `ADMIN_TOKEN`, then call `/api/setup/init-db` with `Authorization: Bearer <token>` or POST JSON. Do not put setup tokens in URLs. This also creates visitor stats tables, rate-limit tables, and the stats salt. Avoid committing Cloudflare resource names or UUIDs; `wrangler.jsonc` intentionally omits D1/R2 resource names and IDs.
+Dashboard-only production setup is preferred: create D1/R2 resources with any names, bind D1 as `DB`, bind R2 as `MEDIA_BUCKET`, optionally set `ADMIN_TOKEN`, then call `/api/setup/init-db` with `Authorization: Bearer <token>` or POST JSON. Do not put setup tokens in URLs. This also creates visitor stats tables, rate-limit tables, and the stats salt. Avoid committing Cloudflare resource names or UUIDs; `wrangler.jsonc` intentionally omits D1/R2 resource names and IDs, and `keep_vars: true` protects manually configured Dashboard vars during future deploys.
 
 ## Build Pitfalls Seen In Practice
 
