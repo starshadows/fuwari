@@ -1,6 +1,7 @@
 <script lang="ts">
-import { onMount } from "svelte";
+import { onMount, tick } from "svelte";
 import HumanProof from "@components/anti-abuse/HumanProof.svelte";
+import "twikoo/dist/twikoo.css";
 
 type HumanProofDetail =
 	| { type: "altcha"; payload: string }
@@ -12,7 +13,7 @@ type TwikooClient = {
 		el: string;
 		path: string;
 		lang?: string;
-	}) => void;
+	}) => void | Promise<void>;
 };
 
 type TwikooModule = Partial<TwikooClient> & {
@@ -62,6 +63,8 @@ const createSession = async (humanProof: HumanProofDetail) => {
 
 		await loadTwikoo();
 	} catch (err) {
+		isLoaded = false;
+		message = "";
 		error = err instanceof Error ? err.message : "评论验证失败。";
 		proofResetSignal += 1;
 	} finally {
@@ -74,14 +77,16 @@ const loadTwikoo = async () => {
 	const module = await import("twikoo") as TwikooModule;
 	const twikoo = resolveTwikooClient(module);
 
-	twikoo.init({
-		envId: "/api/twikoo",
+	isLoaded = true;
+	await tick();
+
+	await twikoo.init({
+		envId: new URL("/api/twikoo", window.location.origin).href,
 		el: "#twikoo-comments",
 		path: window.location.pathname,
 		lang: "zh-CN",
 	});
 
-	isLoaded = true;
 	message = "";
 };
 
@@ -150,5 +155,31 @@ onMount(() => {
 <style>
 	.is-hidden {
 		display: none;
+	}
+
+	:global(#twikoo-comments .tk-avatar) {
+		width: 2.5rem;
+		height: 2.5rem;
+		max-width: 2.5rem;
+		max-height: 2.5rem;
+		flex: 0 0 2.5rem;
+	}
+
+	:global(#twikoo-comments .tk-comment .tk-submit .tk-avatar),
+	:global(#twikoo-comments .tk-replies .tk-avatar) {
+		width: 1.6rem;
+		height: 1.6rem;
+		max-width: 1.6rem;
+		max-height: 1.6rem;
+		flex-basis: 1.6rem;
+	}
+
+	:global(#twikoo-comments .tk-avatar .tk-avatar-img),
+	:global(#twikoo-comments .tk-avatar svg),
+	:global(#twikoo-comments .tk-avatar img) {
+		width: 100%;
+		height: 100%;
+		display: block;
+		object-fit: cover;
 	}
 </style>
