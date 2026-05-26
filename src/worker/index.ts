@@ -1,13 +1,5 @@
 /// <reference types="@cloudflare/workers-types" />
 
-import {
-	createChallenge,
-	sha,
-	verifySolution,
-	type Payload,
-} from "altcha/lib";
-import twikooWorker from "./twikoo-adapter";
-
 type Env = {
 	DB: D1Database;
 	MEDIA_BUCKET: R2Bucket;
@@ -45,26 +37,6 @@ type TurnstileVerifyResult = {
 	"error-codes"?: string[];
 };
 
-type HumanProof =
-	| { type?: "altcha"; payload?: string }
-	| { type?: "turnstile"; token?: string; turnstileToken?: string };
-
-type HumanProofContext = "friends" | "comments";
-
-type TelegramSettings = {
-	enabled: boolean;
-	botToken: string;
-	chatId: string;
-	threadId: string;
-};
-
-type CommentsSessionCookie = {
-	context: "comments";
-	expiresAt: number;
-	actorHash: string;
-	signature: string;
-};
-
 type MusicObjectInfo = MusicMetadata & {
 	key: string;
 	fileName: string;
@@ -88,12 +60,6 @@ const ALLOWED_AVATAR_MIME_TYPES = new Set([
 ]);
 const ADMIN_TOKEN_SETTING_KEY = "admin_token_sha256";
 const STATS_SALT_SETTING_KEY = "stats_salt";
-const COMMENTS_ENABLED_SETTING_KEY = "comments_enabled";
-const TELEGRAM_SETTINGS_KEY = "telegram_friend_notification";
-const COMMENTS_SESSION_COOKIE = "fuwari_comments_session";
-const COMMENTS_SESSION_MAX_AGE_SECONDS = 20 * 60;
-const ALTCHA_CHALLENGE_TTL_SECONDS = 10 * 60;
-const ALTCHA_COST = 800;
 const STATS_ACTIVE_WINDOW_MS = 5 * 60 * 1000;
 const STATS_TIMEZONE_OFFSET_MINUTES = 8 * 60;
 const MUSIC_PREFIX = "music/";
@@ -103,13 +69,9 @@ const AUDIO_EXTENSIONS = new Set(["mp3", "m4a", "aac", "flac", "wav", "ogg", "op
 const RATE_LIMIT_MAX_AGE_SECONDS = 24 * 60 * 60;
 const RATE_LIMITS = {
 	friendSubmit: { scope: "friend-submit", limit: 5, windowSeconds: 10 * 60 },
-	commentsSession: { scope: "comments-session", limit: 8, windowSeconds: 10 * 60 },
-	humanProofFailure: { scope: "human-proof-fail", limit: 2, windowSeconds: 10 * 60 },
 	statsWrite: { scope: "stats-write", limit: 240, windowSeconds: 10 * 60 },
 	adminFailure: { scope: "admin-auth-fail", limit: 6, windowSeconds: 5 * 60 },
 };
-const HUMAN_PROOF_CONTEXTS = new Set(["friends", "comments"]);
-const TURNSTILE_SUBMIT_THRESHOLD = 3;
 const SECURITY_HEADERS = {
 	"content-security-policy": "base-uri 'self'; object-src 'none'; frame-ancestors 'none'",
 	"permissions-policy": "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
@@ -189,49 +151,6 @@ const STATS_INIT_STATEMENTS = [
 	ON stats_active_visitors (last_seen)`,
 	...RATE_LIMIT_INIT_STATEMENTS,
 ];
-const TWIKOO_INIT_STATEMENTS = [
-	`CREATE TABLE IF NOT EXISTS comment (
-		_id TEXT NOT NULL,
-		uid TEXT NOT NULL,
-		nick TEXT NOT NULL,
-		mail TEXT NOT NULL,
-		mailMd5 TEXT NOT NULL,
-		link TEXT NOT NULL,
-		ua TEXT NOT NULL,
-		ip TEXT NOT NULL,
-		ipRegion TEXT NOT NULL DEFAULT '',
-		master INTEGER NOT NULL,
-		url TEXT NOT NULL,
-		href TEXT NOT NULL,
-		comment TEXT NOT NULL,
-		pid TEXT NOT NULL,
-		rid TEXT NOT NULL,
-		isSpam INTEGER NOT NULL,
-		created INTEGER NOT NULL,
-		updated INTEGER NOT NULL,
-		like TEXT NOT NULL,
-		top INTEGER NOT NULL,
-		avatar TEXT NOT NULL,
-		PRIMARY KEY (url, created DESC)
-	)`,
-	`CREATE INDEX IF NOT EXISTS idx_comment_created
-	ON comment (created DESC)`,
-	`CREATE INDEX IF NOT EXISTS idx_comment_ip_created
-	ON comment (ip, created DESC)`,
-	`CREATE TABLE IF NOT EXISTS config (
-		value TEXT NOT NULL
-	)`,
-	`INSERT INTO config (value)
-	SELECT ''
-	WHERE NOT EXISTS (SELECT 1 FROM config)`,
-	`CREATE TABLE IF NOT EXISTS counter (
-		url TEXT NOT NULL PRIMARY KEY,
-		title TEXT NOT NULL,
-		time INTEGER NOT NULL,
-		created INTEGER NOT NULL,
-		updated INTEGER NOT NULL
-	)`,
-];
 const INIT_DB_STATEMENTS = [
 	`CREATE TABLE IF NOT EXISTS friend_links (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -283,14 +202,13 @@ const INIT_DB_STATEMENTS = [
 		updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 	)`,
 	...STATS_INIT_STATEMENTS,
-	...TWIKOO_INIT_STATEMENTS,
 ];
 let statsSchemaReady = false;
 let statsSaltCache: string | null = null;
 let rateLimitSchemaReady = false;
 
 export default {
-	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+	async fetch(request: Request, env: Env): Promise<Response> {
 		const requestUrl = new URL(request.url);
 
 		try {
@@ -304,7 +222,7 @@ export default {
 			}
 
 			if (requestUrl.pathname.startsWith("/api/")) {
-				response = await handleApi(request, env, requestUrl, ctx);
+				response = await handleApi(request, env, requestUrl);
 				return withSecurityHeaders(response);
 			}
 
@@ -326,7 +244,6 @@ async function handleApi(
 	request: Request,
 	env: Env,
 	requestUrl: URL,
-	ctx: ExecutionContext,
 ): Promise<Response> {
 	const { pathname } = requestUrl;
 
@@ -338,25 +255,9 @@ async function handleApi(
 		return getTurnstileConfig(env);
 	}
 
-	if (pathname === "/api/anti-abuse/challenge" && request.method === "GET") {
-		return getAntiAbuseChallenge(request, env, requestUrl);
-	}
-
-	if (pathname === "/api/comments/config" && request.method === "GET") {
-		return getCommentsConfig(env);
-	}
-
-	if (pathname === "/api/comments/session" && request.method === "POST") {
-		return createCommentsSession(request, env);
-	}
-
-	if (pathname === "/api/twikoo") {
-		return handleTwikooRequest(request, env, requestUrl);
-	}
-
 	if (pathname === "/api/friends") {
 		if (request.method === "GET") return getApprovedFriends(env);
-		if (request.method === "POST") return submitFriendLink(request, env, ctx);
+		if (request.method === "POST") return submitFriendLink(request, env);
 	}
 
 	if (pathname === "/api/music/tracks" && request.method === "GET") {
@@ -442,56 +343,10 @@ function getTurnstileConfig(env: Env): Response {
 	});
 }
 
-async function getAntiAbuseChallenge(
-	request: Request,
-	env: Env,
-	requestUrl: URL,
-): Promise<Response> {
-	const context = normalizeHumanProofContext(requestUrl.searchParams.get("context"));
-	const turnstile = await shouldRequireTurnstile(request, env, context);
-
-	if (turnstile.required) {
-		const siteKey = env.TURNSTILE_SITE_KEY?.trim() ?? "";
-		const secretKey = env.TURNSTILE_SECRET_KEY?.trim() ?? "";
-		if (!siteKey || !secretKey) {
-			return json({
-				mode: "turnstile",
-				error: "当前访问需要 Turnstile 验证，但站点尚未配置 Turnstile。请稍后再试或联系站长。",
-				reason: turnstile.reason,
-			}, 503);
-		}
-
-		return json({
-			mode: "turnstile",
-			siteKey,
-			reason: turnstile.reason,
-		});
-	}
-
-	const salt = await ensureStatsSalt(env);
-	const challenge = await createChallenge({
-		algorithm: "SHA-256",
-		cost: ALTCHA_COST,
-		data: { context },
-		deriveKey: sha.deriveKey,
-		expiresAt: Math.floor(Date.now() / 1000) + ALTCHA_CHALLENGE_TTL_SECONDS,
-		hmacSignatureSecret: salt,
-	});
-
-	return json({
-		mode: "altcha",
-		challenge,
-	});
-}
-
 async function submitFriendLink(
 	request: Request,
 	env: Env,
-	ctx: ExecutionContext,
 ): Promise<Response> {
-	const originError = rejectCrossSiteWrite(request);
-	if (originError) return originError;
-
 	const rateLimit = await enforceRateLimit(request, env, RATE_LIMITS.friendSubmit);
 	if (rateLimit) return rateLimit;
 
@@ -500,10 +355,7 @@ async function submitFriendLink(
 	const description = readString(body.description, 120);
 	const linkUrl = readString(body.url, 400);
 	const avatarUrl = readString(body.avatarUrl, 600);
-	const humanProof = readHumanProof(body.humanProof) ??
-		(readString(body.turnstileToken, 2048)
-			? { type: "turnstile", token: readString(body.turnstileToken, 2048) }
-			: null);
+	const turnstileToken = readString(body.turnstileToken, 2048);
 
 	if (!name || !description || !linkUrl || !avatarUrl) {
 		return json({ error: "请填写完整的名称、简介、链接和头像。" }, 400);
@@ -529,25 +381,15 @@ async function submitFriendLink(
 		return json({ error: "这个站点已经提交过申请或已经在友链中。" }, 409);
 	}
 
-	const proofError = await verifyHumanProof(request, env, "friends", humanProof);
-	if (proofError) return proofError;
+	const turnstileError = await verifyTurnstile(request, env, turnstileToken);
+	if (turnstileError) return turnstileError;
 
-	const insert = await env.DB.prepare(
+	await env.DB.prepare(
 		`INSERT INTO friend_links (name, description, url, avatar_url, status)
 		VALUES (?, ?, ?, ?, 'pending')`,
 	)
 		.bind(name, description, linkUrl, avatarUrl)
 		.run();
-
-	ctx.waitUntil(sendTelegramFriendNotification(env, {
-		id: Number(insert.meta.last_row_id ?? 0),
-		name,
-		description,
-		url: linkUrl,
-		avatarUrl,
-	}).catch((error) => {
-		console.warn("Telegram friend notification failed", error);
-	}));
 
 	return json({ ok: true, message: "申请已提交，审核通过后会自动展示。" }, 201);
 }
@@ -592,88 +434,6 @@ async function verifyTurnstile(
 	}
 
 	return null;
-}
-
-async function verifyHumanProof(
-	request: Request,
-	env: Env,
-	context: HumanProofContext,
-	humanProof: HumanProof | null,
-): Promise<Response | null> {
-	const proofType = humanProof?.type;
-	const turnstile = await shouldRequireTurnstile(request, env, context);
-
-	if (turnstile.required || proofType === "turnstile") {
-		if (
-			turnstile.required &&
-			(!env.TURNSTILE_SITE_KEY?.trim() || !env.TURNSTILE_SECRET_KEY?.trim())
-		) {
-			return json({
-				error: "当前访问需要 Turnstile 验证，但站点尚未配置 Turnstile。请稍后再试或联系站长。",
-				requiresTurnstile: true,
-				reason: turnstile.reason,
-			}, 503);
-		}
-		const proof = humanProof as Extract<HumanProof, { type?: "turnstile" }> | null;
-		const token = readString(proof?.token, 2048) ||
-			readString(proof?.turnstileToken, 2048);
-		if (!token) {
-			await recordHumanProofFailure(request, env, context);
-			return json({
-				error: "当前访问需要 Turnstile 验证，请刷新验证后重试。",
-				requiresTurnstile: true,
-				reason: turnstile.reason,
-			}, 400);
-		}
-		const turnstileError = await verifyTurnstile(request, env, token);
-		if (turnstileError) {
-			await recordHumanProofFailure(request, env, context);
-			return turnstileError;
-		}
-		return null;
-	}
-
-	const proof = humanProof as Extract<HumanProof, { type?: "altcha" }> | null;
-	const payload = readString(proof?.payload, 20000);
-	if (!payload) {
-		await recordHumanProofFailure(request, env, context);
-		return json({ error: "请先完成人机验证。" }, 400);
-	}
-
-	const ok = await verifyAltchaPayload(env, payload, context);
-	if (!ok) {
-		await recordHumanProofFailure(request, env, context);
-		return json({
-			error: "人机验证失败，请刷新后重试。",
-			requiresTurnstile: (await shouldRequireTurnstile(request, env, context)).required,
-		}, 400);
-	}
-
-	return null;
-}
-
-async function verifyAltchaPayload(
-	env: Env,
-	payloadValue: string,
-	context: HumanProofContext,
-): Promise<boolean> {
-	try {
-		const payload = JSON.parse(atob(payloadValue)) as Partial<Payload>;
-		if (!payload.challenge || !payload.solution) return false;
-		if (payload.challenge.parameters?.data?.context !== context) return false;
-
-		const result = await verifySolution({
-			challenge: payload.challenge,
-			deriveKey: sha.deriveKey,
-			hmacSignatureSecret: await ensureStatsSalt(env),
-			solution: payload.solution,
-		});
-
-		return result.verified;
-	} catch (error) {
-		console.warn("ALTCHA verification failed", error);
-		return false;
-	}
 }
 
 async function getPublicMusicTracks(env: Env): Promise<Response> {
@@ -880,128 +640,6 @@ async function getStatsSummary(env: Env, path: string): Promise<JsonRecord> {
 	};
 }
 
-async function getCommentsConfig(env: Env): Promise<Response> {
-	return json({ enabled: await areCommentsEnabled(env) });
-}
-
-async function createCommentsSession(
-	request: Request,
-	env: Env,
-): Promise<Response> {
-	const originError = rejectCrossSiteWrite(request);
-	if (originError) return originError;
-
-	const rateLimit = await enforceRateLimit(request, env, RATE_LIMITS.commentsSession);
-	if (rateLimit) return rateLimit;
-
-	if (!(await areCommentsEnabled(env))) {
-		return json({ error: "评论区已关闭。" }, 403);
-	}
-
-	const body = await readJson(request);
-	const proofError = await verifyHumanProof(
-		request,
-		env,
-		"comments",
-		readHumanProof(body.humanProof),
-	);
-	if (proofError) return proofError;
-
-	const requestUrl = new URL(request.url);
-	const cookieValue = await createCommentsSessionCookie(request, env);
-	const response = json({ ok: true, expiresIn: COMMENTS_SESSION_MAX_AGE_SECONDS });
-	response.headers.set(
-		"set-cookie",
-		`${COMMENTS_SESSION_COOKIE}=${cookieValue}; Path=/api/twikoo; Max-Age=${COMMENTS_SESSION_MAX_AGE_SECONDS}; HttpOnly; SameSite=Lax${requestUrl.protocol === "https:" ? "; Secure" : ""}`,
-	);
-	return response;
-}
-
-async function handleTwikooRequest(
-	request: Request,
-	env: Env,
-	requestUrl: URL,
-): Promise<Response> {
-	if (!(await areCommentsEnabled(env))) {
-		return json({ error: "评论区已关闭。" }, 403);
-	}
-
-	if (
-		request.method !== "OPTIONS" &&
-		!(await hasValidCommentsSession(request, env))
-	) {
-		return json({ error: "请先完成评论区人机验证。" }, 401);
-	}
-
-	return twikooWorker.fetch(request, {
-		DB: env.DB,
-		R2: createTwikooR2Binding(env.MEDIA_BUCKET),
-		R2_PUBLIC_URL: `${requestUrl.origin}/media/twikoo`,
-	});
-}
-
-async function areCommentsEnabled(env: Env): Promise<boolean> {
-	const value = await getAppSetting(env, COMMENTS_ENABLED_SETTING_KEY);
-	return value !== "false";
-}
-
-async function createCommentsSessionCookie(
-	request: Request,
-	env: Env,
-): Promise<string> {
-	const actorHash = await getRateLimitActorHash(request, env, "comments-session-cookie");
-	const expiresAt = Math.floor(Date.now() / 1000) + COMMENTS_SESSION_MAX_AGE_SECONDS;
-	const signature = await signSessionValue(env, `comments:${actorHash}:${expiresAt}`);
-	return base64UrlEncode(JSON.stringify({
-		context: "comments",
-		expiresAt,
-		actorHash,
-		signature,
-	} satisfies CommentsSessionCookie));
-}
-
-async function hasValidCommentsSession(
-	request: Request,
-	env: Env,
-): Promise<boolean> {
-	const rawCookie = readCookie(request, COMMENTS_SESSION_COOKIE);
-	if (!rawCookie) return false;
-
-	try {
-		const cookie = JSON.parse(base64UrlDecode(rawCookie)) as CommentsSessionCookie;
-		if (cookie.context !== "comments") return false;
-		if (!Number.isFinite(cookie.expiresAt) || cookie.expiresAt < Math.floor(Date.now() / 1000)) {
-			return false;
-		}
-
-		const actorHash = await getRateLimitActorHash(request, env, "comments-session-cookie");
-		if (cookie.actorHash !== actorHash) return false;
-
-		const expected = await signSessionValue(env, `comments:${cookie.actorHash}:${cookie.expiresAt}`);
-		return timingSafeEqual(cookie.signature, expected);
-	} catch {
-		return false;
-	}
-}
-
-function createTwikooR2Binding(bucket: R2Bucket): Pick<R2Bucket, "put" | "delete"> {
-	return {
-		put: (key, value, options) => bucket.put(normalizeTwikooObjectKey(key), value, options),
-		delete: (keys) => {
-			if (Array.isArray(keys)) {
-				return bucket.delete(keys.map(normalizeTwikooObjectKey));
-			}
-			return bucket.delete(normalizeTwikooObjectKey(keys));
-		},
-	};
-}
-
-function normalizeTwikooObjectKey(key: string): string {
-	const normalized = safeNormalizeMediaKey(key, "twikoo");
-	if (!normalized) throw new Error("Invalid Twikoo media key.");
-	return normalized;
-}
-
 async function handleAdminApi(
 	request: Request,
 	env: Env,
@@ -1011,21 +649,6 @@ async function handleAdminApi(
 
 	if (requestUrl.pathname === "/api/admin/avatar" && request.method === "POST") {
 		return uploadAvatar(request, env);
-	}
-
-	if (segments[2] === "settings") {
-		if (segments[3] === "comments") {
-			if (request.method === "GET") return getAdminCommentsSettings(env);
-			if (request.method === "POST") return updateAdminCommentsSettings(request, env);
-		}
-
-		if (segments[3] === "telegram") {
-			if (!segments[4] && request.method === "GET") return getAdminTelegramSettings(env);
-			if (!segments[4] && request.method === "POST") return updateAdminTelegramSettings(request, env);
-			if (segments[4] === "test" && request.method === "POST") {
-				return sendTelegramTestNotification(env);
-			}
-		}
 	}
 
 	if (segments[2] === "friends") {
@@ -1051,70 +674,6 @@ async function handleAdminApi(
 	}
 
 	return json({ error: "后台接口不存在。" }, 404);
-}
-
-async function getAdminCommentsSettings(env: Env): Promise<Response> {
-	return json({ enabled: await areCommentsEnabled(env) });
-}
-
-async function updateAdminCommentsSettings(
-	request: Request,
-	env: Env,
-): Promise<Response> {
-	const body = await readJson(request);
-	const enabled = readBoolean(body.enabled, await areCommentsEnabled(env));
-	await setAppSetting(env, COMMENTS_ENABLED_SETTING_KEY, enabled ? "true" : "false");
-	return json({ ok: true, enabled });
-}
-
-async function getAdminTelegramSettings(env: Env): Promise<Response> {
-	const settings = await readTelegramSettings(env);
-	return json({
-		enabled: settings.enabled,
-		botTokenConfigured: Boolean(settings.botToken),
-		botTokenHint: maskSecret(settings.botToken),
-		chatId: settings.chatId,
-		threadId: settings.threadId,
-	});
-}
-
-async function updateAdminTelegramSettings(
-	request: Request,
-	env: Env,
-): Promise<Response> {
-	const current = await readTelegramSettings(env);
-	const body = await readJson(request);
-	const botToken = readString(body.botToken, 256);
-	const settings: TelegramSettings = {
-		enabled: readBoolean(body.enabled, current.enabled),
-		botToken: botToken || (readBoolean(body.clearBotToken, false) ? "" : current.botToken),
-		chatId: readString(body.chatId, 120),
-		threadId: readString(body.threadId, 40),
-	};
-
-	await writeTelegramSettings(env, settings);
-	return json({
-		ok: true,
-		enabled: settings.enabled,
-		botTokenConfigured: Boolean(settings.botToken),
-		botTokenHint: maskSecret(settings.botToken),
-		chatId: settings.chatId,
-		threadId: settings.threadId,
-	});
-}
-
-async function sendTelegramTestNotification(env: Env): Promise<Response> {
-	const settings = await readTelegramSettings(env);
-	if (!settings.enabled || !settings.botToken || !settings.chatId) {
-		return json({ error: "Telegram 通知尚未完整配置。" }, 400);
-	}
-
-	const result = await sendTelegramMessage(settings, "这是一条来自星影博客后台的 Telegram 测试通知。");
-	if (!result.ok) {
-		return json({ error: result.error }, 502);
-	}
-
-	return json({ ok: true });
 }
 
 async function listAdminFriends(env: Env, requestUrl: URL): Promise<Response> {
@@ -1749,7 +1308,7 @@ async function handleMedia(
 		return getEmbeddedCoverResponse(request, env, rawKey.slice("from-music/".length));
 	}
 
-	if (kind !== "music" && kind !== "avatars" && kind !== "covers" && kind !== "twikoo") {
+	if (kind !== "music" && kind !== "avatars" && kind !== "covers") {
 		return json({ error: "媒体类型不存在。" }, 404);
 	}
 
@@ -2109,137 +1668,6 @@ async function saveStoredAdminTokenHash(
 		.run();
 }
 
-async function getAppSetting(env: Env, key: string): Promise<string | null> {
-	const readyError = await ensureRateLimitReady(env);
-	if (readyError) throw new Error("Settings table is not available.");
-
-	const row = await env.DB.prepare("SELECT value FROM app_settings WHERE key = ?")
-		.bind(key)
-		.first<{ value: string }>();
-	return row?.value ?? null;
-}
-
-async function setAppSetting(
-	env: Env,
-	key: string,
-	value: string,
-): Promise<void> {
-	const readyError = await ensureRateLimitReady(env);
-	if (readyError) throw new Error("Settings table is not available.");
-
-	await env.DB.prepare(
-		`INSERT INTO app_settings (key, value, updated_at)
-		VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-		ON CONFLICT(key) DO UPDATE SET
-			value = excluded.value,
-			updated_at = excluded.updated_at`,
-	)
-		.bind(key, value)
-		.run();
-}
-
-async function readTelegramSettings(env: Env): Promise<TelegramSettings> {
-	const stored = await getAppSetting(env, TELEGRAM_SETTINGS_KEY);
-	if (!stored) {
-		return { enabled: false, botToken: "", chatId: "", threadId: "" };
-	}
-
-	try {
-		const parsed = JSON.parse(stored) as Partial<TelegramSettings>;
-		return {
-			enabled: Boolean(parsed.enabled),
-			botToken: readString(parsed.botToken, 256),
-			chatId: readString(parsed.chatId, 120),
-			threadId: readString(parsed.threadId, 40),
-		};
-	} catch {
-		return { enabled: false, botToken: "", chatId: "", threadId: "" };
-	}
-}
-
-async function writeTelegramSettings(
-	env: Env,
-	settings: TelegramSettings,
-): Promise<void> {
-	await setAppSetting(env, TELEGRAM_SETTINGS_KEY, JSON.stringify(settings));
-}
-
-async function sendTelegramFriendNotification(
-	env: Env,
-	friend: {
-		id: number;
-		name: string;
-		description: string;
-		url: string;
-		avatarUrl: string;
-	},
-): Promise<void> {
-	const settings = await readTelegramSettings(env);
-	if (!settings.enabled || !settings.botToken || !settings.chatId) return;
-
-	const text = [
-		"新的友链申请",
-		"",
-		`ID：${friend.id || "-"}`,
-		`名称：${friend.name}`,
-		`链接：${friend.url}`,
-		`头像：${friend.avatarUrl}`,
-		`简介：${friend.description}`,
-	].join("\n");
-	const result = await sendTelegramMessage(settings, text);
-	if (!result.ok) {
-		console.warn("Telegram notification rejected", result.error);
-	}
-}
-
-async function sendTelegramMessage(
-	settings: TelegramSettings,
-	text: string,
-): Promise<{ ok: true } | { ok: false; error: string }> {
-	const payload: Record<string, string | number | boolean> = {
-		chat_id: settings.chatId,
-		text,
-		disable_web_page_preview: true,
-	};
-	const threadId = Number.parseInt(settings.threadId, 10);
-	if (Number.isInteger(threadId) && threadId > 0) {
-		payload.message_thread_id = threadId;
-	}
-
-	try {
-		const response = await fetch(
-			`https://api.telegram.org/bot${settings.botToken}/sendMessage`,
-			{
-				method: "POST",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify(payload),
-			},
-		);
-		const data = await response.json().catch(() => ({})) as {
-			ok?: boolean;
-			description?: string;
-		};
-		if (!response.ok || data.ok === false) {
-			return {
-				ok: false,
-				error: data.description ?? `Telegram API returned ${response.status}.`,
-			};
-		}
-		return { ok: true };
-	} catch (error) {
-		return {
-			ok: false,
-			error: error instanceof Error ? error.message : "Telegram request failed.",
-		};
-	}
-}
-
-function maskSecret(value: string): string {
-	if (!value) return "";
-	if (value.length <= 8) return "********";
-	return `${value.slice(0, 4)}...${value.slice(-4)}`;
-}
-
 async function hashToken(token: string): Promise<string> {
 	const digest = await crypto.subtle.digest(
 		"SHA-256",
@@ -2249,58 +1677,6 @@ async function hashToken(token: string): Promise<string> {
 	return Array.from(new Uint8Array(digest))
 		.map((byte) => byte.toString(16).padStart(2, "0"))
 		.join("");
-}
-
-async function signSessionValue(env: Env, value: string): Promise<string> {
-	const key = await crypto.subtle.importKey(
-		"raw",
-		new TextEncoder().encode(await ensureStatsSalt(env)),
-		{ name: "HMAC", hash: "SHA-256" },
-		false,
-		["sign"],
-	);
-	const signature = await crypto.subtle.sign(
-		"HMAC",
-		key,
-		new TextEncoder().encode(value),
-	);
-	return Array.from(new Uint8Array(signature))
-		.map((byte) => byte.toString(16).padStart(2, "0"))
-		.join("");
-}
-
-function timingSafeEqual(left: string, right: string): boolean {
-	if (left.length !== right.length) return false;
-
-	let diff = 0;
-	for (let index = 0; index < left.length; index += 1) {
-		diff |= left.charCodeAt(index) ^ right.charCodeAt(index);
-	}
-	return diff === 0;
-}
-
-function base64UrlEncode(value: string): string {
-	return btoa(value)
-		.replace(/\+/g, "-")
-		.replace(/\//g, "_")
-		.replace(/=+$/g, "");
-}
-
-function base64UrlDecode(value: string): string {
-	const padded = value.replace(/-/g, "+").replace(/_/g, "/")
-		.padEnd(Math.ceil(value.length / 4) * 4, "=");
-	return atob(padded);
-}
-
-function readCookie(request: Request, name: string): string {
-	const cookie = request.headers.get("cookie") ?? "";
-	for (const part of cookie.split(";")) {
-		const [rawKey, ...rawValue] = part.trim().split("=");
-		if (rawKey === name) {
-			return rawValue.join("=");
-		}
-	}
-	return "";
 }
 
 async function readJson(request: Request): Promise<JsonRecord> {
@@ -2331,29 +1707,6 @@ function readBoolean(value: unknown, fallback: boolean): boolean {
 	if (value === 1 || value === "1" || value === "true") return true;
 	if (value === 0 || value === "0" || value === "false") return false;
 	return fallback;
-}
-
-function readHumanProof(value: unknown): HumanProof | null {
-	if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-	const proof = value as Record<string, unknown>;
-	const type = readString(proof.type, 20);
-
-	if (type === "turnstile") {
-		return {
-			type: "turnstile",
-			token: readString(proof.token, 2048) || readString(proof.turnstileToken, 2048),
-		};
-	}
-
-	return {
-		type: "altcha",
-		payload: readString(proof.payload, 20000),
-	};
-}
-
-function normalizeHumanProofContext(value: string | null): HumanProofContext {
-	const context = value?.trim() ?? "";
-	return HUMAN_PROOF_CONTEXTS.has(context) ? context as HumanProofContext : "friends";
 }
 
 function addStringUpdate(
@@ -2454,104 +1807,6 @@ async function enforceRateLimit(
 	return response;
 }
 
-async function shouldRequireTurnstile(
-	request: Request,
-	env: Env,
-	context: HumanProofContext,
-): Promise<{ required: boolean; reason: string }> {
-	if (isLikelyBot(request)) {
-		return { required: true, reason: "bot-user-agent" };
-	}
-
-	const failureCount = await getRateLimitCount(request, env, {
-		...RATE_LIMITS.humanProofFailure,
-		scope: `${RATE_LIMITS.humanProofFailure.scope}:${context}`,
-	});
-	if (failureCount >= RATE_LIMITS.humanProofFailure.limit) {
-		return { required: true, reason: "proof-failures" };
-	}
-
-	const submitConfig = context === "friends"
-		? RATE_LIMITS.friendSubmit
-		: RATE_LIMITS.commentsSession;
-	const submitCount = await getRateLimitCount(request, env, submitConfig);
-	if (submitCount >= TURNSTILE_SUBMIT_THRESHOLD) {
-		return { required: true, reason: "high-frequency" };
-	}
-
-	return { required: false, reason: "" };
-}
-
-async function recordHumanProofFailure(
-	request: Request,
-	env: Env,
-	context: HumanProofContext,
-): Promise<void> {
-	await incrementRateLimitCounter(request, env, {
-		...RATE_LIMITS.humanProofFailure,
-		scope: `${RATE_LIMITS.humanProofFailure.scope}:${context}`,
-	});
-}
-
-async function getRateLimitCount(
-	request: Request,
-	env: Env,
-	config: RateLimitConfig,
-): Promise<number> {
-	const readyError = await ensureRateLimitReady(env);
-	if (readyError) return 0;
-
-	const nowSeconds = Math.floor(Date.now() / 1000);
-	const windowStart = getRateLimitWindowStart(nowSeconds, config.windowSeconds);
-	const actorHash = await getRateLimitActorHash(request, env, config.scope);
-	const row = await env.DB.prepare(
-		`SELECT count
-		FROM rate_limits
-		WHERE scope = ? AND actor_hash = ? AND window_start = ?`,
-	)
-		.bind(config.scope, actorHash, windowStart)
-		.first<{ count: number }>();
-
-	return Number(row?.count ?? 0);
-}
-
-async function incrementRateLimitCounter(
-	request: Request,
-	env: Env,
-	config: RateLimitConfig,
-): Promise<number> {
-	const readyError = await ensureRateLimitReady(env);
-	if (readyError) return 0;
-
-	const nowSeconds = Math.floor(Date.now() / 1000);
-	const windowStart = getRateLimitWindowStart(nowSeconds, config.windowSeconds);
-	const actorHash = await getRateLimitActorHash(request, env, config.scope);
-
-	await env.DB.prepare(
-		`INSERT INTO rate_limits (scope, actor_hash, window_start, count, updated_at)
-		VALUES (?, ?, ?, 1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-		ON CONFLICT(scope, actor_hash, window_start) DO UPDATE SET
-			count = count + 1,
-			updated_at = excluded.updated_at`,
-	)
-		.bind(config.scope, actorHash, windowStart)
-		.run();
-
-	const row = await env.DB.prepare(
-		`SELECT count
-		FROM rate_limits
-		WHERE scope = ? AND actor_hash = ? AND window_start = ?`,
-	)
-		.bind(config.scope, actorHash, windowStart)
-		.first<{ count: number }>();
-
-	return Number(row?.count ?? 0);
-}
-
-function getRateLimitWindowStart(nowSeconds: number, windowSeconds: number): number {
-	return Math.floor(nowSeconds / windowSeconds) * windowSeconds;
-}
-
 async function getRateLimitActorHash(
 	request: Request,
 	env: Env,
@@ -2620,7 +1875,7 @@ function embeddedCoverUrlForMusicKey(objectKey: string): string {
 }
 
 function safeNormalizeMediaKey(value: string, prefix: string): string | null {
-	const validPrefixes = new Set(["music", "avatars", "covers", "twikoo"]);
+	const validPrefixes = new Set(["music", "avatars", "covers"]);
 	if (!validPrefixes.has(prefix)) return null;
 
 	let clean = safeDecodeURIComponent(value)

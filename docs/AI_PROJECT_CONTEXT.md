@@ -88,7 +88,7 @@ Local URL: http://localhost:8787
 ## Friend Links, Music, And Visitor Stats
 
 - Public friend links are shown at `/friends/` and loaded from `GET /api/friends`; submissions live at `/friends/apply/`, call `POST /api/friends`, and are stored as `pending`.
-- Friend submissions default to ALTCHA. The frontend fetches `GET /api/anti-abuse/challenge?context=friends`, sends `humanProof` with the request body, and the Worker verifies it before inserting a pending row. Repeated failures, high-frequency submissions, and obvious bot user agents escalate to Cloudflare Turnstile; if Turnstile is not configured, normal ALTCHA submissions still work and abnormal traffic receives a clear error. Friend URLs must be `https://`; avatar URLs must be `https://` or site media paths; duplicate pending/approved URLs are rejected.
+- Friend submissions require Cloudflare Turnstile. The frontend fetches `GET /api/turnstile/config`, renders the widget with `TURNSTILE_SITE_KEY`, sends `turnstileToken` in the request body, and the Worker validates it against Cloudflare Siteverify with `TURNSTILE_SECRET_KEY` before inserting a pending row. If Turnstile is missing, submissions are disabled and `POST /api/friends` returns 503. Friend URLs must be `https://`; avatar URLs must be `https://` or site media paths; duplicate pending/approved URLs are rejected.
 - Admin actions use `Authorization: Bearer <token>` against `/api/admin/*`. Prefer runtime `ADMIN_TOKEN`; if it is missing, the first successful setup request stores a SHA-256 token hash in D1 `app_settings`.
 - Approved, active friend links appear immediately without rebuilding the Astro site.
 - R2 bucket binding is `MEDIA_BUCKET`; bind it manually in Cloudflare. The bucket can have any Cloudflare-side name.

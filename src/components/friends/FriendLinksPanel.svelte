@@ -1,6 +1,5 @@
 <script lang="ts">
-import { onMount } from "svelte";
-import HumanProof from "@components/anti-abuse/HumanProof.svelte";
+import { onDestroy, onMount, tick } from "svelte";
 
 type Friend = {
 	id: number;
@@ -9,6 +8,29 @@ type Friend = {
 	url: string;
 	avatarUrl: string;
 };
+
+type TurnstileConfig = {
+	enabled?: boolean;
+	siteKey?: string;
+};
+
+type TurnstileOptions = {
+	sitekey: string;
+	theme: "auto";
+	callback: (token: string) => void;
+	"expired-callback": () => void;
+	"error-callback": () => void;
+};
+
+declare global {
+	interface Window {
+		turnstile?: {
+			render: (container: HTMLElement, options: TurnstileOptions) => string;
+			reset: (widgetId?: string) => void;
+			remove: (widgetId?: string) => void;
+		};
+	}
+}
 
 let friends: Friend[] = [];
 let isLoading = true;
@@ -26,13 +48,13 @@ let form = {
 	avatarUrl: "",
 };
 
-let humanProof:
-	| { type: "altcha"; payload: string }
-	| { type: "turnstile"; token: string }
-	| null = null;
-let proofResetSignal = 0;
+let turnstileContainer: HTMLDivElement;
+let turnstileEnabled = false;
+let turnstileToken = "";
+let turnstileWidgetId = "";
+let turnstileMessage = "正在加载人机验证...";
 
-$: canSubmit = !isSubmitting && Boolean(humanProof);
+$: canSubmit = !isSubmitting && turnstileEnabled && Boolean(turnstileToken);
 
 const loadFriends = async () => {
 	if (!showList) {
@@ -55,9 +77,86 @@ const loadFriends = async () => {
 	}
 };
 
-const resetHumanProof = () => {
-	humanProof = null;
-	proofResetSignal += 1;
+const waitForTurnstile = async () => {
+	if (window.turnstile) return;
+
+	const startedAt = Date.now();
+	while (!window.turnstile) {
+		if (Date.now() - startedAt > 8000) {
+			throw new Error("人机验证脚本加载超时。");
+		}
+		await new Promise((resolve) => setTimeout(resolve, 50));
+	}
+};
+
+const loadTurnstileScript = async () => {
+	if (window.turnstile) return;
+
+	const scriptId = "cloudflare-turnstile-script";
+	if (!document.getElementById(scriptId)) {
+		const script = document.createElement("script");
+		script.id = scriptId;
+		script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+		script.async = true;
+		script.defer = true;
+		document.head.appendChild(script);
+	}
+
+	await waitForTurnstile();
+};
+
+const setupTurnstile = async () => {
+	if (!showForm) return;
+
+	try {
+		const response = await fetch("/api/turnstile/config");
+		const config = (await response.json()) as TurnstileConfig;
+
+		if (!response.ok || !config.enabled || !config.siteKey) {
+			turnstileEnabled = false;
+			turnstileMessage = "人机验证尚未配置，暂时无法提交友链申请。";
+			return;
+		}
+
+		turnstileEnabled = true;
+		turnstileMessage = "请完成人机验证。";
+
+		await loadTurnstileScript();
+		await tick();
+
+		if (!turnstileContainer || !window.turnstile) {
+			throw new Error("人机验证容器不可用。");
+		}
+
+		turnstileWidgetId = window.turnstile.render(turnstileContainer, {
+			sitekey: config.siteKey,
+			theme: "auto",
+			callback: (token: string) => {
+				turnstileToken = token;
+				turnstileMessage = "";
+			},
+			"expired-callback": () => {
+				turnstileToken = "";
+				turnstileMessage = "人机验证已过期，请重新验证。";
+			},
+			"error-callback": () => {
+				turnstileToken = "";
+				turnstileMessage = "人机验证加载失败，请刷新后重试。";
+			},
+		});
+	} catch (err) {
+		turnstileEnabled = false;
+		turnstileToken = "";
+		turnstileMessage = err instanceof Error ? err.message : "人机验证加载失败。";
+	}
+};
+
+const resetTurnstile = () => {
+	turnstileToken = "";
+	if (turnstileWidgetId && window.turnstile) {
+		window.turnstile.reset(turnstileWidgetId);
+		turnstileMessage = "请完成人机验证。";
+	}
 };
 
 const submit = async () => {
@@ -74,13 +173,10 @@ const submit = async () => {
 		const response = await fetch("/api/friends", {
 			method: "POST",
 			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ ...form, humanProof }),
+			body: JSON.stringify({ ...form, turnstileToken }),
 		});
 		const data = await response.json();
-		if (!response.ok) {
-			if (data.requiresTurnstile) resetHumanProof();
-			throw new Error(data.error ?? "提交失败。");
-		}
+		if (!response.ok) throw new Error(data.error ?? "提交失败。");
 
 		message = data.message ?? "申请已提交。";
 		form = { name: "", description: "", url: "", avatarUrl: "" };
@@ -88,7 +184,7 @@ const submit = async () => {
 		error = err instanceof Error ? err.message : "提交失败。";
 	} finally {
 		isSubmitting = false;
-		resetHumanProof();
+		resetTurnstile();
 	}
 };
 
@@ -98,6 +194,14 @@ const markBrokenAvatar = (url: string) => {
 
 onMount(() => {
 	void loadFriends();
+	void setupTurnstile();
+});
+
+onDestroy(() => {
+	if (typeof window === "undefined") return;
+	if (turnstileWidgetId && window.turnstile) {
+		window.turnstile.remove(turnstileWidgetId);
+	}
 });
 </script>
 
@@ -197,14 +301,13 @@ onMount(() => {
 		</label>
 	</div>
 
-	<div class="mt-4">
-		<HumanProof
-			context="friends"
-			resetSignal={proofResetSignal}
-			on:verified={(event) => (humanProof = event.detail)}
-			on:expired={() => (humanProof = null)}
-			on:error={() => (humanProof = null)}
-		/>
+	<div class="mt-4 rounded-xl bg-[var(--btn-plain-bg-hover)] px-4 py-3">
+		{#if turnstileEnabled}
+			<div bind:this={turnstileContainer} class="min-h-[65px]"></div>
+		{/if}
+		{#if turnstileMessage}
+			<div class="text-sm font-bold text-50">{turnstileMessage}</div>
+		{/if}
 	</div>
 
 	<div class="mt-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">

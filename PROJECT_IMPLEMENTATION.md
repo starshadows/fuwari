@@ -153,15 +153,13 @@ TURNSTILE_SITE_KEY     Cloudflare Turnstile 站点 key
 TURNSTILE_SECRET_KEY   Cloudflare Turnstile 校验 secret
 ```
 
-`TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` 现在是异常访问升级验证所需的可选配置；正常友链和评论验证默认走 ALTCHA。
-
 ## 5. 数据库设计
 
 ### 5.1 初始化方式
 
 数据库结构有两套入口：
 
-- 迁移文件：`migrations/0001_create_social_features.sql`、`migrations/0002_create_visitor_stats.sql`、`migrations/0003_create_rate_limits.sql`、`migrations/0004_create_comments_and_notifications.sql`。
+- 迁移文件：`migrations/0001_create_social_features.sql`、`migrations/0002_create_visitor_stats.sql`、`migrations/0003_create_rate_limits.sql`。
 - 线上初始化接口：`GET /api/setup/init-db` 搭配 `Authorization: Bearer <token>`，或 `POST /api/setup/init-db` 搭配 JSON `{"token":"..."}`。
 
 线上初始化接口是幂等的，重复访问不会清空已有数据。它主要是为了减少 Cloudflare 控制台里手动粘贴 SQL 的麻烦。
@@ -266,18 +264,18 @@ POST /api/friends
 申请页会先调用：
 
 ```text
-GET /api/anti-abuse/challenge?context=friends
+GET /api/turnstile/config
 ```
 
-这个接口默认返回 ALTCHA challenge。浏览器完成验证后，会把 `humanProof` 和友链申请一起发给 Worker。
+这个接口只返回公开的 `TURNSTILE_SITE_KEY` 和是否启用。浏览器拿到 site key 后渲染 Cloudflare Turnstile 小组件，并在提交友链时把 `turnstileToken` 一起发给 Worker。
 
-Worker 收到 `POST /api/friends` 后不会直接写库，而是先做 D1 限流、ALTCHA 校验、字段校验和重复 URL 检查。只有同一 IP/UA 哈希短时间内高频提交、连续验证码失败或明显 bot UA 时，才会要求 Cloudflare Turnstile 并调用 Siteverify：
+Worker 收到 `POST /api/friends` 后不会直接写库，而是先做 D1 限流、字段校验和重复 URL 检查，再调用 Cloudflare Turnstile Siteverify：
 
 ```text
 https://challenges.cloudflare.com/turnstile/v0/siteverify
 ```
 
-升级校验时使用 `TURNSTILE_SECRET_KEY`，并附带 `cf-connecting-ip` 作为可选的 `remoteip`。Turnstile 没配置时，正常 ALTCHA 提交仍可进入 pending，异常访问会收到明确错误。友链链接必须是 `https://`，头像必须是 `https://` 或站内媒体路径，同一个 URL 已经待审核或已通过时会拒绝重复申请。
+校验时使用 `TURNSTILE_SECRET_KEY`，并附带 `cf-connecting-ip` 作为可选的 `remoteip`。校验通过后才会把申请写入 D1；如果 Turnstile 没配置、token 缺失、token 过期或校验失败，接口会拒绝提交。友链链接必须是 `https://`，头像必须是 `https://` 或站内媒体路径，同一个 URL 已经待审核或已通过时会拒绝重复申请。
 
 提交后状态默认为 `pending`，不会立刻出现在友链页面。
 
@@ -558,7 +556,6 @@ src/components/widget/TOC.astro
 ```text
 GET  /api/friends
 POST /api/friends
-GET  /api/anti-abuse/challenge?context=friends|comments
 GET  /api/turnstile/config
 
 GET  /api/music/tracks
@@ -566,10 +563,6 @@ GET  /api/music/tracks
 POST /api/stats/visit
 POST /api/stats/heartbeat
 GET  /api/stats/summary
-
-GET  /api/comments/config
-POST /api/comments/session
-POST /api/twikoo
 
 GET  /media/music/<key>
 GET  /media/avatars/<key>
@@ -599,12 +592,6 @@ PATCH  /api/admin/music/:id
 DELETE /api/admin/music/:id
 GET    /api/admin/music/objects
 POST   /api/admin/music/import
-
-GET    /api/admin/settings/comments
-POST   /api/admin/settings/comments
-GET    /api/admin/settings/telegram
-POST   /api/admin/settings/telegram
-POST   /api/admin/settings/telegram/test
 ```
 
 ### 初始化 API
@@ -676,7 +663,7 @@ corepack pnpm exec wrangler deploy
 
 需要注意：
 
-- 友链申请是公开接口，需要保留字段校验、ALTCHA 校验、异常访问 Turnstile 升级、D1 限流和重复 URL 检查。
+- 友链申请是公开接口，需要保留字段校验、Turnstile 校验、D1 限流和重复 URL 检查。
 - 统计写入接口会校验同源 `Origin` / `Referer`，并使用 D1 限流；限流 actor 只存哈希，不保存原始 IP。
 - Worker 会给响应附加基础安全头：`X-Content-Type-Options`、`Referrer-Policy`、`Permissions-Policy` 和最小 CSP。
 - 头像上传限制为常见位图类型，并限制大小。

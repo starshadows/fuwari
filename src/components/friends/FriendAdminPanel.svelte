@@ -2,7 +2,6 @@
 import { onMount } from "svelte";
 
 type FriendStatus = "pending" | "approved" | "rejected" | "all";
-type AdminTab = "friends" | "music" | "comments" | "notifications";
 
 type Friend = {
 	id: number;
@@ -39,25 +38,13 @@ type MusicObject = {
 	audioUrl: string;
 };
 
-type CommentSettings = {
-	enabled: boolean;
-};
-
-type TelegramSettings = {
-	enabled: boolean;
-	botTokenConfigured: boolean;
-	botTokenHint: string;
-	chatId: string;
-	threadId: string;
-};
-
 const tokenKey = "fuwari-admin-token";
 const statusOptions: FriendStatus[] = ["pending", "approved", "rejected", "all"];
 
 let tokenInput = "";
 let token = "";
 let isAuthed = false;
-let activeTab: AdminTab = "friends";
+let activeTab: "friends" | "music" = "friends";
 let friendStatus: FriendStatus = "pending";
 let friends: Friend[] = [];
 let tracks: Track[] = [];
@@ -68,23 +55,6 @@ let error = "";
 let avatarFileInput: HTMLInputElement;
 let isScanningMusic = false;
 let isImportingMusic = false;
-let isSavingComments = false;
-let isSavingTelegram = false;
-let isTestingTelegram = false;
-
-let commentSettings: CommentSettings = {
-	enabled: true,
-};
-
-let telegramSettings: TelegramSettings = {
-	enabled: false,
-	botTokenConfigured: false,
-	botTokenHint: "",
-	chatId: "",
-	threadId: "",
-};
-
-let telegramTokenInput = "";
 
 let musicForm = {
 	title: "",
@@ -168,81 +138,6 @@ const loadMusic = async () => {
 	tracks = data.tracks ?? [];
 };
 
-const loadCommentSettings = async () => {
-	const data = await adminFetch("/api/admin/settings/comments");
-	commentSettings = {
-		enabled: Boolean(data.enabled),
-	};
-};
-
-const saveCommentSettings = async () => {
-	isSavingComments = true;
-	try {
-		const data = await adminFetch("/api/admin/settings/comments", {
-			method: "POST",
-			body: JSON.stringify(commentSettings),
-		});
-		commentSettings.enabled = Boolean(data.enabled);
-		setMessage("评论设置已保存。");
-	} catch (err) {
-		setError(err instanceof Error ? err.message : "评论设置保存失败。");
-	} finally {
-		isSavingComments = false;
-	}
-};
-
-const loadTelegramSettings = async () => {
-	const data = await adminFetch("/api/admin/settings/telegram");
-	telegramSettings = {
-		enabled: Boolean(data.enabled),
-		botTokenConfigured: Boolean(data.botTokenConfigured),
-		botTokenHint: data.botTokenHint ?? "",
-		chatId: data.chatId ?? "",
-		threadId: data.threadId ?? "",
-	};
-	telegramTokenInput = "";
-};
-
-const saveTelegramSettings = async () => {
-	isSavingTelegram = true;
-	try {
-		const data = await adminFetch("/api/admin/settings/telegram", {
-			method: "POST",
-			body: JSON.stringify({
-				enabled: telegramSettings.enabled,
-				botToken: telegramTokenInput,
-				chatId: telegramSettings.chatId,
-				threadId: telegramSettings.threadId,
-			}),
-		});
-		telegramSettings = {
-			enabled: Boolean(data.enabled),
-			botTokenConfigured: Boolean(data.botTokenConfigured),
-			botTokenHint: data.botTokenHint ?? "",
-			chatId: data.chatId ?? "",
-			threadId: data.threadId ?? "",
-		};
-		telegramTokenInput = "";
-		setMessage("Telegram 通知设置已保存。");
-	} catch (err) {
-		setError(err instanceof Error ? err.message : "Telegram 设置保存失败。");
-	} finally {
-		isSavingTelegram = false;
-	}
-};
-
-const sendTelegramTest = async () => {
-	isTestingTelegram = true;
-	try {
-		await adminFetch("/api/admin/settings/telegram/test", { method: "POST" });
-		setMessage("测试通知已发送。");
-	} catch (err) {
-		setError(err instanceof Error ? err.message : "测试通知发送失败。");
-	} finally {
-		isTestingTelegram = false;
-	}
-};
-
 const loadMusicObjects = async () => {
 	isScanningMusic = true;
 	try {
@@ -294,16 +189,6 @@ const fillMusicFormFromObject = (object: MusicObject) => {
 const openMusicTab = async () => {
 	activeTab = "music";
 	if (musicObjects.length === 0) await loadMusicObjects();
-};
-
-const openCommentsTab = async () => {
-	activeTab = "comments";
-	await loadCommentSettings();
-};
-
-const openNotificationsTab = async () => {
-	activeTab = "notifications";
-	await loadTelegramSettings();
 };
 
 const formatFileSize = (size: number) => {
@@ -468,7 +353,7 @@ onMount(async () => {
             <div class="relative pl-4 text-2xl font-bold text-90 before:absolute before:left-0 before:top-2 before:h-5 before:w-1 before:rounded-md before:bg-[var(--primary)]">
                 内容管理
             </div>
-            <div class="flex flex-wrap gap-2">
+            <div class="flex gap-2">
                 <button
                     class={`btn-regular h-10 rounded-xl px-4 font-bold ${activeTab === "friends" ? "!bg-[var(--btn-regular-bg-active)]" : ""}`}
                     on:click={() => (activeTab = "friends")}
@@ -480,18 +365,6 @@ onMount(async () => {
                     on:click={openMusicTab}
                 >
                     音乐
-                </button>
-                <button
-                    class={`btn-regular h-10 rounded-xl px-4 font-bold ${activeTab === "comments" ? "!bg-[var(--btn-regular-bg-active)]" : ""}`}
-                    on:click={openCommentsTab}
-                >
-                    评论
-                </button>
-                <button
-                    class={`btn-regular h-10 rounded-xl px-4 font-bold ${activeTab === "notifications" ? "!bg-[var(--btn-regular-bg-active)]" : ""}`}
-                    on:click={openNotificationsTab}
-                >
-                    通知
                 </button>
                 <button class="btn-plain h-10 rounded-xl px-4 font-bold" on:click={logout}>
                     退出
@@ -580,7 +453,7 @@ onMount(async () => {
                     </div>
                 {/each}
             </div>
-        {:else if activeTab === "music"}
+        {:else}
             <section class="mb-4 rounded-xl bg-[var(--btn-plain-bg-hover)] p-4">
                 <div class="mb-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                     <div>
@@ -693,58 +566,6 @@ onMount(async () => {
                     </div>
                 {/each}
             </div>
-        {:else if activeTab === "comments"}
-            <section class="rounded-xl bg-[var(--btn-plain-bg-hover)] p-4">
-                <div class="mb-3 font-bold text-75">评论区开关</div>
-                <label class="flex items-center gap-2 text-sm text-75">
-                    <input type="checkbox" bind:checked={commentSettings.enabled} />
-                    启用文章评论区
-                </label>
-                <button
-                    type="button"
-                    class="btn-regular mt-4 h-10 rounded-xl px-4 font-bold"
-                    disabled={isSavingComments}
-                    on:click={saveCommentSettings}
-                >
-                    {isSavingComments ? "保存中" : "保存设置"}
-                </button>
-            </section>
-        {:else if activeTab === "notifications"}
-            <section class="rounded-xl bg-[var(--btn-plain-bg-hover)] p-4">
-                <div class="mb-3 font-bold text-75">Telegram 友链通知</div>
-                <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-                    <label class="flex items-center gap-2 text-sm text-75 md:col-span-2">
-                        <input type="checkbox" bind:checked={telegramSettings.enabled} />
-                        启用通知
-                    </label>
-                    <input
-                        bind:value={telegramTokenInput}
-                        type="password"
-                        placeholder={telegramSettings.botTokenConfigured ? `Bot Token 已配置：${telegramSettings.botTokenHint}` : "Bot Token"}
-                        class="admin-input md:col-span-2"
-                    />
-                    <input bind:value={telegramSettings.chatId} placeholder="Chat ID" class="admin-input" />
-                    <input bind:value={telegramSettings.threadId} placeholder="Topic / Thread ID（可选）" class="admin-input" />
-                </div>
-                <div class="mt-4 flex flex-wrap gap-2">
-                    <button
-                        type="button"
-                        class="btn-regular h-10 rounded-xl px-4 font-bold"
-                        disabled={isSavingTelegram}
-                        on:click={saveTelegramSettings}
-                    >
-                        {isSavingTelegram ? "保存中" : "保存设置"}
-                    </button>
-                    <button
-                        type="button"
-                        class="btn-plain h-10 rounded-xl px-4 font-bold"
-                        disabled={isTestingTelegram}
-                        on:click={sendTelegramTest}
-                    >
-                        {isTestingTelegram ? "发送中" : "发送测试通知"}
-                    </button>
-                </div>
-            </section>
         {/if}
     </div>
 {/if}
