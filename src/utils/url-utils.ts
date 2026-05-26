@@ -16,6 +16,25 @@ export function getPostUrlBySlug(slug: string): string {
 	return url(`/posts/${slug}/`);
 }
 
+export function getPostSlugById(id: string): string {
+	return id
+		.replace(/\.(md|mdx)$/i, "")
+		.replace(/\/index$/i, "");
+}
+
+export function getPostContentDir(entry: { id: string; filePath?: string }): string {
+	const normalizedFilePath = entry.filePath?.replace(/\\/g, "/") ?? "";
+	const marker = "src/content/posts/";
+	const markerIndex = normalizedFilePath.indexOf(marker);
+
+	if (markerIndex >= 0) {
+		return getDir(normalizedFilePath.slice(markerIndex + marker.length));
+	}
+
+	const idWithExtension = /\.(md|mdx)$/i.test(entry.id) ? entry.id : `${entry.id}.md`;
+	return getDir(idWithExtension);
+}
+
 export function getTagUrl(tag: string): string {
 	if (!tag) return url("/archive/");
 	return url(`/archive/?tag=${encodeURIComponent(tag.trim())}`);

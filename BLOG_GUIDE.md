@@ -179,7 +179,7 @@ Cloudflare Pages 发布的就是这个目录。
 
 `/friends/` 只展示已审核的友链，`/friends/apply/` 是访客申请入口。访客提交后不会立刻展示，会进入待审核状态。
 
-友链申请启用了 Cloudflare Turnstile 人机验证。前台会先从 `/api/turnstile/config` 读取站点 key，再把验证 token 随申请一起提交；Worker 会用 Turnstile secret 调用 Cloudflare 校验，通过后才会写入 D1。没有配置 Turnstile 时，申请按钮会保持不可提交状态。友链地址必须使用 `https://`，头像必须使用 `https://` 或站内 `/media/avatars/`、`/media/covers/` 地址；同一个站点重复申请会被拒绝。
+友链申请默认使用 ALTCHA 人机验证。前台会从 `/api/anti-abuse/challenge?context=friends` 获取 challenge，并把 `humanProof` 随申请一起提交；Worker 校验通过后才会写入 D1。只有同一 IP/UA 哈希短时间内高频提交、连续验证码失败或明显 bot UA 时，才会升级到 Cloudflare Turnstile。没有配置 Turnstile 时，正常 ALTCHA 提交不受影响，异常流量会收到明确错误。友链地址必须使用 `https://`，头像必须使用 `https://` 或站内 `/media/avatars/`、`/media/covers/` 地址；同一个站点重复申请会被拒绝。
 
 `/friends/admin/` 是友链和音乐后台，可以额外用 Cloudflare Access 保护；后台 API 仍然需要 `ADMIN_TOKEN`。后台可以做这些事：
 
@@ -188,6 +188,8 @@ Cloudflare Pages 发布的就是这个目录。
 - 调整友链排序。
 - 上传头像到 R2，得到 `/media/avatars/...` 这样的公开地址。
 - 扫描 R2 音乐文件，自动导入和维护音乐列表。
+- 开关文章评论区。
+- 配置 Telegram Bot 友链申请通知，并发送测试通知。
 
 音乐文件需要你手动上传到 R2 的 `music/` 目录，例如：
 
@@ -219,7 +221,7 @@ Cloudflare R2 控制台上传文件夹不是同步工具；批量上传被浏览
    - D1 数据库绑定名必须填 `DB`，选择你刚创建的 D1。
    - R2 存储桶绑定名必须填 `MEDIA_BUCKET`，选择你刚创建的 R2。
 5. 可选：设置生产后台口令，Secret 名称填 `ADMIN_TOKEN`。
-6. 在 Cloudflare Turnstile 创建站点，域名填博客域名；Worker 变量填 `TURNSTILE_SITE_KEY`，Secret 填 `TURNSTILE_SECRET_KEY`。
+6. 可选：在 Cloudflare Turnstile 创建站点，域名填博客域名；Worker 变量填 `TURNSTILE_SITE_KEY`，Secret 填 `TURNSTILE_SECRET_KEY`。它只用于异常访问升级验证，正常访客默认走 ALTCHA。
 
 仓库里的 `wrangler.jsonc` 不保存 D1/R2 的资源名或 UUID，只声明代码需要的绑定变量名。Cloudflare 里资源叫什么都可以，只要绑定变量名对上，代码就会通过 `env.DB` 和 `env.MEDIA_BUCKET` 使用它们。`wrangler.jsonc` 已设置 `keep_vars: true`，这样下次 `wrangler deploy` 不会删除 Cloudflare 控制台里手动维护的纯文本变量，例如 `TURNSTILE_SITE_KEY`。
 
