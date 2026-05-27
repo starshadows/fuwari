@@ -80,6 +80,12 @@ const tocEnabled = siteConfig.toc.enable;
     }
 </style>
 
+<style is:global>
+    #sidebar-sticky > * {
+        flex-shrink: 0;
+    }
+</style>
+
 <script is:inline define:vars={{ tocEnabled }}>
 function toggleSidebarToc() {
     const widget = document.getElementById("toc-sidebar-widget");
