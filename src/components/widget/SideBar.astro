@@ -165,9 +165,7 @@ function scheduleSidebarTocToggle() {
         sidebarTocState.frame = 0;
         toggleSidebarToc();
     });
-    sidebarTocState.timers = [
-        window.setTimeout(toggleSidebarToc, 120),
-    ];
+    sidebarTocState.timers = [];
 }
 
 const sidebarTocState = window.__fuwariSidebarTocState ??= {
@@ -393,16 +391,10 @@ function setupSidebarScrollSync() {
 
 function setupSidebarScrollSyncAfterNavigation() {
     teardownSidebarScrollSync();
-    resetSidebarScrollPosition();
     sidebarScrollState.lastScrollIntentAt = 0;
     sidebarScrollState.lastWindowScrollY = window.scrollY;
-
-    sidebarScrollState.timers = [
-        window.setTimeout(() => {
-            sidebarScrollState.navigating = false;
-            setupSidebarScrollSync();
-        }, 0),
-    ];
+    sidebarScrollState.navigating = false;
+    sidebarScrollState.timers = [];
 }
 
 const sidebarScrollIsolationState = window.__fuwariSidebarScrollIsolationState ??= {
@@ -417,7 +409,7 @@ const setupSidebarScrollIsolationSwup = () => {
 };
 
 const setupInitialSidebarScrollSync = () => {
-    window.requestAnimationFrame(setupSidebarScrollSync);
+    sidebarScrollState.navigating = false;
 };
 
 setupSidebarScrollIsolation();
@@ -448,7 +440,6 @@ const setupSidebarScrollSyncSwup = () => {
         sidebarScrollState.lastScrollIntentAt = 0;
         sidebarScrollState.lastWindowScrollY = window.scrollY;
         teardownSidebarScrollSync();
-        resetSidebarScrollPosition();
     });
     window.swup?.hooks?.on("page:view", setupSidebarScrollSyncAfterNavigation);
 };

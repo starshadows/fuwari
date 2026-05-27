@@ -551,6 +551,12 @@ src/components/widget/SideBar.astro
 src/components/widget/TOC.astro
 ```
 
+Navigation performance note (2026-05):
+
+- Sidebar scroll position is preserved during Swup page switches to avoid visible vertical jumps.
+- TOC visibility is synchronized once on the next animation frame; avoid delayed fallback timers that can make the sidebar bounce after article navigation.
+- MusicPlayer is hydrated with `client:idle`, so it should not compete with the initial page switch.
+
 ## 12. API 总览
 
 ### 公开 API
