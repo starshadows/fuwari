@@ -554,7 +554,9 @@ src/components/widget/TOC.astro
 Navigation performance note (2026-05):
 
 - Sidebar scroll position is preserved during Swup page switches to avoid visible vertical jumps.
+- During Swup navigation the sidebar is briefly locked hidden and restored after layout settles, which masks the home/post sticky-top realignment when a user clicks a post from a scrolled homepage.
 - TOC visibility is synchronized once on the next animation frame; avoid delayed fallback timers that can make the sidebar bounce after article navigation.
+- The article TOC card does not run its own onload animation when revealed, avoiding a second sidebar bounce.
 - MusicPlayer is hydrated with `client:idle`, so it should not compete with the initial page switch.
 
 ## 12. API 总览

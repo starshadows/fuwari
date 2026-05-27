@@ -32,7 +32,7 @@ const postPathPrefix = url("/posts/");
         <Categories class="onload-animation" style="animation-delay: 150ms"></Categories>
         <Tag class="onload-animation" style="animation-delay: 200ms"></Tag>
         <div id="toc-sidebar-widget" class:list={["min-h-0", {"hidden": !showToc}]}>
-            <WidgetLayout name="目录" id="article-toc" class="onload-animation !shrink min-h-0" style="animation-delay: 250ms">
+            <WidgetLayout name="目录" id="article-toc" class="!shrink min-h-0">
                 <div id="toc-sidebar-scroll" data-toc-scroll class="overflow-y-auto overflow-x-hidden hide-scrollbar">
                     <div id="toc" class="relative w-full transition-swup-fade">
                         {tocEnabled && <TOC headings={headings}></TOC>}
@@ -46,6 +46,14 @@ const postPathPrefix = url("/posts/");
 <style>
     #sidebar {
         min-height: 0;
+        transition: opacity 120ms ease;
+        overflow-anchor: none;
+    }
+
+    #sidebar.sidebar-navigation-lock {
+        opacity: 0 !important;
+        visibility: hidden !important;
+        pointer-events: none;
     }
 
     #sidebar-sticky {
@@ -56,6 +64,7 @@ const postPathPrefix = url("/posts/");
         overscroll-behavior-y: contain;
         padding-bottom: 1rem;
         scrollbar-width: none;
+        overflow-anchor: none;
     }
 
     #sidebar-sticky::-webkit-scrollbar {
@@ -279,6 +288,7 @@ function clamp(value, min, max) {
 
 const sidebarScrollState = window.__fuwariSidebarScrollState ??= {
     timers: [],
+    revealTimer: 0,
     swupBound: false,
     navigating: false,
     lastScrollIntentAt: 0,
@@ -290,10 +300,36 @@ function clearSidebarScrollSyncTimers() {
     sidebarScrollState.timers = [];
 }
 
-function resetSidebarScrollPosition() {
-    const sidebar = document.getElementById("sidebar-sticky");
+function hideSidebarDuringNavigation() {
+    if (sidebarScrollState.revealTimer) {
+        window.clearTimeout(sidebarScrollState.revealTimer);
+        sidebarScrollState.revealTimer = 0;
+    }
+
+    const sidebar = document.getElementById("sidebar");
     if (!sidebar) return;
-    sidebar.scrollTop = 0;
+
+    sidebar.classList.add("sidebar-navigation-lock");
+    sidebar.style.setProperty("opacity", "0", "important");
+    sidebar.style.setProperty("visibility", "hidden", "important");
+    sidebar.style.pointerEvents = "none";
+}
+
+function revealSidebarAfterNavigation(delay = 140) {
+    if (sidebarScrollState.revealTimer) {
+        window.clearTimeout(sidebarScrollState.revealTimer);
+    }
+
+    sidebarScrollState.revealTimer = window.setTimeout(() => {
+        const sidebar = document.getElementById("sidebar");
+        if (sidebar) {
+            sidebar.classList.remove("sidebar-navigation-lock");
+            sidebar.style.removeProperty("opacity");
+            sidebar.style.removeProperty("visibility");
+            sidebar.style.pointerEvents = "";
+        }
+        sidebarScrollState.revealTimer = 0;
+    }, delay);
 }
 
 function teardownSidebarScrollSync() {
@@ -395,6 +431,8 @@ function setupSidebarScrollSyncAfterNavigation() {
     sidebarScrollState.lastWindowScrollY = window.scrollY;
     sidebarScrollState.navigating = false;
     sidebarScrollState.timers = [];
+    setupSidebarScrollSync();
+    revealSidebarAfterNavigation();
 }
 
 const sidebarScrollIsolationState = window.__fuwariSidebarScrollIsolationState ??= {
@@ -410,6 +448,7 @@ const setupSidebarScrollIsolationSwup = () => {
 
 const setupInitialSidebarScrollSync = () => {
     sidebarScrollState.navigating = false;
+    window.requestAnimationFrame(setupSidebarScrollSync);
 };
 
 setupSidebarScrollIsolation();
@@ -433,12 +472,14 @@ const setupSidebarScrollSyncSwup = () => {
         sidebarScrollState.navigating = true;
         sidebarScrollState.lastScrollIntentAt = 0;
         sidebarScrollState.lastWindowScrollY = window.scrollY;
+        hideSidebarDuringNavigation();
         teardownSidebarScrollSync();
     });
     window.swup?.hooks?.on("content:replace", () => {
         sidebarScrollState.navigating = true;
         sidebarScrollState.lastScrollIntentAt = 0;
         sidebarScrollState.lastWindowScrollY = window.scrollY;
+        hideSidebarDuringNavigation();
         teardownSidebarScrollSync();
     });
     window.swup?.hooks?.on("page:view", setupSidebarScrollSyncAfterNavigation);
