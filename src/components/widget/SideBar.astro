@@ -219,6 +219,7 @@ const sidebarScrollState = window.__fuwariSidebarScrollState ??= {
     swupBound: false,
     navigating: false,
     lastScrollIntentAt: 0,
+    lastWindowScrollY: window.scrollY,
 };
 
 function clearSidebarScrollSyncTimers() {
@@ -275,23 +276,30 @@ function setupSidebarScrollSync() {
     if (!sidebar || !tocWidget || !postContainer) return;
 
     let animationFrame = 0;
+    sidebarScrollState.lastWindowScrollY = window.scrollY;
 
     const syncSidebarToArticle = () => {
         animationFrame = 0;
+        const currentScrollY = window.scrollY;
+        const previousScrollY = sidebarScrollState.lastWindowScrollY;
+        const isScrollingUp = currentScrollY < previousScrollY - 1;
+
+        sidebarScrollState.lastWindowScrollY = currentScrollY;
+
         if (!desktopQuery.matches || tocWidget.classList.contains("hidden")) return;
         if (sidebarScrollState.navigating) return;
 
-        const postTop = postContainer.getBoundingClientRect().top + window.scrollY;
+        const postTop = postContainer.getBoundingClientRect().top + currentScrollY;
         const syncStart = Math.max(0, postTop - 180);
-        if (window.scrollY <= syncStart + 2) {
+        if (currentScrollY <= syncStart + 2) {
             sidebar.scrollTop = 0;
             return;
         }
 
-        if (Date.now() - sidebarScrollState.lastScrollIntentAt > 1200) return;
+        if (!isScrollingUp && Date.now() - sidebarScrollState.lastScrollIntentAt > 1200) return;
 
         const syncEnd = syncStart + Math.min(760, Math.max(360, postContainer.offsetHeight * 0.16));
-        const progress = clamp((window.scrollY - syncStart) / (syncEnd - syncStart), 0, 1);
+        const progress = clamp((currentScrollY - syncStart) / (syncEnd - syncStart), 0, 1);
         const tocTarget = clamp(
             tocWidget.offsetTop - 16,
             0,
@@ -349,6 +357,7 @@ function setupSidebarScrollSyncAfterNavigation() {
     teardownSidebarScrollSync();
     resetSidebarScrollPosition();
     sidebarScrollState.lastScrollIntentAt = 0;
+    sidebarScrollState.lastWindowScrollY = window.scrollY;
 
     sidebarScrollState.timers = [
         window.setTimeout(() => {
@@ -394,6 +403,7 @@ const setupSidebarScrollSyncSwup = () => {
     window.swup?.hooks?.on("visit:start", () => {
         sidebarScrollState.navigating = true;
         sidebarScrollState.lastScrollIntentAt = 0;
+        sidebarScrollState.lastWindowScrollY = window.scrollY;
         hideSidebarDuringNavigation();
         teardownSidebarScrollSync();
         resetSidebarScrollPosition();
@@ -401,6 +411,7 @@ const setupSidebarScrollSyncSwup = () => {
     window.swup?.hooks?.on("content:replace", () => {
         sidebarScrollState.navigating = true;
         sidebarScrollState.lastScrollIntentAt = 0;
+        sidebarScrollState.lastWindowScrollY = window.scrollY;
         hideSidebarDuringNavigation();
         teardownSidebarScrollSync();
         resetSidebarScrollPosition();
