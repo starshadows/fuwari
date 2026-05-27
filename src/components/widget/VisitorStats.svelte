@@ -22,7 +22,8 @@ type StatsSummary = {
 };
 
 const VISITOR_ID_KEY = "starshadow-visitor-id";
-const HEARTBEAT_INTERVAL_MS = 60 * 1000;
+const MIN_HEARTBEAT_DELAY_MS = 60 * 1000;
+const MAX_HEARTBEAT_DELAY_MS = 120 * 1000;
 
 let stats: StatsSummary | null = null;
 let isLoading = true;
@@ -85,64 +86,109 @@ const getVisitorId = () => {
 
 const currentPath = () => window.location.pathname || "/";
 
-const sendStatsRequest = async (endpoint: "visit" | "heartbeat" | "summary") => {
-	const path = currentPath();
-	const init =
-		endpoint === "summary"
-			? undefined
-			: {
-					method: "POST",
-					headers: { "content-type": "application/json" },
-					body: JSON.stringify({
-						path,
-						visitorId: getVisitorId(),
-					}),
-				};
-	const url =
-		endpoint === "summary"
-			? `/api/stats/summary?path=${encodeURIComponent(path)}`
-			: `/api/stats/${endpoint}`;
-	const response = await fetch(url, init);
+const randomHeartbeatDelay = () =>
+	MIN_HEARTBEAT_DELAY_MS +
+	Math.floor(Math.random() * (MAX_HEARTBEAT_DELAY_MS - MIN_HEARTBEAT_DELAY_MS + 1));
+
+const statsPayload = (path: string) =>
+	JSON.stringify({
+		path,
+		visitorId: getVisitorId(),
+	});
+
+const sendStatsPost = (endpoint: "visit" | "heartbeat", path = currentPath()) => {
+	const url = `/api/stats/${endpoint}`;
+	const body = statsPayload(path);
+
+	try {
+		if (navigator.sendBeacon) {
+			const blob = new Blob([body], { type: "application/json" });
+			if (navigator.sendBeacon(url, blob)) return;
+		}
+	} catch {
+		// Ignore write failures; stats must never block navigation or rendering.
+	}
+
+	void fetch(url, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body,
+		keepalive: true,
+	}).catch(() => {
+		// Ignore write failures; the next visit or heartbeat can recover.
+	});
+};
+
+const loadStatsSummary = async (path = currentPath()) => {
+	const response = await fetch(`/api/stats/summary?path=${encodeURIComponent(path)}`);
 	const data = await response.json();
 	if (!response.ok) throw new Error(data.error ?? "统计加载失败。");
+	if (path !== currentPath()) return;
+
 	stats = data;
 	error = "";
 	isLoading = false;
 };
 
-const recordVisit = async () => {
+const recordVisit = () => {
 	const path = currentPath();
 	const now = Date.now();
 	if (path === lastTrackedPath && now - lastTrackedAt < 1500) return;
 
 	lastTrackedPath = path;
 	lastTrackedAt = now;
-	try {
-		await sendStatsRequest("visit");
-	} catch (err) {
+	sendStatsPost("visit", path);
+	void loadStatsSummary(path).catch((err) => {
 		error = err instanceof Error ? err.message : "统计加载失败。";
 		isLoading = false;
-	}
+	});
 };
 
-const sendHeartbeat = async () => {
-	try {
-		await sendStatsRequest("heartbeat");
-	} catch {
-		// Keep the last visible stats; the next heartbeat or page view can recover.
+const clearHeartbeat = () => {
+	if (heartbeatTimer) window.clearTimeout(heartbeatTimer);
+	heartbeatTimer = undefined;
+};
+
+const scheduleHeartbeat = () => {
+	clearHeartbeat();
+	if (document.hidden) return;
+
+	heartbeatTimer = window.setTimeout(() => {
+		if (document.hidden) return;
+		sendHeartbeat();
+		scheduleHeartbeat();
+	}, randomHeartbeatDelay());
+};
+
+const sendHeartbeat = () => {
+	sendStatsPost("heartbeat");
+	void loadStatsSummary().catch(() => {
+		// Keep the last visible stats; the next page view or heartbeat can recover.
+	});
+};
+
+const handleVisibilityChange = () => {
+	if (document.hidden) {
+		clearHeartbeat();
+		return;
 	}
+
+	scheduleHeartbeat();
 };
 
 const setupSwupTracking = () => {
 	const swup = (window as unknown as {
 		swup?: { hooks?: { on?: (event: string, handler: () => void) => void } };
 	}).swup;
-	swup?.hooks?.on?.("page:view", recordVisit);
+	swup?.hooks?.on?.("page:view", () => {
+		recordVisit();
+	});
 };
 
 onMount(() => {
-	recordVisit();
-	heartbeatTimer = window.setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS);
+	window.setTimeout(recordVisit, 0);
+	scheduleHeartbeat();
+	document.addEventListener("visibilitychange", handleVisibilityChange);
 
 	if ((window as unknown as { swup?: unknown }).swup) {
 		setupSwupTracking();
@@ -152,7 +198,9 @@ onMount(() => {
 });
 
 onDestroy(() => {
-	if (heartbeatTimer) window.clearInterval(heartbeatTimer);
+	if (typeof window === "undefined" || typeof document === "undefined") return;
+	clearHeartbeat();
+	document.removeEventListener("visibilitychange", handleVisibilityChange);
 });
 </script>
 

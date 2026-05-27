@@ -31,6 +31,8 @@ let volume = 0.72;
 let playMode: PlayMode = "order";
 let isPlaylistOpen = false;
 let hiddenCoverUrls = new Set<string>();
+let scheduledTrackLoadId: number | undefined;
+let scheduledTrackLoadType: "idle" | "timeout" | undefined;
 
 $: activeTrack = tracks[activeIndex];
 $: progress = duration > 0 ? (currentTime / duration) * 100 : 0;
@@ -142,6 +144,30 @@ const hideCover = (url: string) => {
 	hiddenCoverUrls = new Set([...hiddenCoverUrls, url]);
 };
 
+const scheduleTrackLoad = () => {
+	if ("requestIdleCallback" in window) {
+		scheduledTrackLoadType = "idle";
+		scheduledTrackLoadId = window.requestIdleCallback(() => loadTracks(), { timeout: 1500 });
+		return;
+	}
+
+	scheduledTrackLoadType = "timeout";
+	scheduledTrackLoadId = window.setTimeout(() => loadTracks(), 600);
+};
+
+const cancelScheduledTrackLoad = () => {
+	if (scheduledTrackLoadId === undefined) return;
+
+	if (scheduledTrackLoadType === "idle" && "cancelIdleCallback" in window) {
+		window.cancelIdleCallback(scheduledTrackLoadId);
+	} else {
+		window.clearTimeout(scheduledTrackLoadId);
+	}
+
+	scheduledTrackLoadId = undefined;
+	scheduledTrackLoadType = undefined;
+};
+
 onMount(() => {
 	audio = new Audio();
 	audio.preload = "metadata";
@@ -167,10 +193,11 @@ onMount(() => {
 		isPlaying = true;
 	});
 
-	loadTracks();
+	scheduleTrackLoad();
 });
 
 onDestroy(() => {
+	cancelScheduledTrackLoad();
 	if (audio) {
 		audio.pause();
 		audio.src = "";

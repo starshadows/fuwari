@@ -291,6 +291,7 @@ let rateLimitSchemaReady = false;
 
 export default {
 	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+		const startedAt = performance.now();
 		const requestUrl = new URL(request.url);
 
 		try {
@@ -300,24 +301,25 @@ export default {
 				response = json({
 					error: "Setup tokens are no longer accepted in URL paths. Use /api/setup/init-db with Authorization: Bearer <token> or a POST JSON body.",
 				}, 410);
-				return withSecurityHeaders(response);
+				return withServerTiming(withSecurityHeaders(response), startedAt);
 			}
 
 			if (requestUrl.pathname.startsWith("/api/")) {
 				response = await handleApi(request, env, requestUrl, ctx);
-				return withSecurityHeaders(response);
+				return withServerTiming(withSecurityHeaders(response), startedAt);
 			}
 
 			if (requestUrl.pathname.startsWith("/media/")) {
 				response = await handleMedia(request, env, requestUrl);
-				return withSecurityHeaders(response);
+				return withServerTiming(withSecurityHeaders(response), startedAt);
 			}
 
 			response = await env.ASSETS.fetch(request);
 			return withSecurityHeaders(response);
 		} catch (error) {
 			console.error(error);
-			return json({ error: "服务器暂时开小差了，请稍后再试。" }, 500);
+			const response = json({ error: "服务器暂时开小差了，请稍后再试。" }, 500);
+			return withServerTiming(response, startedAt);
 		}
 	},
 };
@@ -335,7 +337,7 @@ async function handleApi(
 	}
 
 	if (pathname === "/api/turnstile/config" && request.method === "GET") {
-		return getTurnstileConfig(env);
+		return cachedResponse(request, ctx, 300, () => getTurnstileConfig(env));
 	}
 
 	if (pathname === "/api/anti-abuse/challenge" && request.method === "GET") {
@@ -343,7 +345,7 @@ async function handleApi(
 	}
 
 	if (pathname === "/api/comments/config" && request.method === "GET") {
-		return getCommentsConfig(env);
+		return cachedResponse(request, ctx, 300, () => getCommentsConfig(env));
 	}
 
 	if (pathname === "/api/comments/session" && request.method === "POST") {
@@ -355,16 +357,18 @@ async function handleApi(
 	}
 
 	if (pathname === "/api/friends") {
-		if (request.method === "GET") return getApprovedFriends(env);
+		if (request.method === "GET") {
+			return cachedResponse(request, ctx, 300, () => getApprovedFriends(env));
+		}
 		if (request.method === "POST") return submitFriendLink(request, env, ctx);
 	}
 
 	if (pathname === "/api/music/tracks" && request.method === "GET") {
-		return getPublicMusicTracks(env);
+		return cachedResponse(request, ctx, 300, () => getPublicMusicTracks(env));
 	}
 
 	if (pathname === "/api/stats/summary" && request.method === "GET") {
-		return getStatsSummaryResponse(env, requestUrl);
+		return cachedResponse(request, ctx, 60, () => getStatsSummaryResponse(env, requestUrl));
 	}
 
 	if (pathname === "/api/stats/visit" && request.method === "POST") {
@@ -1815,9 +1819,37 @@ async function getEmbeddedCoverResponse(
 
 	const headers = new Headers({
 		"content-type": metadata.cover.mimeType,
-		"cache-control": "public, max-age=86400",
+		"cache-control": "public, max-age=31536000, immutable",
+		"accept-ranges": "bytes",
 	});
-	headers.set("content-length", String(metadata.cover.bytes.byteLength));
+	const size = metadata.cover.bytes.byteLength;
+	headers.set("content-length", String(size));
+
+	const rangeHeader = request.headers.get("range");
+	const range = rangeHeader ? parseRange(rangeHeader, size) : null;
+
+	if (range && !range.ok) {
+		return new Response("Range Not Satisfiable", {
+			status: 416,
+			headers: {
+				"accept-ranges": "bytes",
+				"content-range": `bytes */${size}`,
+			},
+		});
+	}
+
+	if (range?.ok) {
+		headers.set("content-range", `bytes ${range.start}-${range.end}/${size}`);
+		headers.set("content-length", String(range.length));
+		if (request.method === "HEAD") {
+			return new Response(null, { status: 206, headers });
+		}
+
+		return new Response(
+			arrayBufferFromBytes(metadata.cover.bytes.slice(range.start, range.end + 1)),
+			{ status: 206, headers },
+		);
+	}
 
 	if (request.method === "HEAD") {
 		return new Response(null, { headers });
@@ -2655,6 +2687,45 @@ function withSecurityHeaders(response: Response): Response {
 		}
 	}
 	return secured;
+}
+
+function withServerTiming(response: Response, startedAt: number): Response {
+	const timed = new Response(response.body, response);
+	const totalMs = Math.max(0, performance.now() - startedAt).toFixed(1);
+	const existing = timed.headers.get("server-timing");
+	timed.headers.set(
+		"server-timing",
+		existing ? `${existing}, total;dur=${totalMs}` : `total;dur=${totalMs}`,
+	);
+	return timed;
+}
+
+async function cachedResponse(
+	request: Request,
+	ctx: ExecutionContext,
+	ttlSeconds: number,
+	producer: () => Promise<Response> | Response,
+): Promise<Response> {
+	if (request.method !== "GET") return producer();
+
+	const cache = (caches as CacheStorage & { readonly default: Cache }).default;
+	const cacheKey = new Request(request.url, request);
+	const cached = await cache.match(cacheKey);
+	if (cached) return cached;
+
+	const response = await producer();
+	const next = new Response(response.body, response);
+
+	if (next.status !== 200 || next.headers.has("set-cookie")) {
+		return next;
+	}
+
+	next.headers.set(
+		"cache-control",
+		`public, max-age=${ttlSeconds}, s-maxage=${ttlSeconds}`,
+	);
+	ctx.waitUntil(cache.put(cacheKey, next.clone()));
+	return next;
 }
 
 function json(data: unknown, status = 200): Response {

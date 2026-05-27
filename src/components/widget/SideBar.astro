@@ -22,11 +22,12 @@ const showToc =
 	Astro.url.pathname.startsWith(url("/posts/")) &&
 	headings.length > 0;
 const tocEnabled = siteConfig.toc.enable;
+const postPathPrefix = url("/posts/");
 ---
 <div id="sidebar" class:list={[className, "w-full"]}>
     <div id="sidebar-sticky" class="flex flex-col w-full gap-4 sticky top-4">
         <Profile></Profile>
-        <MusicPlayer client:load />
+        <MusicPlayer client:idle />
         <VisitorStats client:load />
         <Categories class="onload-animation" style="animation-delay: 150ms"></Categories>
         <Tag class="onload-animation" style="animation-delay: 200ms"></Tag>
@@ -92,29 +93,94 @@ const tocEnabled = siteConfig.toc.enable;
     }
 </style>
 
-<script is:inline define:vars={{ tocEnabled }}>
+<script is:inline define:vars={{ tocEnabled, postPathPrefix }}>
+function clearSidebarTocSchedule() {
+    if (!window.__fuwariSidebarTocState) return;
+    if (window.__fuwariSidebarTocState.frame) {
+        cancelAnimationFrame(window.__fuwariSidebarTocState.frame);
+        window.__fuwariSidebarTocState.frame = 0;
+    }
+    for (const timer of window.__fuwariSidebarTocState.timers ?? []) {
+        window.clearTimeout(timer);
+    }
+    window.__fuwariSidebarTocState.timers = [];
+}
+
+function syncSidebarTocEntries() {
+    const toc = document.getElementById("toc");
+    if (!toc) return;
+
+    if (!tocEnabled || !window.location.pathname.startsWith(postPathPrefix)) {
+        toc.replaceChildren();
+        return;
+    }
+
+    const postContainer = document.getElementById("post-container");
+    if (!postContainer) return;
+
+    const headings = Array.from(
+        postContainer.querySelectorAll("h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]"),
+    ).filter((heading) => heading.textContent?.trim());
+
+    if (headings.length === 0) return;
+
+    const nextHrefs = headings.map((heading) => `#${heading.id}`);
+    const currentHrefs = Array.from(toc.querySelectorAll("a[href^='#']")).map((link) =>
+        link.getAttribute("href"),
+    );
+
+    if (
+        currentHrefs.length === nextHrefs.length &&
+        currentHrefs.every((href, index) => href === nextHrefs[index])
+    ) {
+        return;
+    }
+
+    const fragment = document.createDocumentFragment();
+    for (const heading of headings) {
+        const link = document.createElement("a");
+        const level = Number(heading.tagName.slice(1));
+        link.href = `#${heading.id}`;
+        link.textContent = heading.textContent.trim();
+        link.className = "block w-full truncate text-sm transition hover:text-[var(--primary)]";
+        link.style.paddingLeft = `${Math.max(0, level - 2) * 0.75}rem`;
+        fragment.append(link);
+    }
+    toc.replaceChildren(fragment);
+}
+
 function toggleSidebarToc() {
     const widget = document.getElementById("toc-sidebar-widget");
     const toc = document.getElementById("toc");
     if (!widget || !toc) return;
 
+    syncSidebarTocEntries();
     const hasEntries = tocEnabled && !!toc.querySelector("a[href^='#']");
     widget.classList.toggle("hidden", !hasEntries);
 }
 
 function scheduleSidebarTocToggle() {
-    requestAnimationFrame(toggleSidebarToc);
+    clearSidebarTocSchedule();
+    sidebarTocState.frame = requestAnimationFrame(() => {
+        sidebarTocState.frame = 0;
+        toggleSidebarToc();
+    });
+    sidebarTocState.timers = [
+        window.setTimeout(toggleSidebarToc, 120),
+    ];
 }
+
+const sidebarTocState = window.__fuwariSidebarTocState ??= {
+    swupBound: false,
+    frame: 0,
+    timers: [],
+};
 
 if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", scheduleSidebarTocToggle, { once: true });
 } else {
     scheduleSidebarTocToggle();
 }
-
-const sidebarTocState = window.__fuwariSidebarTocState ??= {
-    swupBound: false,
-};
 
 const setupSidebarTocSwup = () => {
     if (sidebarTocState.swupBound) return;
@@ -215,7 +281,6 @@ function clamp(value, min, max) {
 
 const sidebarScrollState = window.__fuwariSidebarScrollState ??= {
     timers: [],
-    revealTimer: 0,
     swupBound: false,
     navigating: false,
     lastScrollIntentAt: 0,
@@ -231,33 +296,6 @@ function resetSidebarScrollPosition() {
     const sidebar = document.getElementById("sidebar-sticky");
     if (!sidebar) return;
     sidebar.scrollTop = 0;
-}
-
-function hideSidebarDuringNavigation() {
-    if (sidebarScrollState.revealTimer) {
-        window.clearTimeout(sidebarScrollState.revealTimer);
-        sidebarScrollState.revealTimer = 0;
-    }
-
-    const sidebar = document.getElementById("sidebar");
-    if (!sidebar) return;
-    sidebar.style.setProperty("opacity", "0", "important");
-    sidebar.style.pointerEvents = "none";
-}
-
-function revealSidebarAfterNavigation(delay = 420) {
-    if (sidebarScrollState.revealTimer) {
-        window.clearTimeout(sidebarScrollState.revealTimer);
-    }
-
-    sidebarScrollState.revealTimer = window.setTimeout(() => {
-        const sidebar = document.getElementById("sidebar");
-        if (sidebar) {
-            sidebar.style.removeProperty("opacity");
-            sidebar.style.pointerEvents = "";
-        }
-        sidebarScrollState.revealTimer = 0;
-    }, delay);
 }
 
 function teardownSidebarScrollSync() {
@@ -363,9 +401,8 @@ function setupSidebarScrollSyncAfterNavigation() {
         window.setTimeout(() => {
             sidebarScrollState.navigating = false;
             setupSidebarScrollSync();
-        }, 450),
+        }, 0),
     ];
-    revealSidebarAfterNavigation();
 }
 
 const sidebarScrollIsolationState = window.__fuwariSidebarScrollIsolationState ??= {
@@ -404,15 +441,12 @@ const setupSidebarScrollSyncSwup = () => {
         sidebarScrollState.navigating = true;
         sidebarScrollState.lastScrollIntentAt = 0;
         sidebarScrollState.lastWindowScrollY = window.scrollY;
-        hideSidebarDuringNavigation();
         teardownSidebarScrollSync();
-        resetSidebarScrollPosition();
     });
     window.swup?.hooks?.on("content:replace", () => {
         sidebarScrollState.navigating = true;
         sidebarScrollState.lastScrollIntentAt = 0;
         sidebarScrollState.lastWindowScrollY = window.scrollY;
-        hideSidebarDuringNavigation();
         teardownSidebarScrollSync();
         resetSidebarScrollPosition();
     });
