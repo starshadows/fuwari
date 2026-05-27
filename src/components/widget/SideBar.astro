@@ -46,7 +46,7 @@ const postPathPrefix = url("/posts/");
 <style>
     #sidebar {
         min-height: 0;
-        transition: opacity 120ms ease;
+        transition: opacity 80ms ease;
         overflow-anchor: none;
     }
 
@@ -315,7 +315,7 @@ function hideSidebarDuringNavigation() {
     sidebar.style.pointerEvents = "none";
 }
 
-function revealSidebarAfterNavigation(delay = 140) {
+function revealSidebarAfterNavigation(delay = 48) {
     if (sidebarScrollState.revealTimer) {
         window.clearTimeout(sidebarScrollState.revealTimer);
     }
