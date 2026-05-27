@@ -202,8 +202,66 @@ function setupSidebarScrollIsolation() {
     };
 }
 
+function clamp(value, min, max) {
+    return Math.min(max, Math.max(min, value));
+}
+
+function setupSidebarScrollSync() {
+    window.__fuwariSidebarScrollSyncCleanup?.();
+
+    const sidebar = document.getElementById("sidebar-sticky");
+    const tocWidget = document.getElementById("toc-sidebar-widget");
+    const postContainer = document.getElementById("post-container");
+    const desktopQuery = window.matchMedia("(min-width: 1024px)");
+
+    if (!sidebar || !tocWidget || !postContainer) return;
+
+    let animationFrame = 0;
+
+    const syncSidebarToArticle = () => {
+        animationFrame = 0;
+        if (!desktopQuery.matches || tocWidget.classList.contains("hidden")) return;
+
+        const postTop = postContainer.getBoundingClientRect().top + window.scrollY;
+        const syncStart = Math.max(0, postTop - 180);
+        const syncEnd = syncStart + Math.min(760, Math.max(360, postContainer.offsetHeight * 0.16));
+        const progress = clamp((window.scrollY - syncStart) / (syncEnd - syncStart), 0, 1);
+        const tocTarget = clamp(
+            tocWidget.offsetTop - 16,
+            0,
+            Math.max(0, sidebar.scrollHeight - sidebar.clientHeight),
+        );
+
+        sidebar.scrollTop = Math.round(tocTarget * progress);
+    };
+
+    const scheduleSync = () => {
+        if (animationFrame) return;
+        animationFrame = requestAnimationFrame(syncSidebarToArticle);
+    };
+
+    window.addEventListener("scroll", scheduleSync, { passive: true });
+    window.addEventListener("resize", scheduleSync);
+    window.addEventListener("load", scheduleSync);
+    scheduleSync();
+    setTimeout(scheduleSync, 600);
+    setTimeout(scheduleSync, 1600);
+
+    window.__fuwariSidebarScrollSyncCleanup = () => {
+        if (animationFrame) cancelAnimationFrame(animationFrame);
+        window.removeEventListener("scroll", scheduleSync);
+        window.removeEventListener("resize", scheduleSync);
+        window.removeEventListener("load", scheduleSync);
+        delete window.__fuwariSidebarScrollSyncCleanup;
+    };
+}
+
 setupSidebarScrollIsolation();
+setupSidebarScrollSync();
 
 document.addEventListener("swup:enable", setupSidebarScrollIsolation);
 window.swup?.hooks?.on("content:replace", setupSidebarScrollIsolation);
+document.addEventListener("swup:enable", setupSidebarScrollSync);
+window.swup?.hooks?.on("content:replace", setupSidebarScrollSync);
+window.swup?.hooks?.on("page:view", setupSidebarScrollSync);
 </script>
