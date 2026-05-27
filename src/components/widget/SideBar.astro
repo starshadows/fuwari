@@ -24,16 +24,14 @@ const showToc =
 const tocEnabled = siteConfig.toc.enable;
 ---
 <div id="sidebar" class:list={[className, "w-full"]}>
-    <div class="flex flex-col w-full gap-4 mb-4">
+    <div id="sidebar-sticky" class="transition-all duration-700 flex flex-col w-full gap-4 top-4 sticky top-4">
         <Profile></Profile>
         <MusicPlayer client:load />
         <VisitorStats client:load />
-    </div>
-    <div id="sidebar-sticky" class="transition-all duration-700 flex flex-col w-full gap-4 top-4 sticky top-4">
         <Categories class="onload-animation" style="animation-delay: 150ms"></Categories>
         <Tag class="onload-animation" style="animation-delay: 200ms"></Tag>
-        <div id="toc-sidebar-widget" class:list={[{"hidden": !showToc}]}>
-            <WidgetLayout name="目录" id="article-toc" class="onload-animation" style="animation-delay: 250ms">
+        <div id="toc-sidebar-widget" class:list={["min-h-0", {"hidden": !showToc}]}>
+            <WidgetLayout name="目录" id="article-toc" class="onload-animation !shrink min-h-0" style="animation-delay: 250ms">
                 <div id="toc-sidebar-scroll" data-toc-scroll class="overflow-y-auto overflow-x-hidden hide-scrollbar">
                     <div id="toc" class="relative w-full transition-swup-fade">
                         {tocEnabled && <TOC headings={headings}></TOC>}
@@ -45,10 +43,16 @@ const tocEnabled = siteConfig.toc.enable;
 </div>
 
 <style>
+    #sidebar {
+        min-height: 0;
+    }
+
     #sidebar-sticky {
-        max-height: calc(100vh - 1rem);
+        max-height: calc(100dvh - 1rem);
         overflow-y: auto;
         overflow-x: hidden;
+        overscroll-behavior: contain;
+        overscroll-behavior-y: contain;
         padding-bottom: 1rem;
         scrollbar-width: none;
     }
@@ -58,8 +62,10 @@ const tocEnabled = siteConfig.toc.enable;
     }
 
     #toc-sidebar-scroll {
-        max-height: min(28rem, calc(100vh - 24rem));
+        max-height: min(28rem, calc(100dvh - 24rem));
         min-height: 10rem;
+        overscroll-behavior: contain;
+        overscroll-behavior-y: contain;
     }
 
     @media (max-width: 1023px) {
@@ -104,4 +110,88 @@ if (window.swup?.hooks) {
 } else {
     document.addEventListener("swup:enable", setupSidebarTocSwup, { once: true });
 }
+
+function normalizeWheelDeltaY(event, scroller) {
+    if (event.deltaMode === 1) return event.deltaY * 32;
+    if (event.deltaMode === 2) return event.deltaY * scroller.clientHeight;
+    return event.deltaY;
+}
+
+function setupSidebarScrollIsolation() {
+    window.__fuwariSidebarScrollCleanup?.();
+
+    const sidebar = document.getElementById("sidebar-sticky");
+    const tocScroller = document.getElementById("toc-sidebar-scroll");
+    const desktopQuery = window.matchMedia("(min-width: 1024px)");
+    const cleanup = [];
+
+    if (!sidebar) return;
+
+    const scrollWithWheel = (event, scroller) => {
+        if (!desktopQuery.matches || Math.abs(event.deltaY) < 0.5) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+        scroller.scrollTop += normalizeWheelDeltaY(event, scroller);
+    };
+
+    const bindWheel = (scroller, skipSelector) => {
+        const onWheel = (event) => {
+            if (skipSelector && event.target?.closest?.(skipSelector)) return;
+            scrollWithWheel(event, scroller);
+        };
+
+        scroller.addEventListener("wheel", onWheel, { passive: false });
+        cleanup.push(() => scroller.removeEventListener("wheel", onWheel));
+    };
+
+    const bindTouch = (scroller, skipSelector) => {
+        let lastY = 0;
+
+        const onTouchStart = (event) => {
+            if (!desktopQuery.matches || event.touches.length !== 1) return;
+            if (skipSelector && event.target?.closest?.(skipSelector)) return;
+            lastY = event.touches[0].clientY;
+        };
+
+        const onTouchMove = (event) => {
+            if (!desktopQuery.matches || event.touches.length !== 1) return;
+            if (skipSelector && event.target?.closest?.(skipSelector)) return;
+
+            const nextY = event.touches[0].clientY;
+            const deltaY = lastY - nextY;
+            lastY = nextY;
+
+            if (Math.abs(deltaY) < 0.5) return;
+            event.preventDefault();
+            event.stopPropagation();
+            scroller.scrollTop += deltaY;
+        };
+
+        scroller.addEventListener("touchstart", onTouchStart, { passive: true });
+        scroller.addEventListener("touchmove", onTouchMove, { passive: false });
+        cleanup.push(() => {
+            scroller.removeEventListener("touchstart", onTouchStart);
+            scroller.removeEventListener("touchmove", onTouchMove);
+        });
+    };
+
+    bindWheel(sidebar, "#toc-sidebar-scroll");
+    bindTouch(sidebar, "#toc-sidebar-scroll");
+
+    if (tocScroller) {
+        bindWheel(tocScroller);
+        bindTouch(tocScroller);
+    }
+
+    window.__fuwariSidebarScrollCleanup = () => {
+        for (const cleanupItem of cleanup) cleanupItem();
+        delete window.__fuwariSidebarScrollCleanup;
+    };
+}
+
+setupSidebarScrollIsolation();
+
+document.addEventListener("swup:enable", setupSidebarScrollIsolation);
+window.swup?.hooks?.on("content:replace", setupSidebarScrollIsolation);
 </script>
