@@ -6,6 +6,15 @@ html.is-animating .transition-swup-fade {
     @apply opacity-0 translate-y-4
 }
 
+html.swup-enabled #sidebar {
+    transition: opacity 120ms ease;
+}
+
+html.is-changing #sidebar {
+    opacity: 0 !important;
+    pointer-events: none;
+}
+
 /* Fade-in animations for components */
 @keyframes fade-in-up {
     0% {

@@ -112,7 +112,14 @@ if (document.readyState === "loading") {
     scheduleSidebarTocToggle();
 }
 
+const sidebarTocState = window.__fuwariSidebarTocState ??= {
+    swupBound: false,
+};
+
 const setupSidebarTocSwup = () => {
+    if (sidebarTocState.swupBound) return;
+    sidebarTocState.swupBound = true;
+
     window.swup?.hooks?.on("page:view", scheduleSidebarTocToggle);
     window.swup?.hooks?.on("content:replace", scheduleSidebarTocToggle);
 };
@@ -206,17 +213,50 @@ function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
 }
 
-let sidebarScrollSyncTimers = [];
+const sidebarScrollState = window.__fuwariSidebarScrollState ??= {
+    timers: [],
+    revealTimer: 0,
+    swupBound: false,
+    navigating: false,
+    lastScrollIntentAt: 0,
+};
 
 function clearSidebarScrollSyncTimers() {
-    for (const timer of sidebarScrollSyncTimers) window.clearTimeout(timer);
-    sidebarScrollSyncTimers = [];
+    for (const timer of sidebarScrollState.timers) window.clearTimeout(timer);
+    sidebarScrollState.timers = [];
 }
 
 function resetSidebarScrollPosition() {
     const sidebar = document.getElementById("sidebar-sticky");
     if (!sidebar) return;
     sidebar.scrollTop = 0;
+}
+
+function hideSidebarDuringNavigation() {
+    if (sidebarScrollState.revealTimer) {
+        window.clearTimeout(sidebarScrollState.revealTimer);
+        sidebarScrollState.revealTimer = 0;
+    }
+
+    const sidebar = document.getElementById("sidebar");
+    if (!sidebar) return;
+    sidebar.style.setProperty("opacity", "0", "important");
+    sidebar.style.pointerEvents = "none";
+}
+
+function revealSidebarAfterNavigation(delay = 420) {
+    if (sidebarScrollState.revealTimer) {
+        window.clearTimeout(sidebarScrollState.revealTimer);
+    }
+
+    sidebarScrollState.revealTimer = window.setTimeout(() => {
+        const sidebar = document.getElementById("sidebar");
+        if (sidebar) {
+            sidebar.style.removeProperty("opacity");
+            sidebar.style.pointerEvents = "";
+        }
+        sidebarScrollState.revealTimer = 0;
+    }, delay);
 }
 
 function teardownSidebarScrollSync() {
@@ -239,6 +279,7 @@ function setupSidebarScrollSync() {
     const syncSidebarToArticle = () => {
         animationFrame = 0;
         if (!desktopQuery.matches || tocWidget.classList.contains("hidden")) return;
+        if (sidebarScrollState.navigating || Date.now() - sidebarScrollState.lastScrollIntentAt > 1200) return;
 
         const postTop = postContainer.getBoundingClientRect().top + window.scrollY;
         const syncStart = Math.max(0, postTop - 180);
@@ -258,15 +299,38 @@ function setupSidebarScrollSync() {
         animationFrame = requestAnimationFrame(syncSidebarToArticle);
     };
 
+    const markScrollIntent = (event) => {
+        if (event.target?.closest?.("#sidebar-sticky")) return;
+        sidebarScrollState.lastScrollIntentAt = Date.now();
+    };
+
+    const markKeyboardScrollIntent = (event) => {
+        if (
+            ![
+                "ArrowDown",
+                "ArrowUp",
+                "End",
+                "Home",
+                "PageDown",
+                "PageUp",
+                " ",
+            ].includes(event.key)
+        ) return;
+        markScrollIntent(event);
+    };
+
+    window.addEventListener("wheel", markScrollIntent, { passive: true });
+    window.addEventListener("touchstart", markScrollIntent, { passive: true });
+    window.addEventListener("keydown", markKeyboardScrollIntent);
     window.addEventListener("scroll", scheduleSync, { passive: true });
     window.addEventListener("resize", scheduleSync);
     window.addEventListener("load", scheduleSync);
-    scheduleSync();
-    setTimeout(scheduleSync, 600);
-    setTimeout(scheduleSync, 1600);
 
     window.__fuwariSidebarScrollSyncCleanup = () => {
         if (animationFrame) cancelAnimationFrame(animationFrame);
+        window.removeEventListener("wheel", markScrollIntent);
+        window.removeEventListener("touchstart", markScrollIntent);
+        window.removeEventListener("keydown", markKeyboardScrollIntent);
         window.removeEventListener("scroll", scheduleSync);
         window.removeEventListener("resize", scheduleSync);
         window.removeEventListener("load", scheduleSync);
@@ -277,25 +341,52 @@ function setupSidebarScrollSync() {
 function setupSidebarScrollSyncAfterNavigation() {
     teardownSidebarScrollSync();
     resetSidebarScrollPosition();
+    sidebarScrollState.lastScrollIntentAt = 0;
 
-    sidebarScrollSyncTimers = [
-        window.setTimeout(setupSidebarScrollSync, 320),
-        window.setTimeout(setupSidebarScrollSync, 900),
+    sidebarScrollState.timers = [
+        window.setTimeout(() => {
+            sidebarScrollState.navigating = false;
+            setupSidebarScrollSync();
+        }, 450),
     ];
+    revealSidebarAfterNavigation();
 }
+
+const sidebarScrollIsolationState = window.__fuwariSidebarScrollIsolationState ??= {
+    swupBound: false,
+};
+
+const setupSidebarScrollIsolationSwup = () => {
+    if (sidebarScrollIsolationState.swupBound) return;
+    sidebarScrollIsolationState.swupBound = true;
+
+    window.swup?.hooks?.on("content:replace", setupSidebarScrollIsolation);
+};
 
 setupSidebarScrollIsolation();
 setupSidebarScrollSync();
 
-document.addEventListener("swup:enable", setupSidebarScrollIsolation);
-window.swup?.hooks?.on("content:replace", setupSidebarScrollIsolation);
+if (window.swup?.hooks) {
+    setupSidebarScrollIsolationSwup();
+} else {
+    document.addEventListener("swup:enable", setupSidebarScrollIsolationSwup, { once: true });
+}
 
 const setupSidebarScrollSyncSwup = () => {
+    if (sidebarScrollState.swupBound) return;
+    sidebarScrollState.swupBound = true;
+
     window.swup?.hooks?.on("visit:start", () => {
+        sidebarScrollState.navigating = true;
+        sidebarScrollState.lastScrollIntentAt = 0;
+        hideSidebarDuringNavigation();
         teardownSidebarScrollSync();
         resetSidebarScrollPosition();
     });
     window.swup?.hooks?.on("content:replace", () => {
+        sidebarScrollState.navigating = true;
+        sidebarScrollState.lastScrollIntentAt = 0;
+        hideSidebarDuringNavigation();
         teardownSidebarScrollSync();
         resetSidebarScrollPosition();
     });
