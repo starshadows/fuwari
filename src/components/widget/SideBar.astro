@@ -24,7 +24,7 @@ const showToc =
 const tocEnabled = siteConfig.toc.enable;
 ---
 <div id="sidebar" class:list={[className, "w-full"]}>
-    <div id="sidebar-sticky" class="transition-all duration-700 flex flex-col w-full gap-4 top-4 sticky top-4">
+    <div id="sidebar-sticky" class="flex flex-col w-full gap-4 sticky top-4">
         <Profile></Profile>
         <MusicPlayer client:load />
         <VisitorStats client:load />
@@ -206,6 +206,24 @@ function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
 }
 
+let sidebarScrollSyncTimers = [];
+
+function clearSidebarScrollSyncTimers() {
+    for (const timer of sidebarScrollSyncTimers) window.clearTimeout(timer);
+    sidebarScrollSyncTimers = [];
+}
+
+function resetSidebarScrollPosition() {
+    const sidebar = document.getElementById("sidebar-sticky");
+    if (!sidebar) return;
+    sidebar.scrollTop = 0;
+}
+
+function teardownSidebarScrollSync() {
+    clearSidebarScrollSyncTimers();
+    window.__fuwariSidebarScrollSyncCleanup?.();
+}
+
 function setupSidebarScrollSync() {
     window.__fuwariSidebarScrollSyncCleanup?.();
 
@@ -256,12 +274,37 @@ function setupSidebarScrollSync() {
     };
 }
 
+function setupSidebarScrollSyncAfterNavigation() {
+    teardownSidebarScrollSync();
+    resetSidebarScrollPosition();
+
+    sidebarScrollSyncTimers = [
+        window.setTimeout(setupSidebarScrollSync, 320),
+        window.setTimeout(setupSidebarScrollSync, 900),
+    ];
+}
+
 setupSidebarScrollIsolation();
 setupSidebarScrollSync();
 
 document.addEventListener("swup:enable", setupSidebarScrollIsolation);
 window.swup?.hooks?.on("content:replace", setupSidebarScrollIsolation);
-document.addEventListener("swup:enable", setupSidebarScrollSync);
-window.swup?.hooks?.on("content:replace", setupSidebarScrollSync);
-window.swup?.hooks?.on("page:view", setupSidebarScrollSync);
+
+const setupSidebarScrollSyncSwup = () => {
+    window.swup?.hooks?.on("visit:start", () => {
+        teardownSidebarScrollSync();
+        resetSidebarScrollPosition();
+    });
+    window.swup?.hooks?.on("content:replace", () => {
+        teardownSidebarScrollSync();
+        resetSidebarScrollPosition();
+    });
+    window.swup?.hooks?.on("page:view", setupSidebarScrollSyncAfterNavigation);
+};
+
+if (window.swup?.hooks) {
+    setupSidebarScrollSyncSwup();
+} else {
+    document.addEventListener("swup:enable", setupSidebarScrollSyncSwup, { once: true });
+}
 </script>
