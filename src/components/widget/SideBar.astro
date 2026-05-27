@@ -81,8 +81,14 @@ const tocEnabled = siteConfig.toc.enable;
 </style>
 
 <style is:global>
-    #sidebar-sticky > * {
+    #sidebar-sticky > *,
+    #sidebar-sticky > astro-island > * {
         flex-shrink: 0;
+    }
+
+    #sidebar-sticky > astro-island {
+        display: block;
+        width: 100%;
     }
 </style>
 
