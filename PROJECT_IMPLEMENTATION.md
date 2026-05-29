@@ -28,9 +28,9 @@
 
 ### 前端与静态构建
 
-- **Astro 5**：项目主体框架，负责页面路由、布局、Markdown 内容构建和静态 HTML 输出。
+- **Astro 6**：项目主体框架，负责页面路由、布局、Markdown 内容构建和静态 HTML 输出。
 - **Svelte 5**：负责需要浏览器交互的组件，例如音乐播放器、友链面板、友链后台、访客统计。
-- **Tailwind CSS 3**：主要样式工具，配合 Fuwari 原有 CSS 变量保持主题一致。
+- **Tailwind CSS 3**（最新版 4 可用，当前仍在 3 保持兼容）：主要样式工具，配合 Fuwari 原有 CSS 变量保持主题一致。
 - **Stylus / 全局 CSS**：主题原有样式体系的一部分，用于布局、动画和基础视觉变量。
 - **Pagefind**：构建后生成静态搜索索引，输出到 `dist/pagefind`。
 - **Swup**：站内页面切换增强，让导航更平滑；多个动态组件都监听 Swup 的 `page:view` 或 `content:replace` 钩子。
