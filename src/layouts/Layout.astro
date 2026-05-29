@@ -464,6 +464,7 @@ if (window?.swup?.hooks) {
 let toc = document.getElementById('toc-wrapper');
 let navbar = document.getElementById('navbar-wrapper')
 function scrollFunction() {
+	var bannerHeight = window.innerHeight * (BANNER_HEIGHT / 100);
 	if (bannerEnabled && toc) {
 		if (document.body.scrollTop > bannerHeight || document.documentElement.scrollTop > bannerHeight) {
 			toc.classList.remove('toc-hide')
