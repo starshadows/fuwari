@@ -49,30 +49,18 @@ function backToTop() {
     window.scroll({ top: 0, behavior: 'smooth' });
 }
 function scrollToComments() {
-    // 先滚动到评论区标题区域（SSR 已有），给用户即时反馈
-    var section = document.querySelector('#comments-section');
-    if (section) {
-        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        window.scrollBy(0, -20);
-    }
-
-    // #twikoo-comments 由 Svelte 客户端渲染，等它出现后微调
-    var el = document.querySelector('#twikoo-comments');
+    var el = document.querySelector('#comments-anchor');
     if (el) {
         el.scrollIntoView({ behavior: 'smooth', block: 'start' });
         window.scrollBy(0, -20);
         return;
     }
-    var observer = new MutationObserver(function () {
-        var target = document.querySelector('#twikoo-comments');
-        if (target) {
-            target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            window.scrollBy(0, -20);
-            observer.disconnect();
-        }
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
-    setTimeout(function () { observer.disconnect(); }, 15000);
+    // 兜底：如果锚点不存在（页面结构变化），直接尝试滚动到评论区区域
+    var fallback = document.querySelector('#twikoo-comments, #comments-section');
+    if (fallback) {
+        fallback.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        window.scrollBy(0, -20);
+    }
 }
 
 var BANNER_HEIGHT = 35;  // 与 constants.ts 保持一致

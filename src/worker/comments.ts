@@ -160,17 +160,12 @@ async function getActorHash(
 // Twikoo proxy
 // ================================================================
 
-/** 不需要人机验证 session 的 Twikoo 事件（读取、登录等） */
-const PUBLIC_TWIKOO_EVENTS = new Set([
-  "GET_FUNC_VERSION",
-  "GET_PASSWORD_STATUS",
-  "LOGIN",
-  "GET_CONFIG",
-  "COUNTER_GET",
-  "GET_COMMENTS_COUNT",
-  "GET_RECENT_COMMENTS",
-  "UPLOAD_IMAGE",
-]);
+/** 需要人机验证 session 的 Twikoo 事件
+ *
+ * 只保护发帖操作。其他事件（登录、管理、只读查询等）
+ * 由 twikooWorker 自行鉴权或无需鉴权。
+ */
+const SESSION_REQUIRED_EVENTS = new Set<string>(["COMMENT_SUBMIT"]);
 
 export async function handleTwikooRequest(
   request: Request,
@@ -181,16 +176,15 @@ export async function handleTwikooRequest(
     return json({ error: "评论区已关闭。" }, 403);
   }
 
-  // 提前解析事件类型，公共事件跳过 session 检查
-  // （LOGIN / GET_PASSWORD_STATUS 等也需要经过 twikooWorker，
-  //   它们自己内部有 ADMIN_PASS 检查。session cookie 只用于防滥用发帖。）
+  // 只对发帖等写操作要求人机验证 session
+  // 登录、管理、只读查询等由 twikooWorker 自行鉴权或无需鉴权
   const needsSession = await (async (): Promise<boolean> => {
     if (request.method === "OPTIONS") return false;
     try {
       const body = await request.clone().json() as { event?: string };
-      return !body.event || !PUBLIC_TWIKOO_EVENTS.has(body.event);
+      return SESSION_REQUIRED_EVENTS.has(body.event ?? "");
     } catch {
-      return true;
+      return false; // 无法解析 JSON 时放行，交给 twikooWorker 处理
     }
   })();
 
