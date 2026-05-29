@@ -4,11 +4,11 @@ import { Icon } from "astro-icon/components";
 
 <!-- There can't be a filter on parent element, or it will break `fixed` -->
 <div class="back-to-top-wrapper hidden lg:block">
-    <div id="back-to-top-btn" class="back-to-top-btn hide flex flex-col gap-3" onclick="backToTop()">
-        <button id="goto-comments-btn" aria-label="Go to Comments" class="btn-card h-[3.75rem] w-[3.75rem] goto-comments-btn" onclick="event.stopPropagation();scrollToComments()">
+    <div id="back-to-top-btn" class="back-to-top-btn hide flex flex-col gap-3">
+        <button id="goto-comments-btn" aria-label="Go to Comments" class="btn-card h-[3.75rem] w-[3.75rem]" onclick="scrollToComments()">
             <Icon name="material-symbols:chat-rounded" class="mx-auto"></Icon>
         </button>
-        <button aria-label="Back to Top" class="btn-card h-[3.75rem] w-[3.75rem]">
+        <button aria-label="Back to Top" class="btn-card h-[3.75rem] w-[3.75rem]" onclick="backToTop()">
             <Icon name="material-symbols:keyboard-arrow-up-rounded" class="mx-auto"></Icon>
         </button>
     </div>
@@ -34,17 +34,14 @@ import { Icon } from "astro-icon/components";
     cursor: pointer
     transform: translateX(5rem)
     pointer-events: auto
-    i
-        font-size: 1.75rem
+
     &.hide
         transform: translateX(5rem) scale(0.9)
         opacity: 0
         pointer-events: none
-    &:active
-      transform: translateX(5rem) scale(0.9)
 
-.goto-comments-btn
-    font-size: 1.5rem
+    .btn-card
+        @apply rounded-2xl
 </style>
 
 <script is:raw is:inline>
@@ -52,9 +49,10 @@ function backToTop() {
     window.scroll({ top: 0, behavior: 'smooth' });
 }
 function scrollToComments() {
-    const el = document.querySelector('#twikoo-comments') || document.querySelector('#post-container');
+    const el = document.querySelector('#twikoo-comments');
     if (el) {
         el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        window.scrollBy(0, -20)
     }
 }
 </script>
