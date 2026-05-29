@@ -16,10 +16,7 @@ import {
 import { verifyHumanProof } from "./anti-abuse";
 import {
   RATE_LIMITS,
-  FRIEND_STATUSES,
   TELEGRAM_SETTINGS_KEY,
-  ALLOWED_AVATAR_MIME_TYPES,
-  MAX_AVATAR_SIZE,
 } from "./constants";
 import type { TelegramSettings } from "./types/aliases";
 
@@ -58,11 +55,7 @@ export async function submitFriendLink(
   const description = readString(body.description, 120);
   const linkUrl = readString(body.url, 400);
   const avatarUrl = readString(body.avatarUrl, 600);
-  const humanProof =
-    readHumanProof(body.humanProof) ??
-    (readString(body.turnstileToken, 2048)
-      ? { type: "turnstile", token: readString(body.turnstileToken, 2048) }
-      : null);
+  const humanProof = readHumanProof(body.humanProof);
 
   if (!name || !description || !linkUrl || !avatarUrl) {
     return json({ error: "请填写完整的名称、简介、链接和头像。" }, 400);

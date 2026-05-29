@@ -48,7 +48,6 @@ export const RATE_LIMITS = {
 } as const;
 
 export const HUMAN_PROOF_CONTEXTS = new Set(["friends", "comments"]);
-export const TURNSTILE_SUBMIT_THRESHOLD = 3;
 
 // ----------------------------------------------------------------
 // Security headers

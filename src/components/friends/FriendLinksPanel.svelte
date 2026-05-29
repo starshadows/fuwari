@@ -26,10 +26,7 @@ let form = {
 	avatarUrl: "",
 };
 
-let humanProof:
-	| { type: "altcha"; payload: string }
-	| { type: "turnstile"; token: string }
-	| null = null;
+let humanProof: { type: "altcha"; payload: string } | null = null;
 let proofResetSignal = 0;
 
 $: canSubmit = !isSubmitting && Boolean(humanProof);
@@ -78,7 +75,6 @@ const submit = async () => {
 		});
 		const data = await response.json();
 		if (!response.ok) {
-			if (data.requiresTurnstile) resetHumanProof();
 			throw new Error(data.error ?? "提交失败。");
 		}
 

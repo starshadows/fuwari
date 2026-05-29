@@ -6,17 +6,11 @@ import {
   withSecurityHeaders,
   withServerTiming,
   cachedResponse,
-  normalizeHumanProofContext,
 } from "./utils";
 import { initializeDatabase } from "./db";
-import {
-  getTurnstileConfig,
-  getAntiAbuseChallenge,
-} from "./anti-abuse";
+import { getAntiAbuseChallenge } from "./anti-abuse";
 import { getApprovedFriends, submitFriendLink } from "./friends";
-import {
-  getPublicMusicTracks,
-} from "./music";
+import { getPublicMusicTracks } from "./music";
 import {
   getStatsSummaryResponse,
   recordStatsVisit,
@@ -28,7 +22,6 @@ import {
 } from "./comments";
 import { handleAdminApi } from "./admin";
 import { handleMedia } from "./media";
-import { HUMAN_PROOF_CONTEXTS } from "./constants";
 
 export default {
   async fetch(
@@ -87,13 +80,6 @@ async function handleApi(
   // Database initialization
   if (pathname === "/api/setup/init-db") {
     return initializeDatabase(request, env, requestUrl);
-  }
-
-  // Turnstile config
-  if (pathname === "/api/turnstile/config" && request.method === "GET") {
-    return cachedResponse(request, ctx, 300, () =>
-      getTurnstileConfig(env),
-    );
   }
 
   // Anti-abuse challenge

@@ -3,9 +3,7 @@ import { onMount, tick } from "svelte";
 import HumanProof from "@components/anti-abuse/HumanProof.svelte";
 import "twikoo/dist/twikoo.css";
 
-type HumanProofDetail =
-	| { type: "altcha"; payload: string }
-	| { type: "turnstile"; token: string };
+type HumanProofDetail = { type: "altcha"; payload: string };
 
 type TwikooClient = {
 	init: (options: {
@@ -57,7 +55,6 @@ const createSession = async (humanProof: HumanProofDetail) => {
 		});
 		const data = await response.json();
 		if (!response.ok) {
-			if (data.requiresTurnstile) proofResetSignal += 1;
 			throw new Error(data.error ?? "评论验证失败。");
 		}
 

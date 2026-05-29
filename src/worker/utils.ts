@@ -181,13 +181,6 @@ export function readBoolean(
 export function readHumanProof(value: unknown): HumanProof | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const proof = value as Record<string, unknown>;
-  const type = readString(proof.type, 20);
-  if (type === "turnstile") {
-    return {
-      type: "turnstile",
-      token: readString(proof.token, 2048) || readString(proof.turnstileToken, 2048),
-    };
-  }
   return {
     type: "altcha",
     payload: readString(proof.payload, 20000),

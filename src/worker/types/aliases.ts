@@ -23,14 +23,10 @@ export type EmbeddedCover = {
   bytes: Uint8Array;
 };
 
-export type TurnstileVerifyResult = {
-  success?: boolean;
-  "error-codes"?: string[];
+export type HumanProof = {
+  type?: "altcha";
+  payload?: string;
 };
-
-export type HumanProof =
-  | { type?: "altcha"; payload?: string }
-  | { type?: "turnstile"; token?: string; turnstileToken?: string };
 
 export type HumanProofContext = "friends" | "comments";
 
