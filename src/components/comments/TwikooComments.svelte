@@ -22,10 +22,11 @@ type TwikooModule = Partial<TwikooClient> & {
 let enabled = true;
 let isLoadingConfig = true;
 let isCreatingSession = false;
-let isLoaded = false;
+let isTwikooLoaded = false;
 let message = "";
 let error = "";
 let proofResetSignal = 0;
+let showVerification = false;
 
 const loadConfig = async () => {
 	isLoadingConfig = true;
@@ -42,39 +43,13 @@ const loadConfig = async () => {
 	}
 };
 
-const createSession = async (humanProof: HumanProofDetail) => {
-	isCreatingSession = true;
-	error = "";
-	message = "";
-
-	try {
-		const response = await fetch("/api/comments/session", {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ humanProof }),
-		});
-		const data = await response.json();
-		if (!response.ok) {
-			throw new Error(data.error ?? "评论验证失败。");
-		}
-
-		await loadTwikoo();
-	} catch (err) {
-		isLoaded = false;
-		message = "";
-		error = err instanceof Error ? err.message : "评论验证失败。";
-		proofResetSignal += 1;
-	} finally {
-		isCreatingSession = false;
-	}
-};
-
 const loadTwikoo = async () => {
+	if (isTwikooLoaded) return;
 	message = "正在加载评论...";
 	const module = await import("twikoo") as TwikooModule;
 	const twikoo = resolveTwikooClient(module);
 
-	isLoaded = true;
+	isTwikooLoaded = true;
 	await tick();
 
 	await twikoo.init({
@@ -100,16 +75,54 @@ const resolveTwikooClient = (module: TwikooModule): TwikooClient => {
 		(candidate): candidate is TwikooClient =>
 			typeof (candidate as TwikooClient | undefined)?.init === "function",
 	);
-
 	if (!client) {
 		throw new Error("评论客户端加载失败，请刷新后重试。");
 	}
-
 	return client;
 };
 
+// 先加载 Twikoo 展示已有评论区，再决定是否展示验证
+const initComments = async () => {
+	await loadConfig();
+	if (!enabled) return;
+
+	// 先加载 Twikoo 展示评论列表（不验证）
+	await loadTwikoo();
+
+	// 对比 envId 是否包含 /api/twikoo，如果是则 Twikoo 走的是 worker 代理，
+	// 那么发帖需要验证。展示评论区区域后，再把验证框放出来
+	showVerification = true;
+};
+
+const createSession = async (humanProof: HumanProofDetail) => {
+	isCreatingSession = true;
+	error = "";
+	message = "";
+
+	try {
+		const response = await fetch("/api/comments/session", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ humanProof }),
+		});
+		const data = await response.json();
+		if (!response.ok) {
+			throw new Error(data.error ?? "评论验证失败。");
+		}
+
+		// 验证通过后重新加载 Twikoo（session cookie 已设置）
+		await loadTwikoo();
+	} catch (err) {
+		message = "";
+		error = err instanceof Error ? err.message : "评论验证失败。";
+		proofResetSignal += 1;
+	} finally {
+		isCreatingSession = false;
+	}
+};
+
 onMount(() => {
-	void loadConfig();
+	void initComments();
 });
 </script>
 
@@ -125,15 +138,8 @@ onMount(() => {
 			评论区已关闭。
 		</div>
 	{:else}
-		{#if !isLoaded}
-			<HumanProof
-				context="comments"
-				resetSignal={proofResetSignal}
-				on:verified={(event) => createSession(event.detail)}
-				on:expired={() => (message = "")}
-				on:error={(event) => (error = event.detail.message)}
-			/>
-		{/if}
+		<!-- 评论区容器 — 始终展示 Twikoo 已有评论列表 -->
+		<div id="twikoo-comments"></div>
 
 		{#if message}
 			<div class="mt-3 text-sm text-[var(--primary)]">{message}</div>
@@ -145,15 +151,22 @@ onMount(() => {
 			<div class="mt-3 text-sm text-50">验证中...</div>
 		{/if}
 
-		<div id="twikoo-comments" class:is-hidden={!isLoaded}></div>
+		<!-- 发帖需要验证 — 在评论区下方显示 -->
+		{#if showVerification}
+			<div class="mt-4">
+				<HumanProof
+					context="comments"
+					resetSignal={proofResetSignal}
+					on:verified={(event) => createSession(event.detail)}
+					on:expired={() => (message = "")}
+					on:error={(event) => (error = event.detail.message)}
+				/>
+			</div>
+		{/if}
 	{/if}
 </section>
 
 <style>
-	.is-hidden {
-		display: none;
-	}
-
 	:global(#twikoo-comments .tk-avatar) {
 		width: 2.5rem;
 		height: 2.5rem;
