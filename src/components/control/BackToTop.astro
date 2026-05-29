@@ -49,13 +49,20 @@ function backToTop() {
     window.scroll({ top: 0, behavior: 'smooth' });
 }
 function scrollToComments() {
+    // 先滚动到评论区标题区域（SSR 已有），给用户即时反馈
+    var section = document.querySelector('#comments-section');
+    if (section) {
+        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        window.scrollBy(0, -20);
+    }
+
+    // #twikoo-comments 由 Svelte 客户端渲染，等它出现后微调
     var el = document.querySelector('#twikoo-comments');
     if (el) {
         el.scrollIntoView({ behavior: 'smooth', block: 'start' });
         window.scrollBy(0, -20);
         return;
     }
-    // 评论区容器尚未渲染（Svelte 异步加载中），等待其出现
     var observer = new MutationObserver(function () {
         var target = document.querySelector('#twikoo-comments');
         if (target) {
@@ -65,7 +72,6 @@ function scrollToComments() {
         }
     });
     observer.observe(document.body, { childList: true, subtree: true });
-    // 15 秒超时，避免无限等待
     setTimeout(function () { observer.disconnect(); }, 15000);
 }
 

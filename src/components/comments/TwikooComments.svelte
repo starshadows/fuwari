@@ -126,7 +126,7 @@ onMount(() => {
 });
 </script>
 
-<section class="mt-8 border-t border-[var(--line-divider)] pt-6">
+<section id="comments-section" class="mt-8 border-t border-[var(--line-divider)] pt-6">
 	<div class="relative mb-5 pl-4 text-2xl font-bold text-90 before:absolute before:left-0 before:top-2 before:h-5 before:w-1 before:rounded-md before:bg-[var(--primary)]">
 		评论
 	</div>

@@ -160,6 +160,18 @@ async function getActorHash(
 // Twikoo proxy
 // ================================================================
 
+/** 不需要人机验证 session 的 Twikoo 事件（读取、登录等） */
+const PUBLIC_TWIKOO_EVENTS = new Set([
+  "GET_FUNC_VERSION",
+  "GET_PASSWORD_STATUS",
+  "LOGIN",
+  "GET_CONFIG",
+  "COUNTER_GET",
+  "GET_COMMENTS_COUNT",
+  "GET_RECENT_COMMENTS",
+  "UPLOAD_IMAGE",
+]);
+
 export async function handleTwikooRequest(
   request: Request,
   env: Env,
@@ -169,10 +181,20 @@ export async function handleTwikooRequest(
     return json({ error: "评论区已关闭。" }, 403);
   }
 
-  if (
-    request.method !== "OPTIONS" &&
-    !(await hasValidCommentsSession(request, env))
-  ) {
+  // 提前解析事件类型，公共事件跳过 session 检查
+  // （LOGIN / GET_PASSWORD_STATUS 等也需要经过 twikooWorker，
+  //   它们自己内部有 ADMIN_PASS 检查。session cookie 只用于防滥用发帖。）
+  const needsSession = await (async (): Promise<boolean> => {
+    if (request.method === "OPTIONS") return false;
+    try {
+      const body = await request.clone().json() as { event?: string };
+      return !body.event || !PUBLIC_TWIKOO_EVENTS.has(body.event);
+    } catch {
+      return true;
+    }
+  })();
+
+  if (needsSession && !(await hasValidCommentsSession(request, env))) {
     return json({ error: "请先完成评论区人机验证。" }, 401);
   }
 
