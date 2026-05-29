@@ -1,12 +1,13 @@
 import type { Env } from "./types";
 import { json, hashToken, saveStoredAdminTokenHash, readBearerToken, readString, readJson, ensureStatsSaltCached } from "./utils";
 
+const APP_SETTINGS_TABLE = `CREATE TABLE IF NOT EXISTS app_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+)`;
+
 const STATS_INIT_STATEMENTS = [
-  `CREATE TABLE IF NOT EXISTS app_settings (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL,
-    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-  )`,
   `CREATE TABLE IF NOT EXISTS stats_visitors (
     visitor_hash TEXT PRIMARY KEY,
     first_seen TEXT NOT NULL,
@@ -124,11 +125,6 @@ const FRIEND_LINKS_STATEMENTS = [
 ];
 
 const RATE_LIMIT_STATEMENTS = [
-  `CREATE TABLE IF NOT EXISTS app_settings (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL,
-    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-  )`,
   `CREATE TABLE IF NOT EXISTS rate_limits (
     scope TEXT NOT NULL,
     actor_hash TEXT NOT NULL,
@@ -142,14 +138,12 @@ const RATE_LIMIT_STATEMENTS = [
 ];
 
 const ALL_INIT_STATEMENTS = [
+  APP_SETTINGS_TABLE,
   ...FRIEND_LINKS_STATEMENTS,
   ...STATS_INIT_STATEMENTS,
   ...TWIKOO_INIT_STATEMENTS,
   ...RATE_LIMIT_STATEMENTS,
 ];
-
-// Deduplicate: only keep unique app_settings table creation
-// (it's defined in RATE_LIMIT_STATEMENTS which comes last)
 
 export async function initializeDatabase(
   request: Request,

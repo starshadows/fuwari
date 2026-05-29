@@ -68,16 +68,34 @@ function scrollToComments() {
     // 15 秒超时，避免无限等待
     setTimeout(function () { observer.disconnect(); }, 15000);
 }
+
+var BANNER_HEIGHT = 35;  // 与 constants.ts 保持一致
+var btn = document.getElementById('back-to-top-btn');
+
+function isPostPage() {
+    return window.location.pathname.startsWith('/posts/');
+}
+
 function updateBackToTopVisibility() {
-    var btn = document.getElementById('back-to-top-btn');
     if (!btn) return;
-    var isPostPage = window.location.pathname.startsWith('/posts/');
-    if (isPostPage) {
+    // 仅在文章页根据滚动距离控制显示；非文章页永远隐藏
+    if (!isPostPage()) {
+        btn.classList.add('hide');
+        return;
+    }
+    var scrollTop = document.body.scrollTop || document.documentElement.scrollTop;
+    var bannerHeightPx = window.innerHeight * (BANNER_HEIGHT / 100);
+    if (scrollTop > bannerHeightPx) {
         btn.classList.remove('hide');
     } else {
         btn.classList.add('hide');
     }
 }
+
+// 滚动事件（被动模式，不与 Layout.astro 的 onscroll 冲突）
+window.addEventListener('scroll', updateBackToTopVisibility, { passive: true });
+// 窗口大小变化后重算 banner 高度阈值
+window.addEventListener('resize', updateBackToTopVisibility, { passive: true });
 // 初始加载时执行
 if (document.readyState !== 'loading') {
     updateBackToTopVisibility();
