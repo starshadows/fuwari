@@ -49,10 +49,41 @@ function backToTop() {
     window.scroll({ top: 0, behavior: 'smooth' });
 }
 function scrollToComments() {
-    const el = document.querySelector('#twikoo-comments');
+    var el = document.querySelector('#twikoo-comments');
     if (el) {
         el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        window.scrollBy(0, -20)
+        window.scrollBy(0, -20);
+        return;
+    }
+    // 评论区容器尚未渲染（Svelte 异步加载中），等待其出现
+    var observer = new MutationObserver(function () {
+        var target = document.querySelector('#twikoo-comments');
+        if (target) {
+            target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            window.scrollBy(0, -20);
+            observer.disconnect();
+        }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    // 15 秒超时，避免无限等待
+    setTimeout(function () { observer.disconnect(); }, 15000);
+}
+function updateBackToTopVisibility() {
+    var btn = document.getElementById('back-to-top-btn');
+    if (!btn) return;
+    var isPostPage = window.location.pathname.startsWith('/posts/');
+    if (isPostPage) {
+        btn.classList.remove('hide');
+    } else {
+        btn.classList.add('hide');
     }
 }
+// 初始加载时执行
+if (document.readyState !== 'loading') {
+    updateBackToTopVisibility();
+} else {
+    document.addEventListener('DOMContentLoaded', updateBackToTopVisibility);
+}
+// swup 页面切换后重新判断
+document.addEventListener('swup:contentReplaced', updateBackToTopVisibility);
 </script>
