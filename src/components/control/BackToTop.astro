@@ -49,17 +49,12 @@ function backToTop() {
     window.scroll({ top: 0, behavior: 'smooth' });
 }
 function scrollToComments() {
-    var el = document.querySelector('#comments-anchor');
+    var el = document.querySelector('#comments-anchor')
+        || document.querySelector('#twikoo-comments')
+        || document.querySelector('#comments-section');
     if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        window.scrollBy(0, -20);
-        return;
-    }
-    // 兜底：如果锚点不存在（页面结构变化），直接尝试滚动到评论区区域
-    var fallback = document.querySelector('#twikoo-comments, #comments-section');
-    if (fallback) {
-        fallback.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        window.scrollBy(0, -20);
+        var top = el.getBoundingClientRect().top + window.scrollY - 20;
+        window.scroll({ top: top, behavior: 'smooth' });
     }
 }
 
