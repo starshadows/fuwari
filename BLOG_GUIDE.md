@@ -179,7 +179,7 @@ Cloudflare Pages 发布的就是这个目录。
 
 `/friends/` 只展示已审核的友链，`/friends/apply/` 是访客申请入口。访客提交后不会立刻展示，会进入待审核状态。
 
-友链申请默认使用 ALTCHA 人机验证。前台会从 `/api/anti-abuse/challenge?context=friends` 获取 challenge，并把 `humanProof` 随申请一起提交；Worker 校验通过后才会写入 D1。只有同一 IP/UA 哈希短时间内高频提交、连续验证码失败或明显 bot UA 时，才会升级到 Cloudflare Turnstile。没有配置 Turnstile 时，正常 ALTCHA 提交不受影响，异常流量会收到明确错误。友链地址必须使用 `https://`，头像必须使用 `https://` 或站内 `/media/avatars/`、`/media/covers/` 地址；同一个站点重复申请会被拒绝。
+友链申请使用 ALTCHA 人机验证。前台会从 `/api/anti-abuse/challenge?context=friends` 获取 challenge，并把 `humanProof` 随申请一起提交；Worker 校验通过后才会写入 D1。高频提交和连续验证码失败会受到 D1 限流限制。友链地址必须使用 `https://`，头像必须使用 `https://` 或站内 `/media/avatars/`、`/media/covers/` 地址；同一个站点重复申请会被拒绝。
 
 `/friends/admin/` 是友链和音乐后台，可以额外用 Cloudflare Access 保护；后台 API 仍然需要 `ADMIN_TOKEN`。后台可以做这些事：
 
@@ -221,9 +221,8 @@ Cloudflare R2 控制台上传文件夹不是同步工具；批量上传被浏览
    - D1 数据库绑定名必须填 `DB`，选择你刚创建的 D1。
    - R2 存储桶绑定名必须填 `MEDIA_BUCKET`，选择你刚创建的 R2。
 5. 可选：设置生产后台口令，Secret 名称填 `ADMIN_TOKEN`。
-6. 可选：在 Cloudflare Turnstile 创建站点，域名填博客域名；Worker 变量填 `TURNSTILE_SITE_KEY`，Secret 填 `TURNSTILE_SECRET_KEY`。它只用于异常访问升级验证，正常访客默认走 ALTCHA。
 
-仓库里的 `wrangler.jsonc` 不保存 D1/R2 的资源名或 UUID，只声明代码需要的绑定变量名。Cloudflare 里资源叫什么都可以，只要绑定变量名对上，代码就会通过 `env.DB` 和 `env.MEDIA_BUCKET` 使用它们。`wrangler.jsonc` 已设置 `keep_vars: true`，这样下次 `wrangler deploy` 不会删除 Cloudflare 控制台里手动维护的纯文本变量，例如 `TURNSTILE_SITE_KEY`。
+仓库里的 `wrangler.jsonc` 不保存 D1/R2 的资源名或 UUID，只声明代码需要的绑定变量名。Cloudflare 里资源叫什么都可以，只要绑定变量名对上，代码就会通过 `env.DB` 和 `env.MEDIA_BUCKET` 使用它们。`wrangler.jsonc` 已设置 `keep_vars: true`，这样下次 `wrangler deploy` 不会删除 Cloudflare 控制台里手动维护的纯文本变量。
 
 Cloudflare Workers 连接 GitHub 自动部署时，表单可以这样填：
 

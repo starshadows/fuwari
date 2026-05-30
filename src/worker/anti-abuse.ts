@@ -9,7 +9,7 @@ import {
 import { ALTCHA_COST, ALTCHA_CHALLENGE_TTL_SECONDS } from "./constants";
 
 // ================================================================
-// Generate ALTCHA challenge (always, no Turnstile escalation)
+// Generate ALTCHA challenge
 // ================================================================
 
 export async function getAntiAbuseChallenge(

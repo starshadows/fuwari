@@ -142,18 +142,15 @@ src/worker/index.ts
 }
 ```
 
-D1 和 R2 的实际资源名称可以在 Cloudflare 控制台随便取，但绑定变量名必须一致。`keep_vars: true` 用来保护控制台里手动维护的纯文本变量，避免后续 `wrangler deploy` 把 `TURNSTILE_SITE_KEY` 这类 Dashboard 变量删除。
+D1 和 R2 的实际资源名称可以在 Cloudflare 控制台随便取，但绑定变量名必须一致。`keep_vars: true` 用来保护控制台里手动维护的纯文本变量，避免后续 `wrangler deploy` 把这些变量删除。
 
 ```text
 DB             D1 数据库绑定
 MEDIA_BUCKET   R2 桶绑定
 ASSETS         Workers Static Assets 绑定
 ADMIN_TOKEN    可选后台管理 token
-TURNSTILE_SITE_KEY     Cloudflare Turnstile 站点 key
-TURNSTILE_SECRET_KEY   Cloudflare Turnstile 校验 secret
 ```
 
-`TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` 现在是异常访问升级验证所需的可选配置；正常友链和评论验证默认走 ALTCHA。
 
 ## 5. 数据库设计
 
@@ -271,13 +268,12 @@ GET /api/anti-abuse/challenge?context=friends
 
 这个接口默认返回 ALTCHA challenge。浏览器完成验证后，会把 `humanProof` 和友链申请一起发给 Worker。
 
-Worker 收到 `POST /api/friends` 后不会直接写库，而是先做 D1 限流、ALTCHA 校验、字段校验和重复 URL 检查。只有同一 IP/UA 哈希短时间内高频提交、连续验证码失败或明显 bot UA 时，才会要求 Cloudflare Turnstile 并调用 Siteverify：
+Worker 收到 `POST /api/friends` 后不会直接写库，而是先做 D1 限流、ALTCHA 校验、字段校验和重复 URL 检查。高频提交和连续验证码失败会受到 D1 限流限制。
 
 ```text
-https://challenges.cloudflare.com/turnstile/v0/siteverify
 ```
 
-升级校验时使用 `TURNSTILE_SECRET_KEY`，并附带 `cf-connecting-ip` 作为可选的 `remoteip`。Turnstile 没配置时，正常 ALTCHA 提交仍可进入 pending，异常访问会收到明确错误。友链链接必须是 `https://`，头像必须是 `https://` 或站内媒体路径，同一个 URL 已经待审核或已通过时会拒绝重复申请。
+友链链接必须是 `https://`，头像必须是 `https://` 或站内媒体路径，同一个 URL 已经待审核或已通过时会拒绝重复申请。
 
 提交后状态默认为 `pending`，不会立刻出现在友链页面。
 
@@ -567,7 +563,6 @@ Navigation performance note (2026-05):
 GET  /api/friends
 POST /api/friends
 GET  /api/anti-abuse/challenge?context=friends|comments
-GET  /api/turnstile/config
 
 GET  /api/music/tracks
 
@@ -684,7 +679,7 @@ corepack pnpm exec wrangler deploy
 
 需要注意：
 
-- 友链申请是公开接口，需要保留字段校验、ALTCHA 校验、异常访问 Turnstile 升级、D1 限流和重复 URL 检查。
+- 友链申请是公开接口，需要保留字段校验、ALTCHA 校验、D1 限流和重复 URL 检查。
 - 统计写入接口会校验同源 `Origin` / `Referer`，并使用 D1 限流；限流 actor 只存哈希，不保存原始 IP。
 - Worker 会给响应附加基础安全头：`X-Content-Type-Options`、`Referrer-Policy`、`Permissions-Policy` 和最小 CSP。
 - 头像上传限制为常见位图类型，并限制大小。
