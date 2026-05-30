@@ -10,11 +10,11 @@
 
 import sanitizeHtml from "sanitize-html";
 import {
-  readString,
-  readInteger,
-  clampInteger,
-  hashToken,
-  getClientIp,
+	readString,
+	readInteger,
+	clampInteger,
+	hashToken,
+	getClientIp,
 } from "./utils";
 
 type CommentSubmittedEvent = {
@@ -39,7 +39,10 @@ type TwikooWorkerEnv = {
 
 type JsonRecord = Record<string, unknown>;
 
-type TwikooConfig = Record<string, string | number | boolean | null | undefined>;
+type TwikooConfig = Record<
+	string,
+	string | number | boolean | null | undefined
+>;
 
 type CommentRow = {
 	_id: string;
@@ -93,7 +96,7 @@ const twikooWorker = {
 
 		let event: JsonRecord = {};
 		try {
-			event = await request.json() as JsonRecord;
+			event = (await request.json()) as JsonRecord;
 		} catch {
 			event = {};
 		}
@@ -110,14 +113,21 @@ const twikooWorker = {
 		try {
 			const config = await readConfig(env.DB);
 			const accessToken = getAccessToken(event);
-			responseBody = await handleEvent(event, request, env, config, accessToken);
+			responseBody = await handleEvent(
+				event,
+				request,
+				env,
+				config,
+				accessToken,
+			);
 			if (!event.accessToken && !responseBody.accessToken) {
 				responseBody.accessToken = accessToken;
 			}
 		} catch (error) {
 			responseBody = {
 				code: RES_CODE.FAIL,
-				message: error instanceof Error ? error.message : "Twikoo request failed.",
+				message:
+					error instanceof Error ? error.message : "Twikoo request failed.",
 			};
 		}
 
@@ -180,7 +190,8 @@ async function handleEvent(
 			}
 			return {
 				code: RES_CODE.NO_PARAM,
-				message: "Twikoo 云函数运行正常，请参考 https://twikoo.js.org/frontend.html 完成前端的配置",
+				message:
+					"Twikoo 云函数运行正常，请参考 https://twikoo.js.org/frontend.html 完成前端的配置",
 				version: VERSION,
 			};
 	}
@@ -214,10 +225,16 @@ async function ensureTwikooSchema(db: D1Database): Promise<void> {
 			avatar TEXT NOT NULL,
 			PRIMARY KEY (url, created DESC)
 		)`),
-		db.prepare("CREATE INDEX IF NOT EXISTS idx_comment_created ON comment (created DESC)"),
-		db.prepare("CREATE INDEX IF NOT EXISTS idx_comment_ip_created ON comment (ip, created DESC)"),
+		db.prepare(
+			"CREATE INDEX IF NOT EXISTS idx_comment_created ON comment (created DESC)",
+		),
+		db.prepare(
+			"CREATE INDEX IF NOT EXISTS idx_comment_ip_created ON comment (ip, created DESC)",
+		),
 		db.prepare("CREATE TABLE IF NOT EXISTS config (value TEXT NOT NULL)"),
-		db.prepare("INSERT INTO config (value) SELECT '' WHERE NOT EXISTS (SELECT 1 FROM config)"),
+		db.prepare(
+			"INSERT INTO config (value) SELECT '' WHERE NOT EXISTS (SELECT 1 FROM config)",
+		),
 		db.prepare(`CREATE TABLE IF NOT EXISTS counter (
 			url TEXT NOT NULL PRIMARY KEY,
 			title TEXT NOT NULL,
@@ -227,10 +244,18 @@ async function ensureTwikooSchema(db: D1Database): Promise<void> {
 		)`),
 	]);
 
-	const columns = await db.prepare("PRAGMA table_info(comment)").all<{ name: string }>();
-	const hasIpRegion = (columns.results ?? []).some((column) => column.name === "ipRegion");
+	const columns = await db
+		.prepare("PRAGMA table_info(comment)")
+		.all<{ name: string }>();
+	const hasIpRegion = (columns.results ?? []).some(
+		(column) => column.name === "ipRegion",
+	);
 	if (!hasIpRegion) {
-		await db.prepare("ALTER TABLE comment ADD COLUMN ipRegion TEXT NOT NULL DEFAULT ''").run();
+		await db
+			.prepare(
+				"ALTER TABLE comment ADD COLUMN ipRegion TEXT NOT NULL DEFAULT ''",
+			)
+			.run();
 	}
 
 	schemaReady = true;
@@ -246,23 +271,29 @@ async function commentGet(
 
 	const uid = accessToken;
 	const admin = isAdmin(config, accessToken);
-	const limit = clampInteger(readInteger(config.COMMENT_PAGE_SIZE, DEFAULT_COMMENT_PAGE_SIZE), 1, 100);
+	const limit = clampInteger(
+		readInteger(config.COMMENT_PAGE_SIZE, DEFAULT_COMMENT_PAGE_SIZE),
+		1,
+		100,
+	);
 	const before = readInteger(event.before, MAX_TIMESTAMP_MILLIS);
 	const visibleSpamValue = admin ? 2 : 1;
 	const urlValue = readString(event.url, 500);
 
-	const count = await db.prepare(
-		"SELECT COUNT(*) AS count FROM comment WHERE url = ? AND rid = '' AND (isSpam != ? OR uid = ?)",
-	)
+	const count = await db
+		.prepare(
+			"SELECT COUNT(*) AS count FROM comment WHERE url = ? AND rid = '' AND (isSpam != ? OR uid = ?)",
+		)
 		.bind(urlValue, visibleSpamValue, uid)
 		.first<{ count: number }>("count");
 
-	const mainResult = await db.prepare(
-		`SELECT * FROM comment
+	const mainResult = await db
+		.prepare(
+			`SELECT * FROM comment
 		WHERE url = ? AND (isSpam != ? OR uid = ?) AND created < ? AND top = ? AND rid = ''
 		ORDER BY created DESC
 		LIMIT ?`,
-	)
+		)
 		.bind(urlValue, visibleSpamValue, uid, before, 0, limit + 1)
 		.all<CommentRow>();
 
@@ -272,13 +303,21 @@ async function commentGet(
 
 	let top: CommentRow[] = [];
 	if (!config.TOP_DISABLED && !event.before) {
-		const topResult = await db.prepare(
-			`SELECT * FROM comment
+		const topResult = await db
+			.prepare(
+				`SELECT * FROM comment
 			WHERE url = ? AND (isSpam != ? OR uid = ?) AND created < ? AND top = ? AND rid = ''
 			ORDER BY created DESC
 			LIMIT ?`,
-		)
-			.bind(urlValue, visibleSpamValue, uid, MAX_TIMESTAMP_MILLIS, 1, MAX_QUERY_LIMIT)
+			)
+			.bind(
+				urlValue,
+				visibleSpamValue,
+				uid,
+				MAX_TIMESTAMP_MILLIS,
+				1,
+				MAX_QUERY_LIMIT,
+			)
 			.all<CommentRow>();
 		top = topResult.results ?? [];
 	}
@@ -303,11 +342,12 @@ async function getReplies(
 	if (roots.length === 0) return [];
 
 	const placeholders = roots.map(() => "?").join(", ");
-	const result = await db.prepare(
-		`SELECT * FROM comment
+	const result = await db
+		.prepare(
+			`SELECT * FROM comment
 		WHERE url = ? AND (isSpam != ? OR uid = ?) AND rid IN (${placeholders})
 		ORDER BY created ASC`,
-	)
+		)
 		.bind(urlValue, visibleSpamValue, uid, ...roots.map((item) => item._id))
 		.all<CommentRow>();
 	return result.results ?? [];
@@ -330,8 +370,11 @@ async function commentSubmit(
 	const timestamp = Date.now();
 	const mail = normalizeMail(readString(event.mail, 160));
 	const displayMail = isQQMail(mail) ? addQQMailSuffix(mail) : mail;
-	const mailHash = displayMail ? await hashToken(displayMail) : await hashToken(nick);
-	const isBlogger = Boolean(config.BLOGGER_EMAIL) &&
+	const mailHash = displayMail
+		? await hashToken(displayMail)
+		: await hashToken(nick);
+	const isBlogger =
+		Boolean(config.BLOGGER_EMAIL) &&
 		normalizeMail(String(config.BLOGGER_EMAIL)) === displayMail;
 
 	if (isBlogger && !isAdmin(config, accessToken)) {
@@ -406,7 +449,8 @@ async function commentLike(
 ): Promise<JsonRecord> {
 	validate(event, ["id"]);
 	const id = readString(event.id, 80);
-	const comment = await db.prepare("SELECT _id, like FROM comment WHERE _id = ?")
+	const comment = await db
+		.prepare("SELECT _id, like FROM comment WHERE _id = ?")
 		.bind(id)
 		.first<{ _id: string; like: string }>();
 	if (!comment) return {};
@@ -416,46 +460,56 @@ async function commentLike(
 		? likes.filter((item) => item !== accessToken)
 		: [...likes, accessToken];
 
-	await db.prepare("UPDATE comment SET like = ?, updated = ? WHERE _id = ?")
+	await db
+		.prepare("UPDATE comment SET like = ?, updated = ? WHERE _id = ?")
 		.bind(JSON.stringify(next), Date.now(), id)
 		.run();
 	return {};
 }
 
-async function counterGet(db: D1Database, event: JsonRecord): Promise<JsonRecord> {
+async function counterGet(
+	db: D1Database,
+	event: JsonRecord,
+): Promise<JsonRecord> {
 	validate(event, ["url"]);
 	const urlValue = readString(event.url, 500);
 	const title = readString(event.title, 200);
 	const now = Date.now();
 
-	await db.prepare(
-		`INSERT INTO counter (url, title, time, created, updated)
+	await db
+		.prepare(
+			`INSERT INTO counter (url, title, time, created, updated)
 		VALUES (?, ?, 1, ?, ?)
 		ON CONFLICT(url) DO UPDATE SET
 			time = time + 1,
 			title = excluded.title,
 			updated = excluded.updated`,
-	)
+		)
 		.bind(urlValue, title, now, now)
 		.run();
 
-	const time = await db.prepare("SELECT time FROM counter WHERE url = ?")
+	const time = await db
+		.prepare("SELECT time FROM counter WHERE url = ?")
 		.bind(urlValue)
 		.first<{ time: number }>("time");
 
 	return { time: Number(time ?? 0) };
 }
 
-async function getCommentsCount(db: D1Database, event: JsonRecord): Promise<JsonRecord> {
+async function getCommentsCount(
+	db: D1Database,
+	event: JsonRecord,
+): Promise<JsonRecord> {
 	if (!Array.isArray(event.urls)) throw new Error('参数"urls"不合法');
 
 	const includeReply = Boolean(event.includeReply);
 	const data = await Promise.all(
 		event.urls.map(async (urlValue) => {
 			const urlText = readString(urlValue, 500);
-			const count = await db.prepare(
-				"SELECT COUNT(*) AS count FROM comment WHERE url = ? AND isSpam = 0 AND (? OR rid = '')",
-			)
+			const count = await db
+				.prepare(
+					"SELECT COUNT(*) AS count FROM comment WHERE url = ? AND isSpam = 0 AND (? OR rid = '')",
+				)
 				.bind(urlText, includeReply ? 1 : 0)
 				.first<{ count: number }>("count");
 			return { url: urlText, count: Number(count ?? 0) };
@@ -476,26 +530,35 @@ async function getRecentComments(
 		? event.urls.map((value) => readString(value, 500)).filter(Boolean)
 		: [];
 
-	const comments = urls.length > 0
-		? (await Promise.all(urls.map(async (urlValue) => {
-				const result = await db.prepare(
-					`SELECT * FROM comment
+	const comments =
+		urls.length > 0
+			? (
+					await Promise.all(
+						urls.map(async (urlValue) => {
+							const result = await db
+								.prepare(
+									`SELECT * FROM comment
 					WHERE url = ? AND isSpam = 0 AND (? OR rid = '')
 					ORDER BY created DESC
 					LIMIT ?`,
-				)
-					.bind(urlValue, includeReply ? 1 : 0, pageSize)
-					.all<CommentRow>();
-				return result.results ?? [];
-			}))).flat()
-		: (await db.prepare(
-				`SELECT * FROM comment
+								)
+								.bind(urlValue, includeReply ? 1 : 0, pageSize)
+								.all<CommentRow>();
+							return result.results ?? [];
+						}),
+					)
+				).flat()
+			: ((
+					await db
+						.prepare(
+							`SELECT * FROM comment
 				WHERE isSpam = 0 AND (? OR rid = '')
 				ORDER BY created DESC
 				LIMIT ?`,
-			)
-				.bind(includeReply ? 1 : 0, pageSize)
-				.all<CommentRow>()).results ?? [];
+						)
+						.bind(includeReply ? 1 : 0, pageSize)
+						.all<CommentRow>()
+				).results ?? []);
 
 	return {
 		data: comments
@@ -540,12 +603,15 @@ async function setPassword(
 	return { code: RES_CODE.SUCCESS };
 }
 
-async function login(event: JsonRecord, config: TwikooConfig): Promise<JsonRecord> {
+async function login(
+	event: JsonRecord,
+	config: TwikooConfig,
+): Promise<JsonRecord> {
 	if (!config.ADMIN_PASS) {
 		return { code: RES_CODE.PASS_NOT_EXIST, message: "未配置管理密码" };
 	}
 	const password = readString(event.password, 256);
-	if (config.ADMIN_PASS !== await hashToken(password)) {
+	if (config.ADMIN_PASS !== (await hashToken(password))) {
 		return { code: RES_CODE.PASS_NOT_MATCH, message: "密码错误" };
 	}
 	return {
@@ -554,7 +620,10 @@ async function login(event: JsonRecord, config: TwikooConfig): Promise<JsonRecor
 	};
 }
 
-function getPublicConfig(config: TwikooConfig, accessToken: string): JsonRecord {
+function getPublicConfig(
+	config: TwikooConfig,
+	accessToken: string,
+): JsonRecord {
 	return {
 		code: RES_CODE.SUCCESS,
 		config: {
@@ -583,7 +652,10 @@ function getPublicConfig(config: TwikooConfig, accessToken: string): JsonRecord 
 	};
 }
 
-function getConfigForAdmin(config: TwikooConfig, accessToken: string): JsonRecord {
+function getConfigForAdmin(
+	config: TwikooConfig,
+	accessToken: string,
+): JsonRecord {
 	if (!isAdmin(config, accessToken)) {
 		return { code: RES_CODE.NEED_LOGIN, message: "请先登录" };
 	}
@@ -600,9 +672,12 @@ async function setConfig(
 	if (!isAdmin(config, accessToken)) {
 		return { code: RES_CODE.NEED_LOGIN, message: "请先登录" };
 	}
-	const nextConfig = event.config && typeof event.config === "object" && !Array.isArray(event.config)
-		? { ...config, ...(event.config as TwikooConfig) }
-		: config;
+	const nextConfig =
+		event.config &&
+		typeof event.config === "object" &&
+		!Array.isArray(event.config)
+			? { ...config, ...(event.config as TwikooConfig) }
+			: config;
 	await writeConfig(db, nextConfig);
 	return { code: RES_CODE.SUCCESS };
 }
@@ -622,26 +697,48 @@ async function commentGetForAdmin(
 	const type = readString(event.type, 20);
 	const spamValue = type === "VISIBLE" ? 1 : type === "HIDDEN" ? 0 : 2;
 
-	const count = await db.prepare(
-		`SELECT COUNT(*) AS count FROM comment
+	const count = await db
+		.prepare(
+			`SELECT COUNT(*) AS count FROM comment
 		WHERE isSpam != ? AND (
 			nick LIKE ? OR mail LIKE ? OR link LIKE ? OR ip LIKE ? OR
 			comment LIKE ? OR url LIKE ? OR href LIKE ?
 		)`,
-	)
-		.bind(spamValue, keyword, keyword, keyword, keyword, keyword, keyword, keyword)
+		)
+		.bind(
+			spamValue,
+			keyword,
+			keyword,
+			keyword,
+			keyword,
+			keyword,
+			keyword,
+			keyword,
+		)
 		.first<{ count: number }>("count");
 
-	const data = await db.prepare(
-		`SELECT * FROM comment
+	const data = await db
+		.prepare(
+			`SELECT * FROM comment
 		WHERE isSpam != ? AND (
 			nick LIKE ? OR mail LIKE ? OR link LIKE ? OR ip LIKE ? OR
 			comment LIKE ? OR url LIKE ? OR href LIKE ?
 		)
 		ORDER BY created DESC
 		LIMIT ? OFFSET ?`,
-	)
-		.bind(spamValue, keyword, keyword, keyword, keyword, keyword, keyword, keyword, per, per * (page - 1))
+		)
+		.bind(
+			spamValue,
+			keyword,
+			keyword,
+			keyword,
+			keyword,
+			keyword,
+			keyword,
+			keyword,
+			per,
+			per * (page - 1),
+		)
 		.all<CommentRow>();
 
 	return {
@@ -665,14 +762,28 @@ async function commentSetForAdmin(
 		throw new Error('参数"set"不合法');
 	}
 
-	const allowedFields = new Set(["nick", "mail", "link", "comment", "isSpam", "top"]);
-	const fields = Object.keys(event.set).filter((field) => allowedFields.has(field)).sort();
+	const allowedFields = new Set([
+		"nick",
+		"mail",
+		"link",
+		"comment",
+		"isSpam",
+		"top",
+	]);
+	const fields = Object.keys(event.set)
+		.filter((field) => allowedFields.has(field))
+		.sort();
 	if (fields.length === 0) return { code: RES_CODE.SUCCESS };
 
-	await db.prepare(
-		`UPDATE comment SET ${fields.map((field) => `${field} = ?`).join(", ")}, updated = ? WHERE _id = ?`,
-	)
-		.bind(...fields.map((field) => (event.set as JsonRecord)[field]), Date.now(), readString(event.id, 80))
+	await db
+		.prepare(
+			`UPDATE comment SET ${fields.map((field) => `${field} = ?`).join(", ")}, updated = ? WHERE _id = ?`,
+		)
+		.bind(
+			...fields.map((field) => (event.set as JsonRecord)[field]),
+			Date.now(),
+			readString(event.id, 80),
+		)
 		.run();
 
 	return { code: RES_CODE.SUCCESS };
@@ -688,7 +799,8 @@ async function commentDeleteForAdmin(
 		return { code: RES_CODE.NEED_LOGIN, message: "请先登录" };
 	}
 	validate(event, ["id"]);
-	await db.prepare("DELETE FROM comment WHERE _id = ?")
+	await db
+		.prepare("DELETE FROM comment WHERE _id = ?")
 		.bind(readString(event.id, 80))
 		.run();
 	return { code: RES_CODE.SUCCESS };
@@ -702,13 +814,21 @@ async function commentExportForAdmin(
 	if (!isAdmin(config, accessToken)) {
 		return { code: RES_CODE.NEED_LOGIN, message: "请先登录" };
 	}
-	const data = await db.prepare("SELECT * FROM comment ORDER BY created DESC").all<CommentRow>();
+	const data = await db
+		.prepare("SELECT * FROM comment ORDER BY created DESC")
+		.all<CommentRow>();
 	return { code: RES_CODE.SUCCESS, data: data.results ?? [] };
 }
 
-async function uploadImageToR2(env: TwikooWorkerEnv, event: JsonRecord): Promise<JsonRecord> {
+async function uploadImageToR2(
+	env: TwikooWorkerEnv,
+	event: JsonRecord,
+): Promise<JsonRecord> {
 	if (!env.R2 || !env.R2_PUBLIC_URL) {
-		return { code: RES_CODE.UPLOAD_FAILED, message: "R2 storage is not configured." };
+		return {
+			code: RES_CODE.UPLOAD_FAILED,
+			message: "R2 storage is not configured.",
+		};
 	}
 
 	const photo = readString(event.photo, 10 * 1024 * 1024);
@@ -720,7 +840,8 @@ async function uploadImageToR2(env: TwikooWorkerEnv, event: JsonRecord): Promise
 	const now = new Date();
 	const month = String(now.getMonth() + 1).padStart(2, "0");
 	const hash = await hashToken(photo);
-	const extension = blob.type.split("/")[1]?.replace(/[^a-z0-9.+-]/gi, "") || "bin";
+	const extension =
+		blob.type.split("/")[1]?.replace(/[^a-z0-9.+-]/gi, "") || "bin";
 	const key = `${now.getFullYear()}/${month}/${hash}.${extension}`;
 	const object = await env.R2.put(key, blob);
 	const publicBase = env.R2_PUBLIC_URL.replace(/\/+$/g, "");
@@ -737,20 +858,26 @@ async function uploadImageToR2(env: TwikooWorkerEnv, event: JsonRecord): Promise
 }
 
 async function readConfig(db: D1Database): Promise<TwikooConfig> {
-	const row = await db.prepare("SELECT value FROM config LIMIT 1").first<{ value: string }>();
+	const row = await db
+		.prepare("SELECT value FROM config LIMIT 1")
+		.first<{ value: string }>();
 	if (!row?.value) return {};
 	try {
 		const parsed = JSON.parse(row.value);
 		return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-			? parsed as TwikooConfig
+			? (parsed as TwikooConfig)
 			: {};
 	} catch {
 		return {};
 	}
 }
 
-async function writeConfig(db: D1Database, config: TwikooConfig): Promise<void> {
-	await db.prepare("UPDATE config SET value = ?")
+async function writeConfig(
+	db: D1Database,
+	config: TwikooConfig,
+): Promise<void> {
+	await db
+		.prepare("UPDATE config SET value = ?")
 		.bind(JSON.stringify(config))
 		.run();
 }
@@ -760,22 +887,31 @@ async function limitCommentSubmit(
 	request: Request,
 	config: TwikooConfig,
 ): Promise<void> {
-	const limitPerMinute = readInteger(config.LIMIT_PER_MINUTE, DEFAULT_LIMIT_PER_MINUTE);
-	const limitPerMinuteAll = readInteger(config.LIMIT_PER_MINUTE_ALL, DEFAULT_LIMIT_PER_MINUTE);
+	const limitPerMinute = readInteger(
+		config.LIMIT_PER_MINUTE,
+		DEFAULT_LIMIT_PER_MINUTE,
+	);
+	const limitPerMinuteAll = readInteger(
+		config.LIMIT_PER_MINUTE_ALL,
+		DEFAULT_LIMIT_PER_MINUTE,
+	);
 	const since = Date.now() - 600000;
 	const ip = getClientIp(request);
 
 	if (limitPerMinute > 0) {
-		const countByIp = await db.prepare(
-			"SELECT COUNT(*) AS count FROM comment WHERE created > ? AND ip = ?",
-		)
+		const countByIp = await db
+			.prepare(
+				"SELECT COUNT(*) AS count FROM comment WHERE created > ? AND ip = ?",
+			)
 			.bind(since, ip)
 			.first<{ count: number }>("count");
-		if (Number(countByIp ?? 0) > limitPerMinute) throw new Error("发言频率过高");
+		if (Number(countByIp ?? 0) > limitPerMinute)
+			throw new Error("发言频率过高");
 	}
 
 	if (limitPerMinuteAll > 0) {
-		const count = await db.prepare("SELECT COUNT(*) AS count FROM comment WHERE created > ?")
+		const count = await db
+			.prepare("SELECT COUNT(*) AS count FROM comment WHERE created > ?")
 			.bind(since)
 			.first<{ count: number }>("count");
 		if (Number(count ?? 0) > limitPerMinuteAll) {
@@ -816,7 +952,9 @@ function toCommentDto(
 		comment: comment.comment,
 		os: "",
 		browser: "",
-		ipRegion: shouldShowRegion(config) ? formatIpRegion(comment.ipRegion ?? "") : "",
+		ipRegion: shouldShowRegion(config)
+			? formatIpRegion(comment.ipRegion ?? "")
+			: "",
 		master: Boolean(comment.master),
 		like: likes.length,
 		liked: likes.includes(uid),
@@ -831,7 +969,10 @@ function toCommentDto(
 	};
 }
 
-function preCheckSpam(comment: { comment: string; nick: string }, config: TwikooConfig): void {
+function preCheckSpam(
+	comment: { comment: string; nick: string },
+	config: TwikooConfig,
+): void {
 	const limitLength = readInteger(config.LIMIT_LENGTH, DEFAULT_LIMIT_LENGTH);
 	if (limitLength > 0 && comment.comment.length > limitLength) {
 		throw new Error("评论内容过长");
@@ -843,12 +984,18 @@ function preCheckSpam(comment: { comment: string; nick: string }, config: Twikoo
 	}
 }
 
-function shouldMarkSpam(comment: { comment: string; nick: string }, config: TwikooConfig): boolean {
+function shouldMarkSpam(
+	comment: { comment: string; nick: string },
+	config: TwikooConfig,
+): boolean {
 	if (config.AKISMET_KEY === "MANUAL_REVIEW") return true;
 	return containsAnyWord(comment, readString(config.FORBIDDEN_WORDS, 2000));
 }
 
-function containsAnyWord(comment: { comment: string; nick: string }, words: string): boolean {
+function containsAnyWord(
+	comment: { comment: string; nick: string },
+	words: string,
+): boolean {
 	if (!words) return false;
 	const content = `${comment.comment}\n${comment.nick}`.toLowerCase();
 	return words
@@ -865,8 +1012,19 @@ function sanitizeComment(value: string): string {
 	// <object>, <embed>, <form>, formaction, CSS expression(), etc.
 	return sanitizeHtml(value, {
 		allowedTags: [
-			"b", "i", "em", "strong", "a", "code", "pre",
-			"blockquote", "br", "p", "ul", "ol", "li",
+			"b",
+			"i",
+			"em",
+			"strong",
+			"a",
+			"code",
+			"pre",
+			"blockquote",
+			"br",
+			"p",
+			"ul",
+			"ol",
+			"li",
 		],
 		allowedAttributes: {
 			a: ["href", "title", "target"],
@@ -879,7 +1037,8 @@ function sanitizeComment(value: string): string {
 function getAvatar(comment: CommentRow, config: TwikooConfig): string {
 	if (comment.avatar) return comment.avatar;
 	const gravatarCdn = readString(config.GRAVATAR_CDN, 100) || "weavatar.com";
-	const defaultGravatar = readString(config.DEFAULT_GRAVATAR, 200) ||
+	const defaultGravatar =
+		readString(config.DEFAULT_GRAVATAR, 200) ||
 		`initials&name=${encodeURIComponent(comment.nick)}`;
 	return `https://${gravatarCdn}/avatar/${comment.mailMd5}?d=${defaultGravatar}`;
 }
@@ -895,7 +1054,9 @@ function isAdmin(config: TwikooConfig, accessToken: string): boolean {
 }
 
 function getAccessToken(event: JsonRecord): string {
-	return readString(event.accessToken, 128) || crypto.randomUUID().replace(/-/g, "");
+	return (
+		readString(event.accessToken, 128) || crypto.randomUUID().replace(/-/g, "")
+	);
 }
 
 function getRequestRegion(request: Request): string {
@@ -935,8 +1096,10 @@ function normalizeMail(value: string): string {
 }
 
 function isQQMail(value: string): boolean {
-	return /^[1-9][0-9]{4,10}$/u.test(value) ||
-		/^[1-9][0-9]{4,10}@qq\.com$/iu.test(value);
+	return (
+		/^[1-9][0-9]{4,10}$/u.test(value) ||
+		/^[1-9][0-9]{4,10}@qq\.com$/iu.test(value)
+	);
 }
 
 function addQQMailSuffix(value: string): string {
@@ -947,7 +1110,9 @@ function normalizeLink(value: string): string {
 	if (!value) return "";
 	try {
 		const parsed = new URL(value);
-		return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.href : "";
+		return parsed.protocol === "http:" || parsed.protocol === "https:"
+			? parsed.href
+			: "";
 	} catch {
 		return "";
 	}

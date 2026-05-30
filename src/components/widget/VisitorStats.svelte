@@ -88,7 +88,9 @@ const currentPath = () => window.location.pathname || "/";
 
 const randomHeartbeatDelay = () =>
 	MIN_HEARTBEAT_DELAY_MS +
-	Math.floor(Math.random() * (MAX_HEARTBEAT_DELAY_MS - MIN_HEARTBEAT_DELAY_MS + 1));
+	Math.floor(
+		Math.random() * (MAX_HEARTBEAT_DELAY_MS - MIN_HEARTBEAT_DELAY_MS + 1),
+	);
 
 const statsPayload = (path: string) =>
 	JSON.stringify({
@@ -96,7 +98,10 @@ const statsPayload = (path: string) =>
 		visitorId: getVisitorId(),
 	});
 
-const sendStatsPost = (endpoint: "visit" | "heartbeat", path = currentPath()) => {
+const sendStatsPost = (
+	endpoint: "visit" | "heartbeat",
+	path = currentPath(),
+) => {
 	const url = `/api/stats/${endpoint}`;
 	const body = statsPayload(path);
 
@@ -120,7 +125,9 @@ const sendStatsPost = (endpoint: "visit" | "heartbeat", path = currentPath()) =>
 };
 
 const loadStatsSummary = async (path = currentPath()) => {
-	const response = await fetch(`/api/stats/summary?path=${encodeURIComponent(path)}`);
+	const response = await fetch(
+		`/api/stats/summary?path=${encodeURIComponent(path)}`,
+	);
 	const data = await response.json();
 	if (!response.ok) throw new Error(data.error ?? "统计加载失败。");
 	if (path !== currentPath()) return;
@@ -177,9 +184,11 @@ const handleVisibilityChange = () => {
 };
 
 const setupSwupTracking = () => {
-	const swup = (window as unknown as {
-		swup?: { hooks?: { on?: (event: string, handler: () => void) => void } };
-	}).swup;
+	const swup = (
+		window as unknown as {
+			swup?: { hooks?: { on?: (event: string, handler: () => void) => void } };
+		}
+	).swup;
 	swup?.hooks?.on?.("page:view", () => {
 		recordVisit();
 	});

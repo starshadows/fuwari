@@ -59,7 +59,11 @@ export function GithubCardComponent(properties, children) {
 		},
 		[
 			title,
-			h("div", { class: "gc-description" }, "个人博客源码，基于 Fuwari 主题改造。"),
+			h(
+				"div",
+				{ class: "gc-description" },
+				"个人博客源码，基于 Fuwari 主题改造。",
+			),
 			h("div", { class: "gc-infobar" }, [
 				h("div", { class: "gc-stars" }, "GitHub"),
 				h("div", { class: "gc-forks" }, "Astro"),

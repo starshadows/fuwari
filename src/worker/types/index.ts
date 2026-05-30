@@ -1,8 +1,8 @@
 export type * from "./aliases";
 
 export type Env = {
-  DB: D1Database;
-  MEDIA_BUCKET: R2Bucket;
-  ASSETS: Fetcher;
-  ADMIN_TOKEN?: string;
+	DB: D1Database;
+	MEDIA_BUCKET: R2Bucket;
+	ASSETS: Fetcher;
+	ADMIN_TOKEN?: string;
 };

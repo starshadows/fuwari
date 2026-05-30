@@ -24,7 +24,14 @@ export const MUSIC_PREFIX = "music/";
 export const MUSIC_OBJECT_SCAN_LIMIT = 200;
 export const MUSIC_METADATA_READ_BYTES = 256 * 1024; // 256 KB — ID3v2 tags live at the start of MP3 files
 export const AUDIO_EXTENSIONS = new Set([
-  "mp3", "m4a", "aac", "flac", "wav", "ogg", "opus", "webm",
+	"mp3",
+	"m4a",
+	"aac",
+	"flac",
+	"wav",
+	"ogg",
+	"opus",
+	"webm",
 ]);
 
 // ----------------------------------------------------------------
@@ -33,18 +40,30 @@ export const AUDIO_EXTENSIONS = new Set([
 export const FRIEND_STATUSES = new Set(["pending", "approved", "rejected"]);
 export const MAX_AVATAR_SIZE = 3 * 1024 * 1024;
 export const ALLOWED_AVATAR_MIME_TYPES = new Set([
-  "image/avif", "image/gif", "image/jpeg", "image/png", "image/webp",
+	"image/avif",
+	"image/gif",
+	"image/jpeg",
+	"image/png",
+	"image/webp",
 ]);
 
 // ----------------------------------------------------------------
 // Rate limits
 // ----------------------------------------------------------------
 export const RATE_LIMITS = {
-  friendSubmit: { scope: "friend-submit", limit: 5, windowSeconds: 10 * 60 },
-  commentsSession: { scope: "comments-session", limit: 8, windowSeconds: 10 * 60 },
-  humanProofFailure: { scope: "human-proof-fail", limit: 2, windowSeconds: 10 * 60 },
-  statsWrite: { scope: "stats-write", limit: 240, windowSeconds: 10 * 60 },
-  adminFailure: { scope: "admin-auth-fail", limit: 6, windowSeconds: 5 * 60 },
+	friendSubmit: { scope: "friend-submit", limit: 5, windowSeconds: 10 * 60 },
+	commentsSession: {
+		scope: "comments-session",
+		limit: 8,
+		windowSeconds: 10 * 60,
+	},
+	humanProofFailure: {
+		scope: "human-proof-fail",
+		limit: 2,
+		windowSeconds: 10 * 60,
+	},
+	statsWrite: { scope: "stats-write", limit: 240, windowSeconds: 10 * 60 },
+	adminFailure: { scope: "admin-auth-fail", limit: 6, windowSeconds: 5 * 60 },
 } as const;
 
 export const HUMAN_PROOF_CONTEXTS = new Set(["friends", "comments"]);
@@ -53,9 +72,9 @@ export const HUMAN_PROOF_CONTEXTS = new Set(["friends", "comments"]);
 // Cache version domains
 // ----------------------------------------------------------------
 export const CACHE_VERSION_DOMAINS = {
-  friends: "cv_friends",
-  commentsConfig: "cv_comments_config",
-  music: "cv_music",
+	friends: "cv_friends",
+	commentsConfig: "cv_comments_config",
+	music: "cv_music",
 } as const;
 
 export type CacheDomain = keyof typeof CACHE_VERSION_DOMAINS;
@@ -63,21 +82,80 @@ export type CacheDomain = keyof typeof CACHE_VERSION_DOMAINS;
 // ----------------------------------------------------------------
 // Security headers
 // ----------------------------------------------------------------
+// ----------------------------------------------------------------
+// API error messages (centralised, replaceable for i18n later)
+// ----------------------------------------------------------------
+export const API_ERROR = {
+	NOT_FOUND: "接口不存在。",
+	METHOD_NOT_ALLOWED: "不支持的请求方法。",
+	SERVER_ERROR: "服务器暂时开小差了，请稍后再试。",
+	RATE_LIMITED: "请求过于频繁，请稍后再试。",
+	CROSS_SITE: "跨站请求已被拒绝。",
+	MISSING_TOKEN: "Missing admin token.",
+	INVALID_TOKEN: "Invalid admin token.",
+	TOKEN_NOT_INITIALIZED:
+		"Admin token is not initialized. Call /api/setup/init-db with Authorization: Bearer <token> first.",
+	MISSING_D1: "Missing D1 binding. Bind a D1 database as DB first.",
+	MISSING_R2: "Missing R2 binding. Bind an R2 bucket as MEDIA_BUCKET first.",
+	INVALID_MEDIA_PATH: "媒体路径不正确。",
+	MEDIA_TYPE_MISSING: "媒体类型不存在。",
+	COMMENTS_DISABLED: "评论区已关闭。",
+	HUMAN_PROOF_MISSING: "请先完成人机验证。",
+	HUMAN_PROOF_FAILED: "人机验证失败，请刷新后重试。",
+	SETUP_TOKEN_MISSING:
+		'Missing setup token. Use Authorization: Bearer <token> or POST JSON { "token": "<token>" }.',
+	INVALID_SETUP_TOKEN_404:
+		"Setup tokens are no longer accepted in URL paths. Use /api/setup/init-db with Authorization: Bearer <token> or a POST JSON body.",
+	FRIEND_STATUS_INVALID: "友链状态不正确。",
+	FRIEND_ID_INVALID: "友链 ID 不正确。",
+	FRIEND_NOT_FOUND: "友链不存在。",
+	FRIEND_FIELDS_MISSING: "请填写完整的名称、简介、链接和头像。",
+	FRIEND_URL_NOT_HTTPS: "链接必须是 https 地址。",
+	FRIEND_AVATAR_INVALID: "头像需要使用公网 https 地址或站内头像地址。",
+	FRIEND_DUPLICATE: "这个站点已经提交过申请或已经在友链中。",
+	MUSIC_FIELDS_MISSING: "请填写歌曲名称和 R2 音频 Key。",
+	MUSIC_ID_INVALID: "歌曲 ID 不正确。",
+	MUSIC_NOT_FOUND: "歌曲不存在。",
+	MUSIC_COVER_INVALID: "封面地址不正确。",
+	MUSIC_COVER_R2: "封面地址需要是公网图片或站内头像地址。",
+	MUSIC_OBJECT_KEY_INVALID: "R2 音频 Key 不正确。",
+	MUSIC_IMPORT_EMPTY: "没有可导入的新音乐。",
+	AVATAR_FILE_MISSING: "请选择头像文件。",
+	AVATAR_TYPE_INVALID: "头像必须是 JPG、PNG、WebP、AVIF 或 GIF 图片。",
+	AVATAR_SIZE_TOO_LARGE: "头像文件不能超过 3 MB。",
+	TELEGRAM_INCOMPLETE: "Telegram 通知尚未完整配置。",
+	TELEGRAM_FAILED: "Telegram API 返回错误。",
+	TWIKOO_SESSION_REQUIRED: "请先完成评论区人机验证。",
+} as const;
+
+export type ApiErrorKey = keyof typeof API_ERROR;
+
+/**
+ * Resolve an API error message by key.
+ * When i18n support is added, this function selects the language
+ * based on the request's Accept-Language header.
+ */
+export function apiError(key: ApiErrorKey): string {
+	return API_ERROR[key];
+}
+
+// ----------------------------------------------------------------
+// Security headers
+// ----------------------------------------------------------------
 export const SECURITY_HEADERS: Record<string, string> = {
-  // Do not set script-src — Astro/Swup pages require inline scripts.
-  // Additional CSP directives sit in the HTML <meta> where they can be
-  // page-specific. These directives apply to every Worker response.
-  "content-security-policy":
-    [
-      "base-uri 'self'",
-      "object-src 'none'",
-      "frame-ancestors 'none'",
-      "form-action 'self'",
-      "frame-src 'none'",
-      "upgrade-insecure-requests",
-    ].join("; "),
-  "permissions-policy":
-    "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
-  "referrer-policy": "strict-origin-when-cross-origin",
-  "x-content-type-options": "nosniff",
+	// Do not set script-src — Astro/Swup pages require inline scripts.
+	// Additional CSP directives sit in the HTML <meta> where they can be
+	// page-specific. These directives apply to every Worker response.
+	"content-security-policy": [
+		"base-uri 'self'",
+		"object-src 'none'",
+		"frame-ancestors 'none'",
+		"form-action 'self'",
+		"frame-src 'none'",
+		"upgrade-insecure-requests",
+	].join("; "),
+	"permissions-policy":
+		"accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
+	"referrer-policy": "strict-origin-when-cross-origin",
+	"x-content-type-options": "nosniff",
 };

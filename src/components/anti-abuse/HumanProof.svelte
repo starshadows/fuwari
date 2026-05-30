@@ -42,7 +42,9 @@ const loadChallenge = async () => {
 	dispatch("expired");
 
 	try {
-		const response = await fetch(`/api/anti-abuse/challenge?context=${context}`);
+		const response = await fetch(
+			`/api/anti-abuse/challenge?context=${context}`,
+		);
 		const data = (await response.json()) as ChallengeResponse;
 		if (!response.ok) {
 			const errData = data as Record<string, unknown>;

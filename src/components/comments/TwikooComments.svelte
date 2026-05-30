@@ -46,7 +46,7 @@ const loadConfig = async () => {
 const loadTwikoo = async () => {
 	if (isTwikooLoaded) return;
 	message = "正在加载评论...";
-	const module = await import("twikoo") as TwikooModule;
+	const module = (await import("twikoo")) as TwikooModule;
 	const twikoo = resolveTwikooClient(module);
 
 	isTwikooLoaded = true;

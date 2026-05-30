@@ -43,7 +43,8 @@ if (!banner || typeof banner !== "string" || banner.trim() === "") {
 	banner = siteConfig.banner.src;
 }
 
-// TODO don't use post cover as banner for now
+// Always use the configured site banner — individual post covers are not
+// used as the page banner to keep the hero area visually consistent.
 banner = siteConfig.banner.src;
 
 const enableBanner = siteConfig.banner.enable;
@@ -339,7 +340,6 @@ function showBanner() {
 }
 
 function init() {
-	// disableAnimation()()		// TODO
 	loadTheme();
 	loadHue();
 	initCustomScrollbar();

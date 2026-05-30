@@ -107,9 +107,7 @@ describe("clampInteger", () => {
 // ================================================================
 describe("safeNormalizeMediaKey", () => {
 	it("returns prefixed key for valid input", () => {
-		expect(safeNormalizeMediaKey("song.mp3", "music")).toBe(
-			"music/song.mp3",
-		);
+		expect(safeNormalizeMediaKey("song.mp3", "music")).toBe("music/song.mp3");
 	});
 
 	it("removes duplicate prefix", () => {
@@ -216,12 +214,9 @@ describe("isSameOrigin", () => {
 	});
 
 	it("returns false for different origins", () => {
-		expect(
-			isSameOrigin(
-				"https://attacker.com",
-				"https://example.com",
-			),
-		).toBe(false);
+		expect(isSameOrigin("https://attacker.com", "https://example.com")).toBe(
+			false,
+		);
 	});
 
 	it("returns false for invalid URLs", () => {
@@ -263,9 +258,7 @@ describe("isAvatarUrl", () => {
 	});
 
 	it("rejects invalid paths", () => {
-		expect(
-			isAvatarUrl("/media/avatars/../../etc/passwd"),
-		).toBe(false);
+		expect(isAvatarUrl("/media/avatars/../../etc/passwd")).toBe(false);
 	});
 });
 
@@ -306,11 +299,7 @@ describe("isLikelyBot", () => {
 
 	it("passes human browsers", () => {
 		expect(
-			isLikelyBot(
-				mockRequest(
-					"Mozilla/5.0 (Windows NT 10.0) Chrome/120",
-				),
-			),
+			isLikelyBot(mockRequest("Mozilla/5.0 (Windows NT 10.0) Chrome/120")),
 		).toBe(false);
 	});
 });

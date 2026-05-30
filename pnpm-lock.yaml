@@ -196,6 +196,9 @@ importers:
       '@types/sanitize-html':
         specifier: ^2.16.1
         version: 2.16.1
+      miniflare:
+        specifier: ^4.20260526.0
+        version: 4.20260526.0
       postcss-import:
         specifier: ^16.1.1
         version: 16.1.1(postcss@8.5.15)

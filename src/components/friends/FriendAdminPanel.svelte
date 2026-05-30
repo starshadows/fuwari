@@ -52,7 +52,12 @@ type TelegramSettings = {
 };
 
 const tokenKey = "fuwari-admin-token";
-const statusOptions: FriendStatus[] = ["pending", "approved", "rejected", "all"];
+const statusOptions: FriendStatus[] = [
+	"pending",
+	"approved",
+	"rejected",
+	"all",
+];
 
 let tokenInput = "";
 let token = "";
@@ -248,8 +253,12 @@ const loadMusicObjects = async () => {
 	try {
 		const data = await adminFetch("/api/admin/music/objects");
 		musicObjects = data.objects ?? [];
-		const unimportedCount = musicObjects.filter((object) => !object.imported).length;
-		setMessage(`已扫描 R2：${musicObjects.length} 个音频，${unimportedCount} 个未导入。`);
+		const unimportedCount = musicObjects.filter(
+			(object) => !object.imported,
+		).length;
+		setMessage(
+			`已扫描 R2：${musicObjects.length} 个音频，${unimportedCount} 个未导入。`,
+		);
 	} catch (err) {
 		setError(err instanceof Error ? err.message : "扫描 R2 音乐失败。");
 	} finally {
@@ -416,7 +425,8 @@ const normalizeTrackSort = async () => {
 	}
 
 	const orderedTracks = [...tracks].sort((left, right) => {
-		if (left.sortOrder !== right.sortOrder) return left.sortOrder - right.sortOrder;
+		if (left.sortOrder !== right.sortOrder)
+			return left.sortOrder - right.sortOrder;
 		return left.id - right.id;
 	});
 

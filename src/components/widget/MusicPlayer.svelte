@@ -13,11 +13,24 @@ type Track = {
 
 type PlayMode = "shuffle" | "repeat-one" | "order";
 
-const playModeOptions: Array<{ mode: PlayMode; icon: string; label: string }> = [
-	{ mode: "shuffle", icon: "material-symbols:shuffle-rounded", label: "随机播放" },
-	{ mode: "repeat-one", icon: "material-symbols:repeat-one-rounded", label: "单曲循环" },
-	{ mode: "order", icon: "material-symbols:format-list-numbered-rounded", label: "顺序播放" },
-];
+const playModeOptions: Array<{ mode: PlayMode; icon: string; label: string }> =
+	[
+		{
+			mode: "shuffle",
+			icon: "material-symbols:shuffle-rounded",
+			label: "随机播放",
+		},
+		{
+			mode: "repeat-one",
+			icon: "material-symbols:repeat-one-rounded",
+			label: "单曲循环",
+		},
+		{
+			mode: "order",
+			icon: "material-symbols:format-list-numbered-rounded",
+			label: "顺序播放",
+		},
+	];
 
 let tracks: Track[] = [];
 let activeIndex = 0;
@@ -37,15 +50,19 @@ let scheduledTrackLoadType: "idle" | "timeout" | undefined;
 $: activeTrack = tracks[activeIndex];
 $: progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 $: volumeProgress = Math.round(volume * 100);
-$: activeCoverUrl = activeTrack?.coverUrl && !hiddenCoverUrls.has(activeTrack.coverUrl)
-	? activeTrack.coverUrl
-	: "";
-$: currentPlayMode = playModeOptions.find((item) => item.mode === playMode) ?? playModeOptions[2];
+$: activeCoverUrl =
+	activeTrack?.coverUrl && !hiddenCoverUrls.has(activeTrack.coverUrl)
+		? activeTrack.coverUrl
+		: "";
+$: currentPlayMode =
+	playModeOptions.find((item) => item.mode === playMode) ?? playModeOptions[2];
 
 const formatTime = (value: number) => {
 	if (!Number.isFinite(value)) return "0:00";
 	const minutes = Math.floor(value / 60);
-	const seconds = Math.floor(value % 60).toString().padStart(2, "0");
+	const seconds = Math.floor(value % 60)
+		.toString()
+		.padStart(2, "0");
 	return `${minutes}:${seconds}`;
 };
 
@@ -123,7 +140,8 @@ const switchTrackTo = (index: number, autoplay = isPlaying) => {
 
 const cyclePlayMode = () => {
 	const index = playModeOptions.findIndex((item) => item.mode === playMode);
-	playMode = playModeOptions[(index + 1) % playModeOptions.length]?.mode ?? "order";
+	playMode =
+		playModeOptions[(index + 1) % playModeOptions.length]?.mode ?? "order";
 };
 
 const seek = (event: Event) => {
@@ -147,7 +165,9 @@ const hideCover = (url: string) => {
 const scheduleTrackLoad = () => {
 	if ("requestIdleCallback" in window) {
 		scheduledTrackLoadType = "idle";
-		scheduledTrackLoadId = window.requestIdleCallback(() => loadTracks(), { timeout: 1500 });
+		scheduledTrackLoadId = window.requestIdleCallback(() => loadTracks(), {
+			timeout: 1500,
+		});
 		return;
 	}
 

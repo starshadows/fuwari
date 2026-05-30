@@ -17,12 +17,13 @@ export function getPostUrlBySlug(slug: string): string {
 }
 
 export function getPostSlugById(id: string): string {
-	return id
-		.replace(/\.(md|mdx)$/i, "")
-		.replace(/\/index$/i, "");
+	return id.replace(/\.(md|mdx)$/i, "").replace(/\/index$/i, "");
 }
 
-export function getPostContentDir(entry: { id: string; filePath?: string }): string {
+export function getPostContentDir(entry: {
+	id: string;
+	filePath?: string;
+}): string {
 	const normalizedFilePath = entry.filePath?.replace(/\\/g, "/") ?? "";
 	const marker = "src/content/posts/";
 	const markerIndex = normalizedFilePath.indexOf(marker);
@@ -31,7 +32,9 @@ export function getPostContentDir(entry: { id: string; filePath?: string }): str
 		return getDir(normalizedFilePath.slice(markerIndex + marker.length));
 	}
 
-	const idWithExtension = /\.(md|mdx)$/i.test(entry.id) ? entry.id : `${entry.id}.md`;
+	const idWithExtension = /\.(md|mdx)$/i.test(entry.id)
+		? entry.id
+		: `${entry.id}.md`;
 	return getDir(idWithExtension);
 }
 
