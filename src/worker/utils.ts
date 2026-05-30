@@ -418,30 +418,33 @@ export async function requireAdmin(
 ): Promise<Response | null> {
   const token = readBearerToken(request);
   if (!token) {
-    const rl = await enforceRateLimit(
-      request,
-      env,
-      { scope: "admin-auth-fail", limit: 6, windowSeconds: 5 * 60 },
-    );
-    if (rl) return rl;
     return json({ error: "Missing admin token." }, 401);
   }
 
+  // Always enforce rate limit before any auth verification.
+  // Previously rate-limiting was only applied on some failure paths,
+  // which leaked information about whether ADMIN_TOKEN was configured
+  // and whether the submitted token was correct (timing / 429 presence).
+  // Now every request with a token hits the same rate-limit check first.
+  const rl = await enforceRateLimit(
+    request,
+    env,
+    { scope: "admin-auth-fail", limit: 30, windowSeconds: 5 * 60 },
+  );
+  if (rl) return rl;
+
+  // Verify through environment variable (fast path)
   if (env.ADMIN_TOKEN && token === env.ADMIN_TOKEN) return null;
 
+  // Verify through database-stored hash
   if (env.DB && (await verifyStoredAdminToken(env, token))) return null;
 
+  // Token not yet initialized — guide the operator to set one up
   if (
     !env.ADMIN_TOKEN &&
     env.DB &&
     !(await getStoredAdminTokenHash(env))
   ) {
-    const rl = await enforceRateLimit(
-      request,
-      env,
-      { scope: "admin-auth-fail", limit: 6, windowSeconds: 5 * 60 },
-    );
-    if (rl) return rl;
     return json(
       {
         error:
@@ -451,12 +454,6 @@ export async function requireAdmin(
     );
   }
 
-  const rl = await enforceRateLimit(
-    request,
-    env,
-    { scope: "admin-auth-fail", limit: 6, windowSeconds: 5 * 60 },
-  );
-  if (rl) return rl;
   return json({ error: "Invalid admin token." }, 401);
 }
 

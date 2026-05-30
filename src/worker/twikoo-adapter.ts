@@ -8,6 +8,8 @@
  * for Cloudflare Workers.
  */
 
+import sanitizeHtml from "sanitize-html";
+
 type CommentSubmittedEvent = {
 	id: string;
 	nick: string;
@@ -850,12 +852,21 @@ function containsAnyWord(comment: { comment: string; nick: string }, words: stri
 }
 
 function sanitizeComment(value: string): string {
-	return value
-		.replace(/<script[\s\S]*?<\/script>/gi, "")
-		.replace(/<style[\s\S]*?<\/style>/gi, "")
-		.replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
-		.replace(/\s(href|src)\s*=\s*(['"])\s*javascript:[\s\S]*?\2/gi, "")
-		.replace(/\s(href|src)\s*=\s*javascript:[^\s>]+/gi, "");
+	// Use a proper HTML sanitizer instead of a hand-rolled regex blacklist.
+	// The previous regex approach only stripped <script>, <style>, on* event
+	// handlers, and javascript: URLs, but missed vectors like <iframe>,
+	// <object>, <embed>, <form>, formaction, CSS expression(), etc.
+	return sanitizeHtml(value, {
+		allowedTags: [
+			"b", "i", "em", "strong", "a", "code", "pre",
+			"blockquote", "br", "p", "ul", "ol", "li",
+		],
+		allowedAttributes: {
+			a: ["href", "title", "target"],
+		},
+		allowedSchemes: ["http", "https", "mailto"],
+		disallowedTagsMode: "discard",
+	});
 }
 
 function getAvatar(comment: CommentRow, config: TwikooConfig): string {
@@ -980,6 +991,20 @@ function clampInteger(value: number, min: number, max: number): number {
 function allowCors(request: Request, headers: Record<string, string>): void {
 	const origin = request.headers.get("origin");
 	if (!origin) return;
+
+	// Only allow same-origin requests with credentials.
+	// Previously the Origin header was reflected verbatim with
+	// Access-Control-Allow-Credentials: true, which allowed any
+	// third-party site to make authenticated cross-origin requests
+	// that included cookies.
+	try {
+		const originUrl = new URL(origin);
+		const requestUrl = new URL(request.url);
+		if (originUrl.hostname !== requestUrl.hostname) return;
+	} catch {
+		return;
+	}
+
 	headers["Access-Control-Allow-Credentials"] = "true";
 	headers["Access-Control-Allow-Origin"] = origin;
 	headers["Access-Control-Allow-Methods"] = "POST";
