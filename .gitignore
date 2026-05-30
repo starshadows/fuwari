@@ -32,6 +32,9 @@ yarn.lock
 .idea
 *.iml
 
+# AI assistant context (local only, must not be committed)
+CLAUDE.md
+
 # local source assets that are not used directly by the site
 博客素材/
 src/assets/images/beijing2.png
