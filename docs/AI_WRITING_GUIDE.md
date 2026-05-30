@@ -259,12 +259,14 @@ Run:
 
 ```powershell
 corepack pnpm check
+corepack pnpm test
 corepack pnpm build
 ```
 
 Expected result:
 
 - `astro check` has 0 errors.
+- `vitest run` passes all tests.
 - `astro build` succeeds.
 - Pagefind generates `dist/pagefind`.
 

@@ -17,6 +17,8 @@
     "d1:migrate:remote": "wrangler d1 migrations apply fuwari-data --remote",
     "astro": "astro",
     "type-check": "tsc --noEmit --isolatedDeclarations",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "new-post": "node scripts/new-post.js",
     "format": "biome format --write ./src",
     "lint": "biome check --write ./src",
@@ -80,6 +82,7 @@
     "@types/sanitize-html": "^2.16.1",
     "postcss-import": "^16.1.1",
     "postcss-nesting": "^13.0.2",
+    "vitest": "^4.1.7",
     "wrangler": "^4.95.0"
   },
   "pnpm": {

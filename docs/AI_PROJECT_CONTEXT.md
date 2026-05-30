@@ -10,13 +10,15 @@ The owner is not deeply technical, so future AI assistants should keep changes s
 
 ## Tech Stack
 
-- Framework: Astro 5
-- UI: Astro components plus Svelte components
-- Styling: Tailwind CSS, Stylus, and project CSS files
+- Framework: Astro 6 (SSG + Cloudflare Workers backend)
+- UI: Astro components plus Svelte 5 components
+- Styling: Tailwind CSS 3, Stylus, and project CSS files
 - Package manager: pnpm 9.14.4
 - Static search: Pagefind, generated during `pnpm build`
 - Deployment target: Cloudflare Workers with Static Assets
-- Runtime data: Cloudflare D1 for friend links and music metadata; Cloudflare R2 for avatars and audio files
+- Runtime data: Cloudflare D1 for links/comments/stats/music; Cloudflare R2 for avatars/music/covers
+- Testing: Vitest 4 (46 unit tests for Worker utility functions)
+- TypeScript 6 + Biome 2.4 for code quality
 
 ## Important Commands
 
@@ -26,7 +28,9 @@ Use these from the repository root:
 corepack pnpm install
 corepack pnpm dev
 corepack pnpm check
+corepack pnpm test
 corepack pnpm build
+corepack pnpm test
 corepack pnpm new-post post-file-name
 corepack pnpm d1:migrate:local
 corepack pnpm worker:dev
@@ -135,6 +139,17 @@ lang: ''
 - External article links should open in a new tab using HTML anchors with `target="_blank"` and `rel="noopener noreferrer"`.
 - For multi-service tutorials, add a simple original flow/architecture diagram when text alone is hard to follow. Store the diagram beside the post; do not paste user-supplied screenshots as the diagram.
 
+## Testing
+
+Worker utility function tests live in `src/worker/__tests__/utils.test.ts` (46 tests).
+
+```powershell
+corepack pnpm test           # single run
+corepack pnpm test:watch     # watch mode
+```
+
+Tests cover input parsing, media key validation, URL helpers, crypto utilities, and bot detection. Integration tests requiring D1/R2 are not yet present.
+
 ## Deployment Notes
 
 This site builds to static HTML/CSS/JS in `dist/`, then Cloudflare Workers serves those assets and handles API/media routes.
@@ -151,6 +166,7 @@ Before pushing meaningful changes, run:
 
 ```powershell
 corepack pnpm check
+corepack pnpm test
 corepack pnpm build
 ```
 

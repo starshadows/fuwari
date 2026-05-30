@@ -9,6 +9,13 @@
  */
 
 import sanitizeHtml from "sanitize-html";
+import {
+  readString,
+  readInteger,
+  clampInteger,
+  hashToken,
+  getClientIp,
+} from "./utils";
 
 type CommentSubmittedEvent = {
 	id: string;
@@ -323,7 +330,7 @@ async function commentSubmit(
 	const timestamp = Date.now();
 	const mail = normalizeMail(readString(event.mail, 160));
 	const displayMail = isQQMail(mail) ? addQQMailSuffix(mail) : mail;
-	const mailHash = displayMail ? await hashHex(displayMail) : await hashHex(nick);
+	const mailHash = displayMail ? await hashToken(displayMail) : await hashToken(nick);
 	const isBlogger = Boolean(config.BLOGGER_EMAIL) &&
 		normalizeMail(String(config.BLOGGER_EMAIL)) === displayMail;
 
@@ -339,7 +346,7 @@ async function commentSubmit(
 		mailMd5: mailHash,
 		link: normalizeLink(readString(event.link, 500)),
 		ua: readString(event.ua, 600),
-		ip: getIp(request),
+		ip: getClientIp(request),
 		ipRegion: getRequestRegion(request),
 		master: isBlogger ? 1 : 0,
 		url: readString(event.url, 500),
@@ -529,7 +536,7 @@ async function setPassword(
 	}
 	const password = readString(event.password, 256);
 	if (!password) throw new Error('参数"password"不合法');
-	await writeConfig(db, { ...config, ADMIN_PASS: await hashHex(password) });
+	await writeConfig(db, { ...config, ADMIN_PASS: await hashToken(password) });
 	return { code: RES_CODE.SUCCESS };
 }
 
@@ -538,7 +545,7 @@ async function login(event: JsonRecord, config: TwikooConfig): Promise<JsonRecor
 		return { code: RES_CODE.PASS_NOT_EXIST, message: "未配置管理密码" };
 	}
 	const password = readString(event.password, 256);
-	if (config.ADMIN_PASS !== await hashHex(password)) {
+	if (config.ADMIN_PASS !== await hashToken(password)) {
 		return { code: RES_CODE.PASS_NOT_MATCH, message: "密码错误" };
 	}
 	return {
@@ -712,7 +719,7 @@ async function uploadImageToR2(env: TwikooWorkerEnv, event: JsonRecord): Promise
 
 	const now = new Date();
 	const month = String(now.getMonth() + 1).padStart(2, "0");
-	const hash = await hashHex(photo);
+	const hash = await hashToken(photo);
 	const extension = blob.type.split("/")[1]?.replace(/[^a-z0-9.+-]/gi, "") || "bin";
 	const key = `${now.getFullYear()}/${month}/${hash}.${extension}`;
 	const object = await env.R2.put(key, blob);
@@ -756,7 +763,7 @@ async function limitCommentSubmit(
 	const limitPerMinute = readInteger(config.LIMIT_PER_MINUTE, DEFAULT_LIMIT_PER_MINUTE);
 	const limitPerMinuteAll = readInteger(config.LIMIT_PER_MINUTE_ALL, DEFAULT_LIMIT_PER_MINUTE);
 	const since = Date.now() - 600000;
-	const ip = getIp(request);
+	const ip = getClientIp(request);
 
 	if (limitPerMinute > 0) {
 		const countByIp = await db.prepare(
@@ -891,13 +898,6 @@ function getAccessToken(event: JsonRecord): string {
 	return readString(event.accessToken, 128) || crypto.randomUUID().replace(/-/g, "");
 }
 
-function getIp(request: Request): string {
-	return request.headers.get("CF-Connecting-IP") ??
-		request.headers.get("x-real-ip") ??
-		request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-		"";
-}
-
 function getRequestRegion(request: Request): string {
 	const cf = request.cf as IncomingRequestCfProperties | undefined;
 	return `${cf?.country || ""}|0|${cf?.region || ""}|${cf?.city || ""}|`;
@@ -964,30 +964,9 @@ function dataUriToBlob(value: string): Blob | null {
 	return new Blob([bytes], { type: match[1] });
 }
 
-async function hashHex(value: string): Promise<string> {
-	const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-	return Array.from(new Uint8Array(digest))
-		.map((byte) => byte.toString(16).padStart(2, "0"))
-		.join("");
-}
-
 function stripTags(value: string): string {
 	return value.replace(/<[^>]+>/g, "");
 }
-
-function readString(value: unknown, maxLength: number): string {
-	return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
-}
-
-function readInteger(value: unknown, fallback: number): number {
-	const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
-	return Number.isFinite(parsed) ? Math.trunc(parsed) : fallback;
-}
-
-function clampInteger(value: number, min: number, max: number): number {
-	return Math.min(max, Math.max(min, value));
-}
-
 function allowCors(request: Request, headers: Record<string, string>): void {
 	const origin = request.headers.get("origin");
 	if (!origin) return;

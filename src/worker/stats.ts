@@ -1,5 +1,5 @@
 import type { Env } from "./types";
-import { json, readString, readJson, rejectCrossSiteWrite, enforceRateLimit, isLikelyBot, hashToken, ensureStatsSaltCached } from "./utils";
+import { json, readString, readJson, rejectCrossSiteWrite, enforceRateLimit, isLikelyBot, hashToken, ensureStatsSaltCached, getClientIp } from "./utils";
 import { RATE_LIMITS, STATS_ACTIVE_WINDOW_MS, STATS_TIMEZONE_OFFSET_MINUTES } from "./constants";
 
 let statsSchemaReady = false;
@@ -297,10 +297,7 @@ async function getStatsVisitorHash(
 ): Promise<string> {
   const salt = await ensureStatsSaltCached(env);
   const userAgent = request.headers.get("user-agent") ?? "";
-  const ip =
-    request.headers.get("cf-connecting-ip") ??
-    request.headers.get("x-real-ip") ??
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "";
+  const ip = getClientIp(request);
   const source = clientVisitorId
     ? `client:${clientVisitorId}:${userAgent}`
     : `request:${ip}:${userAgent}`;

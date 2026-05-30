@@ -21,6 +21,8 @@ pnpm d1:migrate:remote
 pnpm format           # Biome format (tab indent, double quotes)
 pnpm lint             # Biome lint + autofix
 pnpm type-check       # tsc --noEmit
+pnpm test             # vitest run (unit tests)
+pnpm test:watch       # vitest in watch mode
 
 # Content
 pnpm new-post <name>  # Scaffold a new blog post in src/content/posts/
@@ -66,20 +68,25 @@ Runs as a Cloudflare Worker with `ASSETS` binding for static files, `DB` (D1 SQL
 - **`comments.ts`** — Twikoo-compatible comment API with session-based check. Enables/disables comments via admin settings. ALTCHA challenge required for posting. Sends Telegram notification on new comments.
 - **`twikoo-adapter.ts`** — Translates Twikoo request/response format to Worker's internal API.
 - **`friends.ts`** — `GET /api/friends` returns approved links; `POST /api/friends` submits with rate limiting, dedup by domain, human proof verification, Telegram notification for friends.
-- **`id3.ts`** — Shared ID3v2 tag parser (titles, artists, albums, embedded cover art), used by both `media.ts` and `music.ts`.
-- **`music.ts`** — CRUD for music tracks, R2 object listing with ID3 metadata reading, auto-import from R2 `music/` prefix.
+- **`id3.ts`** — Shared ID3v2 tag parser (titles, artists, albums, embedded cover art).
+- **`music.ts`** — CRUD for music tracks, R2 object listing with ID3 metadata reading, auto-import from R2 `music/` prefix. Uses in-memory scan cache (5-min TTL) to avoid re-reading metadata on every admin page load.
 - **`stats.ts`** — Visitor counting: page views, unique visitors, daily aggregates, real-time online (5-min heartbeat window). Visitor identification via local random ID + SHA-256 (no raw IP storage).
 - **`admin.ts`** — Admin API (`/api/admin/*`) for friend management (approve/reject/sort), avatar upload to R2, comments toggle, Telegram settings, music management. All endpoints require `ADMIN_TOKEN` auth.
 - **`anti-abuse.ts`** — ALTCHA challenge generation/verification for friend submissions and comments.
 - **`media.ts`** — Serves files from R2 `MEDIA_BUCKET` at `/media/avatars/*` and `/media/covers/*` with content-type detection.
-- **`utils.ts`** — Shared utilities: response helpers (json, security headers, server timing, caching), versioned cache invalidation (`cachedResponseV`, `incrementCacheVersion`), input validation, rate limiting (D1-based sliding window), admin token verification, cross-site write protection.
+- **`utils.ts`** — Shared utilities: response helpers (json, security headers, server timing, caching), versioned cache invalidation (`cachedResponseV`, `incrementCacheVersion`), input validation, rate limiting (D1-based sliding window), admin token verification (timing-safe via unified rate-limit-first gate), cross-site write protection. Also hosts shared worker helpers: `readMusicMetadataFromR2`, `inferMusicMetadataFromKey`, `getMusicFileNameFromKey`, `embeddedCoverUrlForMusicKey`, `getClientIp`, `getRequestRegion`, `clampInteger`.
 - **`types/index.ts`** — `Env` interface with `DB`, `MEDIA_BUCKET`, `ASSETS`, `ADMIN_TOKEN` bindings.
 
 Key backend patterns:
-- Admin API uses Bearer token auth; rate limiting on public write endpoints; cross-site origin check for writes; versioned cached responses for public GET endpoints (`cachedResponseV` with `incrementCacheVersion` on mutations).
-- AST-based CORS headers on all Worker responses via `withSecurityHeaders()`.
+- Admin API uses Bearer token auth with unified rate-limit-first gate (all auth paths hit rate limit before verification, preventing timing-based probing).
+- Rate limiting on public write endpoints; cross-site origin check for writes; versioned cached responses for public GET endpoints (`cachedResponseV` with `incrementCacheVersion` on mutations).
+- CSP headers on all Worker responses via `withSecurityHeaders()`: `base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; frame-src 'none'; upgrade-insecure-requests`. Do not add `script-src` here — Astro/Swup pages require inline scripts.
 - Server timing headers via `withServerTiming()`.
 - Graceful 410 on old URL-based setup token pattern.
+- Twikoo comments use `sanitize-html` for robust XSS-safe HTML (not hand-rolled regex blacklist).
+- Twikoo CORS is same-origin only — Origin header is validated against the request hostname before being reflected with credentials.
+- Worker unit tests in `src/worker/__tests__/utils.test.ts`, run with `pnpm test`.
+- R2 music scan has a 5-minute in-memory result cache; `MUSIC_METADATA_READ_BYTES` is 256 KB.
 
 ### Deployment
 

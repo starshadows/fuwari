@@ -53,6 +53,7 @@
 - **TypeScript**：Astro、Svelte 和 Worker 都使用 TypeScript。
 - **Biome**：格式化和基础检查工具。
 - **@astrojs/check**：Astro/Svelte/TypeScript 检查。
+- **Vitest**：单元测试框架，Worker `utils.ts` 纯函数有 46 个测试用例覆盖。
 
 ## 3. 关键目录
 
@@ -82,11 +83,13 @@ src/
     index.ts                        Cloudflare Worker API 入口
     db.ts                           版本化 D1 迁移初始化
     id3.ts                          共享 ID3 标签解析模块
-    utils.ts                        通用工具：缓存版本化、限流、鉴权
+	    utils.ts                        通用工具：缓存版本化、限流、鉴权、音乐元数据读取
     friends.ts                      友链读取和申请（含 Telegram 友链通知）
     comments.ts                     Twikoo 评论代理（含 Telegram 评论通知）
-    twikoo-adapter.ts               Twikoo 协议适配
-    music.ts                        音乐列表、R2 扫描、ID3 元数据
+	    twikoo-adapter.ts               Twikoo 协议适配（评论 HTML 净化用 sanitize-html）
+	    music.ts                        音乐列表、R2 扫描、ID3 元数据（5 分钟扫描缓存）
+	    __tests__/
+	      utils.test.ts                 纯函数单元测试（46 用例）
 
 public/
   sakana/
@@ -100,6 +103,8 @@ public/
 migrations/
   0001_create_social_features.sql   友链、音乐、后台设置表
   0002_create_visitor_stats.sql     访客统计表
+  0003_create_rate_limits.sql       限流表
+  0004_create_comments_and_notifications.sql   评论与通知表
 
 docs/
   AI_PROJECT_CONTEXT.md             给协作者 / AI 的项目上下文
@@ -681,7 +686,7 @@ corepack pnpm exec wrangler deploy
 当前后台认证是轻量 token 模式，适合个人博客：
 
 - 后台页面可以额外用 Cloudflare Access 保护。
-- 后台 API 仍然校验 Bearer token。
+- 后台 API 仍然校验 Bearer token（所有 auth 路径统一先做限流再验证，防止时序侧信道泄露 token 配置状态）。
 - token 不应该写入前端源码或文档。
 - 初始化 token 不允许放在 URL query 或路径里，只能放在 Authorization 头或 POST JSON。
 - D1 兜底模式保存的是 token 的 SHA-256 哈希，不是明文。
@@ -725,7 +730,20 @@ Worker 负责：
 - 摇摇乐等纯前端增强可以跟随静态资源一起部署。
 - 整体复杂度仍然集中在一个 Worker 文件和少量 Svelte/Astro 组件内。
 
-## 16. 已完成的改进（2026-05）
+## 16. 已完成的改进
+
+### 2026-05（第二轮安全加固 + 重构）
+
+- 修复 admin auth 时序攻击：所有 auth 路径先统一限流再做验证。
+- 修复 Twikoo CORS 反射：Origin 头校验 hostname 后才返回 credential CORS 头。
+- 修复评论 HTML 净化：sanitize-html 白名单替代正则黑名单。
+- 消除 Worker 模块间代码重复：共享 getClientIp、readMusicMetadataFromR2、inferMusicMetadataFromKey、getMusicFileNameFromKey、clampInteger 等函数到 utils.ts。
+- R2 音乐扫描缓存：5 分钟内存缓存避免重复读取 ID3 元数据。
+- 加固 CSP 安全头：新增 form-action、frame-src、upgrade-insecure-requests。
+- 添加 vitest 单元测试框架（46 测试用例）。
+- MUSIC_METADATA_READ_BYTES 从 1 MB 降低到 256 KB。
+
+### 2026-05（第一轮重构）
 
 - 抽取 ID3 解析到 `id3.ts`，消除 `media.ts` 和 `music.ts` 之间的代码重复。
 - BackToTop 硬编码 `BANNER_HEIGHT` → 通过 data attribute 注入。
@@ -738,7 +756,22 @@ Worker 负责：
 - Telegram 评论通知：复用友链通知的 Telegram Bot 配置，新评论自动推送。
 - 统一 Worker 错误格式（已统一为 `json({ error: “...” }, status)`，不需修改）。
 
-## 17. 后续可扩展方向
+## 17. 测试
+
+Worker 纯函数有单元测试覆盖，位于 `src/worker/__tests__/utils.test.ts`。
+
+运行测试：
+
+```bash
+pnpm test           # 单次运行
+pnpm test:watch     # 监听模式
+```
+
+测试覆盖的函数包括：`readString`、`readInteger`、`readBoolean`、`clampInteger`、`safeNormalizeMediaKey`、`safeDecodeURIComponent`、`stripMediaPrefix`、`base64UrlEncode`/`base64UrlDecode`、`timingSafeEqual`、`maskSecret`、`isSameOrigin`、`isHttpsUrl`、`isAvatarUrl`、`sanitizeFileName`、`isLikelyBot`。
+
+需要 D1/R2 的集成测试暂未添加，可在后续通过 miniflare + vitest 环境引入。
+
+## 18. 后续可扩展方向
 
 可以继续考虑：
 

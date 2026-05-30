@@ -22,7 +22,7 @@ export const RATE_LIMIT_MAX_AGE_SECONDS = 24 * 60 * 60;
 // ----------------------------------------------------------------
 export const MUSIC_PREFIX = "music/";
 export const MUSIC_OBJECT_SCAN_LIMIT = 200;
-export const MUSIC_METADATA_READ_BYTES = 1024 * 1024;
+export const MUSIC_METADATA_READ_BYTES = 256 * 1024; // 256 KB — ID3v2 tags live at the start of MP3 files
 export const AUDIO_EXTENSIONS = new Set([
   "mp3", "m4a", "aac", "flac", "wav", "ogg", "opus", "webm",
 ]);
@@ -64,8 +64,18 @@ export type CacheDomain = keyof typeof CACHE_VERSION_DOMAINS;
 // Security headers
 // ----------------------------------------------------------------
 export const SECURITY_HEADERS: Record<string, string> = {
+  // Do not set script-src — Astro/Swup pages require inline scripts.
+  // Additional CSP directives sit in the HTML <meta> where they can be
+  // page-specific. These directives apply to every Worker response.
   "content-security-policy":
-    "base-uri 'self'; object-src 'none'; frame-ancestors 'none'",
+    [
+      "base-uri 'self'",
+      "object-src 'none'",
+      "frame-ancestors 'none'",
+      "form-action 'self'",
+      "frame-src 'none'",
+      "upgrade-insecure-requests",
+    ].join("; "),
   "permissions-policy":
     "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
   "referrer-policy": "strict-origin-when-cross-origin",

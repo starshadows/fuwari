@@ -83,6 +83,7 @@ All commands are run from the root of the project, from a terminal:
 | `pnpm build`               | Build your production site to `./dist/`             |
 | `pnpm preview`             | Preview your build locally, before deploying        |
 | `pnpm check`               | Run checks for errors in your code                  |
+| `pnpm test`                | Run unit tests with Vitest                          |
 | `pnpm format`              | Format your code using Biome                        |
 | `pnpm new-post <filename>` | Create a new post                                   |
 | `pnpm astro ...`           | Run CLI commands like `astro add`, `astro check`    |

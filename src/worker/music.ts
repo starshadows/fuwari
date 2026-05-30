@@ -13,6 +13,9 @@ import {
   isAvatarUrl,
   cachedResponse,
   incrementCacheVersion,
+  readMusicMetadataFromR2,
+  getMusicFileNameFromKey,
+  embeddedCoverUrlForMusicKey,
 } from "./utils";
 import {
   MUSIC_PREFIX,
@@ -20,11 +23,6 @@ import {
   MUSIC_METADATA_READ_BYTES,
   AUDIO_EXTENSIONS,
 } from "./constants";
-import {
-  parseId3Metadata,
-  cleanMetadataText,
-  truncateText,
-} from "./id3";
 
 // ================================================================
 // Public: GET /api/music/tracks
@@ -59,12 +57,6 @@ export async function getPublicMusicTracks(env: Env): Promise<Response> {
   return json({ tracks });
 }
 
-function embeddedCoverUrlForMusicKey(objectKey: string): string {
-  const key = safeNormalizeMediaKey(objectKey, "music");
-  if (!key) return "";
-  if (!key.toLowerCase().endsWith(".mp3")) return "";
-  return `/media/covers/from-music/${stripMediaPrefix(key, "music")}`;
-}
 
 // ================================================================
 // Admin: list music
@@ -162,6 +154,7 @@ export async function importR2MusicObjects(
     sortOrder += 1;
   }
 
+  invalidateScanCache();
   await incrementCacheVersion(env, "music");
   return json({ ok: true, imported }, 201);
 }
@@ -202,6 +195,7 @@ export async function createMusicTrack(
     .bind(title, artist, album, objectKey, coverUrl, isActive, sortOrder)
     .run();
 
+  invalidateScanCache();
   await incrementCacheVersion(env, "music");
   return json({ ok: true, id: result.meta.last_row_id }, 201);
 }
@@ -256,6 +250,7 @@ export async function updateMusicTrack(
     .first<Record<string, unknown>>();
 
   if (!track) return json({ error: "歌曲不存在。" }, 404);
+  invalidateScanCache();
   await incrementCacheVersion(env, "music");
   return json({ track });
 }
@@ -266,6 +261,7 @@ export async function deleteMusicTrack(
 ): Promise<Response> {
   if (!Number.isInteger(id)) return json({ error: "歌曲 ID 不正确。" }, 400);
   await env.DB.prepare("DELETE FROM music_tracks WHERE id = ?").bind(id).run();
+  invalidateScanCache();
   await incrementCacheVersion(env, "music");
   return json({ ok: true });
 }
@@ -274,7 +270,23 @@ export async function deleteMusicTrack(
 // R2 scanning helpers
 // ================================================================
 
+// Per-instance in-memory scan cache (lives for the lifetime of the Worker isolate).
+// Avoids re-reading ID3 metadata for every object on every admin page load.
+// Cleared automatically when music tracks are created / updated / deleted.
+let scanResultCache: MusicObjectInfo[] | null = null;
+let scanResultCacheTs = 0;
+const SCAN_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+function invalidateScanCache(): void {
+  scanResultCache = null;
+  scanResultCacheTs = 0;
+}
+
 async function scanR2MusicObjects(env: Env): Promise<MusicObjectInfo[]> {
+  if (scanResultCache && Date.now() - scanResultCacheTs < SCAN_CACHE_TTL_MS) {
+    return scanResultCache;
+  }
+
   const existingKeys = await getExistingMusicKeys(env);
   const objects: MusicObjectInfo[] = [];
   let cursor: string | undefined;
@@ -293,12 +305,12 @@ async function scanR2MusicObjects(env: Env): Promise<MusicObjectInfo[]> {
       const key = safeNormalizeMediaKey(obj.key, "music");
       if (!key) continue;
 
-      const metadata = await readMusicMetadata(env, key);
+      const metadata = await readMusicMetadataFromR2(env, key);
       const coverUrl = embeddedCoverUrlForMusicKey(key);
       objects.push({
         ...metadata,
         key,
-        fileName: getFileNameFromKey(key),
+        fileName: getMusicFileNameFromKey(key),
         size: obj.size,
         uploaded:
           obj.uploaded instanceof Date
@@ -314,9 +326,12 @@ async function scanR2MusicObjects(env: Env): Promise<MusicObjectInfo[]> {
     cursor = listed.truncated ? listed.cursor : undefined;
   } while (cursor && objects.length < MUSIC_OBJECT_SCAN_LIMIT);
 
-  return objects.sort((a, b) =>
+  const sorted = objects.sort((a, b) =>
     a.fileName.localeCompare(b.fileName, "zh-Hans-CN"),
   );
+  scanResultCache = sorted;
+  scanResultCacheTs = Date.now();
+  return sorted;
 }
 
 function stripCoverBytes(
@@ -339,31 +354,6 @@ async function getExistingMusicKeys(env: Env): Promise<Set<string>> {
   );
 }
 
-async function readMusicMetadata(
-  env: Env,
-  key: string,
-): Promise<MusicMetadata & { cover?: EmbeddedCover }> {
-  const fallback = inferMusicMetadataFromKey(key);
-  if (!key.toLowerCase().endsWith(".mp3")) return fallback;
-
-  try {
-    const object = await env.MEDIA_BUCKET.get(key, {
-      range: { offset: 0, length: MUSIC_METADATA_READ_BYTES },
-    });
-    if (!object) return fallback;
-
-    const bytes = new Uint8Array(await object.arrayBuffer());
-    const parsed = parseId3Metadata(bytes);
-    return {
-      title: truncateText(parsed.title || fallback.title, 80),
-      artist: truncateText(parsed.artist || fallback.artist, 80),
-      album: truncateText(parsed.album || fallback.album, 80),
-      cover: parsed.cover,
-    };
-  } catch {
-    return fallback;
-  }
-}
 
 function isAudioObjectKey(key: string): boolean {
   if (key.endsWith("/")) return false;
@@ -371,31 +361,6 @@ function isAudioObjectKey(key: string): boolean {
   return AUDIO_EXTENSIONS.has(ext);
 }
 
-function getFileNameFromKey(key: string): string {
-  const fileName = stripMediaPrefix(key, "music").split("/").pop() ?? key;
-  return safeDecodeURIComponent(fileName);
-}
-
-function inferMusicMetadataFromKey(key: string): MusicMetadata {
-  const fileName = getFileNameFromKey(key);
-  const baseName = fileName
-    .replace(/\.[^.]+$/, "")
-    .replace(/[_]+/g, " ")
-    .trim();
-  const parts = baseName.split(/\s+-\s+/).map(cleanMetadataText).filter(Boolean);
-  if (parts.length >= 2) {
-    return {
-      title: truncateText(parts[0], 80),
-      artist: truncateText(parts.slice(1).join(" - "), 80),
-      album: "",
-    };
-  }
-  return {
-    title: truncateText(cleanMetadataText(baseName) || fileName, 80),
-    artist: "",
-    album: "",
-  };
-}
 
 async function saveEmbeddedCover(
   env: Env,
@@ -404,7 +369,7 @@ async function saveEmbeddedCover(
 ): Promise<string> {
   const ext = imageExtensionFromMimeType(cover.mimeType);
   const baseName = sanitizeFileName(
-    getFileNameFromKey(musicKey).replace(/\.[^.]+$/, ""),
+    getMusicFileNameFromKey(musicKey).replace(/\.[^.]+$/, ""),
   );
   const key = `covers/${baseName}-${crypto.randomUUID()}.${ext}`;
   await env.MEDIA_BUCKET.put(key, cover.bytes, {

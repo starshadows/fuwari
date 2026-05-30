@@ -16,6 +16,7 @@ import {
   base64UrlEncode,
   base64UrlDecode,
   ensureStatsSaltCached,
+  getClientIp,
 } from "./utils";
 import { verifyHumanProof } from "./anti-abuse";
 import {
@@ -147,14 +148,10 @@ async function getActorHash(
   env: Env,
   scope: string,
 ): Promise<string> {
-  const { hashToken } = await import("./utils");
+  const { hashToken: h } = await import("./utils");
   const salt = await ensureStatsSaltCached(env);
   const userAgent = request.headers.get("user-agent") ?? "";
-  const ip =
-    request.headers.get("cf-connecting-ip") ??
-    request.headers.get("x-real-ip") ??
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "";
-  return hashToken(`${salt}:rate:${scope}:${ip}:${userAgent}`);
+  return h(`${salt}:rate:${scope}:${getClientIp(request)}:${userAgent}`);
 }
 
 // ================================================================

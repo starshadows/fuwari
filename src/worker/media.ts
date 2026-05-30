@@ -1,13 +1,12 @@
 import type { Env } from "./types";
-import type { RangeResult, MusicMetadata, EmbeddedCover } from "./types/aliases";
-import { json, safeNormalizeMediaKey, safeDecodeURIComponent, stripMediaPrefix } from "./utils";
-import { MUSIC_METADATA_READ_BYTES } from "./constants";
+import type { RangeResult } from "./types/aliases";
 import {
-  parseId3Metadata,
-  cleanMetadataText,
-  truncateText,
-  readMusicMetadataFromBuffer,
-} from "./id3";
+  json,
+  safeNormalizeMediaKey,
+  safeDecodeURIComponent,
+  stripMediaPrefix,
+  readMusicMetadataFromR2,
+} from "./utils";
 
 // ================================================================
 // Primary media handler
@@ -99,7 +98,7 @@ async function getEmbeddedCoverResponse(
   const key = safeNormalizeMediaKey(rawMusicKey, "music");
   if (!key) return json({ error: "媒体路径不正确。" }, 400);
 
-  const metadata = await readMusicMetadata(env, key);
+  const metadata = await readMusicMetadataFromR2(env, key);
   if (!metadata.cover) return new Response("Not found", { status: 404 });
 
   const headers = new Headers({
@@ -200,56 +199,3 @@ function mediaHeaders(object: R2Object): Headers {
 // ================================================================
 // Music metadata reading (ID3 parsing)
 // ================================================================
-
-async function readMusicMetadata(
-  env: Env,
-  key: string,
-): Promise<MusicMetadata & { cover?: EmbeddedCover }> {
-  const fallback = inferMusicMetadataFromKey(key);
-  if (!key.toLowerCase().endsWith(".mp3")) return fallback;
-
-  try {
-    const object = await env.MEDIA_BUCKET.get(key, {
-      range: { offset: 0, length: MUSIC_METADATA_READ_BYTES },
-    });
-    if (!object) return fallback;
-
-    const bytes = new Uint8Array(await object.arrayBuffer());
-    const metadata = readMusicMetadataFromBuffer(bytes);
-    return {
-      title: truncateText(metadata.title || fallback.title, 80),
-      artist: truncateText(metadata.artist || fallback.artist, 80),
-      album: truncateText(metadata.album || fallback.album, 80),
-      cover: metadata.cover,
-    };
-  } catch {
-    return fallback;
-  }
-}
-
-function inferMusicMetadataFromKey(key: string): MusicMetadata {
-  const fileName = getFileNameFromKey(key);
-  const baseName = fileName
-    .replace(/\.[^.]+$/, "")
-    .replace(/[_]+/g, " ")
-    .trim();
-  const parts = baseName.split(/\s+-\s+/).map(cleanMetadataText).filter(Boolean);
-
-  if (parts.length >= 2) {
-    return {
-      title: truncateText(parts[0], 80),
-      artist: truncateText(parts.slice(1).join(" - "), 80),
-      album: "",
-    };
-  }
-  return {
-    title: truncateText(cleanMetadataText(baseName) || fileName, 80),
-    artist: "",
-    album: "",
-  };
-}
-
-function getFileNameFromKey(key: string): string {
-  const fileName = stripMediaPrefix(key, "music").split("/").pop() ?? key;
-  return safeDecodeURIComponent(fileName);
-}

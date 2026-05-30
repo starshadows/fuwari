@@ -32,6 +32,13 @@ corepack pnpm dev
 http://localhost:4321
 ```
 
+要运行代码检查和测试：
+
+```powershell
+corepack pnpm check
+corepack pnpm test
+```
+
 如果命令提示找不到 `pnpm`，就用 `corepack pnpm ...` 这种写法。
 
 如果要同时测试友链、音乐、后台这些 Cloudflare 功能，先构建并初始化本地 D1：

@@ -17,5 +17,6 @@ Before submitting code, please run the appropriate commands to check for errors 
 
 ```bash
 pnpm check
+pnpm test
 pnpm format
 ```

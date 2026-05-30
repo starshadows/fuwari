@@ -1,4 +1,11 @@
-import { SECURITY_HEADERS, RATE_LIMIT_MAX_AGE_SECONDS, STATS_SALT_SETTING_KEY, CACHE_VERSION_DOMAINS, type CacheDomain } from "./constants";
+import {
+  SECURITY_HEADERS,
+  RATE_LIMIT_MAX_AGE_SECONDS,
+  STATS_SALT_SETTING_KEY,
+  CACHE_VERSION_DOMAINS,
+  MUSIC_METADATA_READ_BYTES,
+  type CacheDomain,
+} from "./constants";
 import type { Env } from "./types";
 import type {
   JsonRecord,
@@ -6,6 +13,8 @@ import type {
   HumanProof,
   HumanProofContext,
   TelegramSettings,
+  MusicMetadata,
+  EmbeddedCover,
 } from "./types/aliases";
 
 // ================================================================
@@ -749,4 +758,99 @@ async function getRateLimitActorHash(
 
 export async function ensureStatsSaltCached(env: Env): Promise<string> {
   return ensureStatsSalt(env);
+}
+
+// ================================================================
+// Generic helpers used across modules
+// ================================================================
+
+export function clampInteger(
+  value: number,
+  min: number,
+  max: number,
+): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+export function getClientIp(request: Request): string {
+  return (
+    request.headers.get("cf-connecting-ip") ??
+    request.headers.get("x-real-ip") ??
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+    ""
+  );
+}
+
+export function getRequestRegion(request: Request): string {
+  const cf = (request as Request & { cf?: Record<string, unknown> }).cf;
+  return `${cf?.country || ""}|0|${cf?.region || ""}|${cf?.city || ""}|`;
+}
+
+// ================================================================
+// Shared music metadata helpers (used by music.ts and media.ts)
+// ================================================================
+
+import {
+  parseId3Metadata,
+  cleanMetadataText,
+  truncateText,
+} from "./id3";
+
+/**
+ * Read ID3 metadata from an R2 music object.
+ * Returns inferred data from the file name when ID3 parsing fails or the
+ * file is not an MP3.
+ */
+export async function readMusicMetadataFromR2(
+  env: Env,
+  key: string,
+): Promise<MusicMetadata & { cover?: EmbeddedCover }> {
+  const fallback = inferMusicMetadataFromKey(key);
+  if (!key.toLowerCase().endsWith(".mp3")) return fallback;
+
+  try {
+    const object = await env.MEDIA_BUCKET.get(key, {
+      range: { offset: 0, length: MUSIC_METADATA_READ_BYTES },
+    });
+    if (!object) return fallback;
+
+    const bytes = new Uint8Array(await object.arrayBuffer());
+    const parsed = parseId3Metadata(bytes);
+    return {
+      title: truncateText(parsed.title || fallback.title, 80),
+      artist: truncateText(parsed.artist || fallback.artist, 80),
+      album: truncateText(parsed.album || fallback.album, 80),
+      cover: parsed.cover,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+/** Derive artist / title from a music R2 object key like "Artist - Title.mp3". */
+export function inferMusicMetadataFromKey(key: string): MusicMetadata {
+  const fileName = getMusicFileNameFromKey(key);
+  const baseName = fileName
+    .replace(/\.[^.]+$/, "")
+    .replace(/[_]+/g, " ")
+    .trim();
+  const parts = baseName.split(/\s+-\s+/).map(cleanMetadataText).filter(Boolean);
+  if (parts.length >= 2) {
+    return {
+      title: truncateText(parts[0], 80),
+      artist: truncateText(parts.slice(1).join(" - "), 80),
+      album: "",
+    };
+  }
+  return {
+    title: truncateText(cleanMetadataText(baseName) || fileName, 80),
+    artist: "",
+    album: "",
+  };
+}
+
+/** Extract the leaf file name from a music R2 object key. */
+export function getMusicFileNameFromKey(key: string): string {
+  const fileName = stripMediaPrefix(key, "music").split("/").pop() ?? key;
+  return safeDecodeURIComponent(fileName);
 }
