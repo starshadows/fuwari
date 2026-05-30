@@ -19,6 +19,11 @@ import {
   MUSIC_METADATA_READ_BYTES,
   AUDIO_EXTENSIONS,
 } from "./constants";
+import {
+  parseId3Metadata,
+  cleanMetadataText,
+  truncateText,
+} from "./id3";
 
 // ================================================================
 // Public: GET /api/music/tracks
@@ -387,18 +392,6 @@ function inferMusicMetadataFromKey(key: string): MusicMetadata {
   };
 }
 
-function cleanMetadataText(value: string): string {
-  return value
-    .replace(/ +/g, " / ")
-    .replace(/\s+\/\s*$/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function truncateText(value: string, maxLength: number): string {
-  return value.trim().slice(0, maxLength);
-}
-
 async function saveEmbeddedCover(
   env: Env,
   musicKey: string,
@@ -420,120 +413,4 @@ function imageExtensionFromMimeType(mimeType: string): string {
   if (mimeType === "image/gif") return "gif";
   if (mimeType === "image/webp") return "webp";
   return "jpg";
-}
-
-// ID3 parsing (re-exported from media.ts but duplicated for import isolation)
-// These are identical to the ones in media.ts; we keep them here for independence.
-function parseId3Metadata(
-  bytes: Uint8Array,
-): Partial<MusicMetadata> & { cover?: EmbeddedCover } {
-  if (bytes.length < 10 || ascii(bytes, 0, 3) !== "ID3") return {};
-  const version = bytes[3];
-  if (version < 3 || version > 4) return {};
-
-  const flags = bytes[5];
-  const tagSize = readSyncSafeInteger(bytes, 6);
-  const end = Math.min(bytes.length, 10 + tagSize);
-  let offset = 10;
-
-  if (flags & 0x40) {
-    if (offset + 4 > end) return {};
-    const extSize = version === 4
-      ? readSyncSafeInteger(bytes, offset)
-      : readUint32(bytes, offset);
-    offset += version === 4 ? extSize : extSize + 4;
-  }
-
-  const frameMap: Record<string, keyof MusicMetadata> = { TIT2: "title", TPE1: "artist", TALB: "album" };
-  const result: Partial<MusicMetadata> & { cover?: EmbeddedCover } = {};
-
-  while (offset + 10 <= end) {
-    const frameId = ascii(bytes, offset, 4);
-    if (!/^[A-Z0-9]{4}$/.test(frameId)) break;
-
-    const frameSize = version === 4
-      ? readSyncSafeInteger(bytes, offset + 4)
-      : readUint32(bytes, offset + 4);
-    if (frameSize <= 0) break;
-
-    const fs = offset + 10;
-    const fe = Math.min(fs + frameSize, end);
-    const field = frameMap[frameId];
-
-    if (field && fs < fe) {
-      const val = decodeId3Text(bytes.slice(fs, fe));
-      if (val) result[field] = val;
-    } else if (frameId === "APIC" && fs < fe && !result.cover) {
-      result.cover = parseApicFrame(bytes.slice(fs, fe));
-    }
-
-    offset = fe;
-  }
-
-  return result;
-}
-
-function decodeId3Text(bytes: Uint8Array): string {
-  if (bytes.length === 0) return "";
-  const enc = bytes[0];
-  let payload = bytes.slice(1);
-  let decoder: TextDecoder;
-
-  if (enc === 1) {
-    if (payload[0] === 0xfe && payload[1] === 0xff) {
-      decoder = new TextDecoder("utf-16be");
-      payload = payload.slice(2);
-    } else {
-      decoder = new TextDecoder("utf-16le");
-      if (payload[0] === 0xff && payload[1] === 0xfe) payload = payload.slice(2);
-    }
-  } else if (enc === 2) {
-    decoder = new TextDecoder("utf-16be");
-  } else if (enc === 3) {
-    decoder = new TextDecoder("utf-8");
-  } else {
-    decoder = new TextDecoder("iso-8859-1");
-  }
-
-  return cleanMetadataText(decoder.decode(payload));
-}
-
-function parseApicFrame(bytes: Uint8Array): EmbeddedCover | undefined {
-  if (bytes.length < 5) return undefined;
-  const enc = bytes[0];
-  let off = 1;
-  const mimeEnd = indexOfTerminator(bytes, off, 1);
-  if (mimeEnd < 0) return undefined;
-  const mimeType = cleanMetadataText(new TextDecoder("iso-8859-1").decode(bytes.slice(off, mimeEnd))).toLowerCase();
-  off = mimeEnd + 1;
-  if (!mimeType.startsWith("image/") || off >= bytes.length) return undefined;
-  off += 1;
-  const termLen = enc === 1 || enc === 2 ? 2 : 1;
-  const descEnd = indexOfTerminator(bytes, off, termLen);
-  if (descEnd < 0) return undefined;
-  const imgStart = descEnd + termLen;
-  if (imgStart >= bytes.length) return undefined;
-  return { mimeType: mimeType === "image/jpg" ? "image/jpeg" : mimeType, bytes: bytes.slice(imgStart) };
-}
-
-function indexOfTerminator(bytes: Uint8Array, start: number, termLen: 1 | 2): number {
-  for (let i = start; i <= bytes.length - termLen; i++) {
-    if (termLen === 1 && bytes[i] === 0) return i;
-    if (termLen === 2 && bytes[i] === 0 && bytes[i + 1] === 0) return i;
-  }
-  return -1;
-}
-
-function ascii(bytes: Uint8Array, offset: number, length: number): string {
-  return Array.from(bytes.slice(offset, offset + length))
-    .map((b) => String.fromCharCode(b))
-    .join("");
-}
-
-function readUint32(bytes: Uint8Array, offset: number): number {
-  return (((bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]) >>> 0);
-}
-
-function readSyncSafeInteger(bytes: Uint8Array, offset: number): number {
-  return ((bytes[offset] << 21) | (bytes[offset + 1] << 14) | (bytes[offset + 2] << 7) | bytes[offset + 3]);
 }

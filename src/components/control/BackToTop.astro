@@ -1,9 +1,10 @@
 ---
 import { Icon } from "astro-icon/components";
+import { BANNER_HEIGHT } from "@constants/constants";
 ---
 
 <!-- There can't be a filter on parent element, or it will break `fixed` -->
-<div class="back-to-top-wrapper hidden lg:block">
+<div class="back-to-top-wrapper hidden lg:block" data-banner-height={BANNER_HEIGHT}>
     <div id="back-to-top-btn" class="back-to-top-btn hide flex flex-col gap-3">
         <button id="goto-comments-btn" aria-label="Go to Comments" class="btn-card h-[3.75rem] w-[3.75rem]" onclick="scrollToComments()">
             <Icon name="material-symbols:chat-rounded" class="mx-auto"></Icon>
@@ -58,7 +59,7 @@ function scrollToComments() {
     }
 }
 
-var BANNER_HEIGHT = 35;  // 与 constants.ts 保持一致
+var BANNER_HEIGHT = Number(document.querySelector('.back-to-top-wrapper')?.dataset.bannerHeight) || 35;
 var btn = document.getElementById('back-to-top-btn');
 
 function isPostPage() {
