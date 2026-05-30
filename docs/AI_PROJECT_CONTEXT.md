@@ -47,8 +47,8 @@ Local URL: http://localhost:8787
 - `src/content/posts/`: blog posts. Each post is Markdown or a folder with `index.md`.
 - `src/content/spec/about.md`: About page content.
 - `src/assets/images/`: committed images used by the site.
-- `src/components/misc/ImageWrapper.astro`: image rendering. Banner images use a special two-layer display: blurred cover background plus contained foreground image.
-- `src/layouts/Layout.astro`: page title, global layout behavior, banner height behavior.
+- `src/components/misc/ImageWrapper.astro`: image rendering with lazy/eager loading (`loading="lazy"` for posts, `loading="eager" fetchpriority="high"` for banners).
+- `src/layouts/Layout.astro`: page title, global layout behavior, banner height behavior, native CSS scrollbar (OverlayScrollbars only for Katex containers), PhotoSwipe lightbox with auto-destroy-on-recreate.
 - `src/worker/index.ts`: Cloudflare Worker API and R2 media routing for `/api/*` and `/media/*`.
 - `migrations/`: D1 schema migrations for friend links and music tracks.
 - `.dev.vars.example`: local development secret example. Copy to `.dev.vars` or keep the existing ignored `.dev.vars`.
@@ -94,7 +94,7 @@ Local URL: http://localhost:8787
 - R2 bucket binding is `MEDIA_BUCKET`; bind it manually in Cloudflare. The bucket can have any Cloudflare-side name.
 - D1 binding is `DB`; bind it manually in Cloudflare. The database can have any Cloudflare-side name.
 - `wrangler.jsonc` intentionally does not commit D1/R2 resource names or UUIDs. Runtime code only depends on binding variable names. It sets `keep_vars: true` so `wrangler deploy` preserves Dashboard-managed plain text vars.
-- Database tables can be initialized after deployment with `GET /api/setup/init-db` plus `Authorization: Bearer <token>`, or `POST /api/setup/init-db` with JSON `{ "token": "<token>" }`. Setup tokens in query strings or `/setup/init-db/<token>` are rejected. The setup route is idempotent and keeps existing data. If no runtime `ADMIN_TOKEN` exists, the first setup token becomes the D1-backed admin token.
+- Database tables can be initialized after deployment with `GET /api/setup/init-db` plus `Authorization: Bearer <token>`, or `POST /api/setup/init-db` with JSON `{ "token": "<token>" }`. The init endpoint uses versioned migrations (tracked via `db_migration_version` in `app_settings`) — it only applies pending migrations, not the full schema. Setup tokens in query strings or `/setup/init-db/<token>` are rejected. If no runtime `ADMIN_TOKEN` exists, the first setup token becomes the D1-backed admin token.
 - Audio objects should be uploaded manually to R2 under `music/`, for example `music/song.mp3`; the music admin page can scan R2 objects, read MP3 ID3 title/artist/album/cover metadata when available, fall back to filename inference, and bulk-import untracked objects into D1. Embedded covers are saved to R2 under `covers/`; old tracks without a stored cover can still use `/media/covers/from-music/<key>` as a lazy embedded-cover endpoint.
 - Admin music scan API: `GET /api/admin/music/objects`; bulk import API: `POST /api/admin/music/import` with optional `objectKeys`.
 - Public media is served by the Worker at `/media/music/<key>` and `/media/avatars/<key>`. Music responses support HTTP Range requests for seeking.

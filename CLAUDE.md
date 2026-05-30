@@ -35,7 +35,7 @@ A static blog built with **Astro 6** + Tailwind CSS (v3), with interactive Svelt
 - **`src/config.ts`** — single source of truth for site title, theme color, banner, nav links, profile, license, expressive-code theme. Modify this to customize the blog.
 - **`src/content/`** — `posts/` for blog entries (Markdown + frontmatter), `spec/` for the about page.
 - **`src/pages/`** — Astro file-based routing: home (`[...page].astro` handles pagination), post detail (`posts/[...slug].astro`), archive, about, friends pages, RSS, robots.txt.
-- **`src/layouts/`** — `Layout.astro` (HTML shell with Swup page transitions, theme/color persistence, PhotoSwipe lightbox, custom scrollbar, banner height logic) and `MainGridLayout.astro`.
+- **`src/layouts/`** — `Layout.astro` (HTML shell with Swup page transitions, theme/color persistence, PhotoSwipe lightbox, native CSS scrollbar with Katex OSB, banner height logic) and `MainGridLayout.astro`.
 - **`src/components/`** — organized by domain:
   - `widget/` — Profile, TOC, Tags, Categories, MusicPlayer (Svelte), VisitorStats (Svelte), DisplaySettings (Svelte), SideBar, NavMenuPanel
   - `control/` — BackToTop, Pagination, ButtonLink, ButtonTag
@@ -53,7 +53,7 @@ A static blog built with **Astro 6** + Tailwind CSS (v3), with interactive Svelt
 Key frontend patterns:
 - **Swup** handles SPA-like page transitions (no full page reload). Layout.astro hooks into Swup events for scroll position, banner height, TOC visibility, PhotoSwipe re-initialization.
 - **Theme persistence**: light/dark/auto mode and hue stored in localStorage, applied before render via inline `<script>` to avoid flash.
-- **Custom scrollbar** via OverlayScrollbars, with special handling for Katex formula overflow containers.
+- **Custom scrollbar**: native CSS (`scrollbar-width: thin` + `::-webkit-scrollbar` styles), with OverlayScrollbars retained only for Katex formula overflow containers.
 - **Post content schema** defined in `src/content.config.ts` with Zod validation (title, published, tags, category, draft, prev/next navigation).
 - **Pagefind** indexes `dist/` for full-text search after build.
 
@@ -62,20 +62,21 @@ Key frontend patterns:
 Runs as a Cloudflare Worker with `ASSETS` binding for static files, `DB` (D1 SQLite) for data, and `MEDIA_BUCKET` (R2) for uploads. Configuration: `wrangler.jsonc`.
 
 - **`index.ts`** — entry point with route dispatch: `/api/*` routes to `handleApi()`, `/media/*` to R2 media handler, everything else serves static assets.
-- **`db.ts`** — D1 schema initialization (7 tables: app_settings, stats_*, comment, config, counter, friend_links, music_tracks, rate_limits). Idempotent setup endpoint at `/api/setup/init-db`.
-- **`comments.ts`** — Twikoo-compatible comment API with session-based check. Enables/disables comments via admin settings. ALTCHA challenge required for posting.
+- **`db.ts`** — Versioned D1 migrations (MIGRATIONS array, 0001-0004). Incrementally applies pending migrations at `/api/setup/init-db`, tracks applied version in `app_settings`.
+- **`comments.ts`** — Twikoo-compatible comment API with session-based check. Enables/disables comments via admin settings. ALTCHA challenge required for posting. Sends Telegram notification on new comments.
 - **`twikoo-adapter.ts`** — Translates Twikoo request/response format to Worker's internal API.
-- **`friends.ts`** — `GET /api/friends` returns approved links; `POST /api/friends` submits with rate limiting, dedup by domain, human proof verification, Telegram notification.
+- **`friends.ts`** — `GET /api/friends` returns approved links; `POST /api/friends` submits with rate limiting, dedup by domain, human proof verification, Telegram notification for friends.
+- **`id3.ts`** — Shared ID3v2 tag parser (titles, artists, albums, embedded cover art), used by both `media.ts` and `music.ts`.
 - **`music.ts`** — CRUD for music tracks, R2 object listing with ID3 metadata reading, auto-import from R2 `music/` prefix.
 - **`stats.ts`** — Visitor counting: page views, unique visitors, daily aggregates, real-time online (5-min heartbeat window). Visitor identification via local random ID + SHA-256 (no raw IP storage).
 - **`admin.ts`** — Admin API (`/api/admin/*`) for friend management (approve/reject/sort), avatar upload to R2, comments toggle, Telegram settings, music management. All endpoints require `ADMIN_TOKEN` auth.
 - **`anti-abuse.ts`** — ALTCHA challenge generation/verification for friend submissions and comments.
 - **`media.ts`** — Serves files from R2 `MEDIA_BUCKET` at `/media/avatars/*` and `/media/covers/*` with content-type detection.
-- **`utils.ts`** — Shared utilities: response helpers (json, security headers, server timing, caching), input validation, rate limiting (D1-based sliding window), admin token verification, cross-site write protection.
+- **`utils.ts`** — Shared utilities: response helpers (json, security headers, server timing, caching), versioned cache invalidation (`cachedResponseV`, `incrementCacheVersion`), input validation, rate limiting (D1-based sliding window), admin token verification, cross-site write protection.
 - **`types/index.ts`** — `Env` interface with `DB`, `MEDIA_BUCKET`, `ASSETS`, `ADMIN_TOKEN` bindings.
 
 Key backend patterns:
-- Admin API uses Bearer token auth; rate limiting on public write endpoints; cross-site origin check for writes; cached responses for public GET endpoints.
+- Admin API uses Bearer token auth; rate limiting on public write endpoints; cross-site origin check for writes; versioned cached responses for public GET endpoints (`cachedResponseV` with `incrementCacheVersion` on mutations).
 - AST-based CORS headers on all Worker responses via `withSecurityHeaders()`.
 - Server timing headers via `withServerTiming()`.
 - Graceful 410 on old URL-based setup token pattern.

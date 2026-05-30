@@ -79,7 +79,14 @@ src/
       admin.astro                   内容管理后台
     posts/[...slug].astro           文章详情页
   worker/
-    index.ts                        Cloudflare Worker API 和媒体路由
+    index.ts                        Cloudflare Worker API 入口
+    db.ts                           版本化 D1 迁移初始化
+    id3.ts                          共享 ID3 标签解析模块
+    utils.ts                        通用工具：缓存版本化、限流、鉴权
+    friends.ts                      友链读取和申请（含 Telegram 友链通知）
+    comments.ts                     Twikoo 评论代理（含 Telegram 评论通知）
+    twikoo-adapter.ts               Twikoo 协议适配
+    music.ts                        音乐列表、R2 扫描、ID3 元数据
 
 public/
   sakana/
@@ -161,7 +168,7 @@ ADMIN_TOKEN    可选后台管理 token
 - 迁移文件：`migrations/0001_create_social_features.sql`、`migrations/0002_create_visitor_stats.sql`、`migrations/0003_create_rate_limits.sql`、`migrations/0004_create_comments_and_notifications.sql`。
 - 线上初始化接口：`GET /api/setup/init-db` 搭配 `Authorization: Bearer <token>`，或 `POST /api/setup/init-db` 搭配 JSON `{"token":"..."}`。
 
-线上初始化接口是幂等的，重复访问不会清空已有数据。它主要是为了减少 Cloudflare 控制台里手动粘贴 SQL 的麻烦。
+线上初始化接口使用版本化迁移（`src/worker/db.ts` 的 `MIGRATIONS` 数组），不再一次性执行所有 SQL。每次请求只应用迁移版本号大于当前记录版本的迁移。版本号记录在 `app_settings` 的 `db_migration_version` 中。新增迁移时，同时创建 `migrations/0005_xxx.sql` 并在 `MIGRATIONS` 数组追加一条即可。
 
 如果 Worker 配置了 `ADMIN_TOKEN`，初始化 token 必须和它一致。如果没有配置 `ADMIN_TOKEN`，初始化接口会把传入 token 的 SHA-256 哈希写入 D1，以后后台登录用同一个 token。旧的 URL query token 和 `/setup/init-db/<token>` 路径会被拒绝，避免口令进入浏览器历史或日志。
 
@@ -610,6 +617,8 @@ POST   /api/admin/settings/telegram
 POST   /api/admin/settings/telegram/test
 ```
 
+> 所有公开 GET 接口使用版本化缓存（`cachedResponseV`），每次 admin 写操作递增对应域的缓存版本号，使缓存立即失效。缓存域包括：friends、music、commentsConfig。
+
 ### 初始化 API
 
 ```text
@@ -716,13 +725,26 @@ Worker 负责：
 - 摇摇乐等纯前端增强可以跟随静态资源一起部署。
 - 整体复杂度仍然集中在一个 Worker 文件和少量 Svelte/Astro 组件内。
 
-## 16. 后续可扩展方向
+## 16. 已完成的改进（2026-05）
+
+- 抽取 ID3 解析到 `id3.ts`，消除 `media.ts` 和 `music.ts` 之间的代码重复。
+- BackToTop 硬编码 `BANNER_HEIGHT` → 通过 data attribute 注入。
+- `window.onscroll`/`window.onresize` → `addEventListener`，避免与 BackToTop 等的滚动监听冲突。
+- OverlayScrollbars body 初始化 → 原生 CSS 滚动条样式，body OSB 移除，只保留 Katex 公式容器 OSB。
+- D1 迁移版本化：`MIGRATIONS` 数组 + `db_migration_version` 追踪，增量应用。
+- 图片懒加载：banner `loading=”eager”`，正文 `loading=”lazy”`。
+- PhotoSwipe 创建时先销毁旧实例，避免泄漏。
+- Worker 缓存版本化：`cachedResponseV` + `incrementCacheVersion`，admin 改配置后立即失效对应域缓存。
+- Telegram 评论通知：复用友链通知的 Telegram Bot 配置，新评论自动推送。
+- 统一 Worker 错误格式（已统一为 `json({ error: “...” }, status)`，不需修改）。
+
+## 17. 后续可扩展方向
 
 可以继续考虑：
 
 - 后台增加修改 token 的 UI。
 - 音乐导入支持更多格式的内嵌标签，例如 FLAC / Vorbis Comment。
-- 给旧音乐数据增加“一键固化封面到 R2”。
+- 给旧音乐数据增加”一键固化封面到 R2”。
 - 后台列表增加搜索、批量启用 / 禁用、拖拽排序。
 - 访客统计增加更细的文章维度排行，但保持侧边栏 UI 简洁。
 - 摇摇乐增加第二个自定义角色后，再启用角色切换按钮。
