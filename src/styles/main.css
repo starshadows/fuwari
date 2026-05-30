@@ -114,6 +114,38 @@
     @apply cursor-zoom-in
 }
 
+/* Native scrollbar styling (replaces OverlayScrollbars body initialization) */
+html {
+	scroll-behavior: smooth;
+}
+html::-webkit-scrollbar {
+	width: 10px;
+}
+html::-webkit-scrollbar-track {
+	background: transparent;
+}
+html::-webkit-scrollbar-thumb {
+	background: var(--scrollbar-bg);
+	border-radius: 9999px;
+	border: 2px solid transparent;
+	background-clip: content-box;
+}
+html::-webkit-scrollbar-thumb:hover {
+	background: var(--scrollbar-bg-hover);
+	border: 2px solid transparent;
+	background-clip: content-box;
+}
+html {
+	scrollbar-width: thin;
+	scrollbar-color: var(--scrollbar-bg) transparent;
+}
+@media (hover: hover) {
+	html {
+		scrollbar-width: thin;
+		scrollbar-color: var(--scrollbar-bg) transparent;
+	}
+}
+
 ::selection {
     background-color: var(--selection-bg)
 }

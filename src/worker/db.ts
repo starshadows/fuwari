@@ -49,6 +49,8 @@ const STATS_INIT_STATEMENTS = [
     first_seen TEXT NOT NULL,
     PRIMARY KEY (path, day, visitor_hash)
   )`,
+  `CREATE INDEX IF NOT EXISTS idx_stats_page_daily_visitors_day
+   ON stats_page_daily_visitors (day)`,
   `CREATE TABLE IF NOT EXISTS stats_active_visitors (
     visitor_hash TEXT PRIMARY KEY,
     path TEXT NOT NULL,
@@ -137,13 +139,83 @@ const RATE_LIMIT_STATEMENTS = [
    ON rate_limits (updated_at)`,
 ];
 
-const ALL_INIT_STATEMENTS = [
-  APP_SETTINGS_TABLE,
-  ...FRIEND_LINKS_STATEMENTS,
-  ...STATS_INIT_STATEMENTS,
-  ...TWIKOO_INIT_STATEMENTS,
-  ...RATE_LIMIT_STATEMENTS,
+/**
+ * Versioned migrations, aligned with ./migrations/*.sql for Wrangler CLI parity.
+ *
+ * When adding a new migration:
+ *   1. Create ./migrations/0005_<description>.sql for `pnpm d1:migrate:*`
+ *   2. Append a new entry here with the matching version and statements
+ *   3. The /api/setup/init-db endpoint applies pending migrations automatically
+ */
+interface Migration {
+  version: string;
+  description: string;
+  statements: string[];
+}
+
+const MIGRATIONS: Migration[] = [
+  {
+    version: '0001',
+    description: 'Create social features (friend_links, music_tracks, app_settings)',
+    statements: [
+      APP_SETTINGS_TABLE,
+      ...FRIEND_LINKS_STATEMENTS,
+    ],
+  },
+  {
+    version: '0002',
+    description: 'Create visitor statistics tables',
+    statements: [...STATS_INIT_STATEMENTS],
+  },
+  {
+    version: '0003',
+    description: 'Create rate_limits table',
+    statements: [...RATE_LIMIT_STATEMENTS],
+  },
+  {
+    version: '0004',
+    description: 'Create comments and notifications tables',
+    statements: [...TWIKOO_INIT_STATEMENTS],
+  },
 ];
+
+/** Key used to track the highest applied migration version in app_settings. */
+const MIGRATION_VERSION_KEY = 'db_migration_version';
+
+/**
+ * Read the currently applied migration version from app_settings.
+ * Returns '0000' if no version has been recorded yet.
+ */
+async function getAppliedMigrationVersion(env: Env): Promise<string> {
+  try {
+    const row = await env.DB.prepare(
+      "SELECT value FROM app_settings WHERE key = ?",
+    ).bind(MIGRATION_VERSION_KEY).first<{ value: string }>();
+    return row?.value ?? '0000';
+  } catch {
+    return '0000';
+  }
+}
+
+/**
+ * Update the recorded migration version in app_settings.
+ */
+async function setAppliedMigrationVersion(env: Env, version: string): Promise<void> {
+  await env.DB.prepare(
+    `INSERT INTO app_settings (key, value, updated_at)
+     VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+  ).bind(MIGRATION_VERSION_KEY, version).run();
+}
+
+/**
+ * Compare two migration version strings (e.g. '0002' > '0001').
+ */
+function compareVersions(a: string, b: string): number {
+  const na = Number.parseInt(a, 10);
+  const nb = Number.parseInt(b, 10);
+  return na - nb;
+}
 
 export async function initializeDatabase(
   request: Request,
@@ -173,20 +245,54 @@ export async function initializeDatabase(
     );
   }
 
-  // Deduplicate app_settings creation — keep only the first occurrence
-  const seen = new Set<string>();
-  const deduped: string[] = [];
-  for (const stmt of ALL_INIT_STATEMENTS) {
-    const key = stmt.replace(/\s+/g, " ").trim();
-    if (!seen.has(key)) {
-      seen.add(key);
-      deduped.push(stmt);
-    }
+  // --- Versioned migration logic ---
+
+  const currentVersion = await getAppliedMigrationVersion(env);
+  const pending = MIGRATIONS.filter(
+    (m) => compareVersions(m.version, currentVersion) > 0,
+  );
+
+  if (pending.length === 0) {
+    // Still run the admin token setup so it can't be skipped
+    const adminTokenSource = await setupAdminToken(env, tokenResult);
+    if (adminTokenSource instanceof Response) return adminTokenSource;
+
+    return json({
+      ok: true,
+      message: `Database is up to date at version ${currentVersion}. No pending migrations.`,
+      adminTokenSource,
+    });
   }
 
-  const results = await env.DB.batch(
-    deduped.map((statement) => env.DB.prepare(statement)),
-  );
+  const applied: string[] = [];
+
+  for (const migration of pending) {
+    // Deduplicate within each migration batch
+    const seen = new Set<string>();
+    const deduped = migration.statements.filter((stmt) => {
+      const key = stmt.replace(/\s+/g, ' ').trim();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    const results = await env.DB.batch(
+      deduped.map((stmt) => env.DB.prepare(stmt)),
+    );
+
+    if (results.some((r) => !r.success)) {
+      return json(
+        {
+          error: `Migration ${migration.version} (${migration.description}) failed.`,
+          applied,
+        },
+        500,
+      );
+    }
+
+    await setAppliedMigrationVersion(env, migration.version);
+    applied.push(migration.version);
+  }
 
   const adminTokenSource = await setupAdminToken(env, tokenResult);
   if (adminTokenSource instanceof Response) return adminTokenSource;
@@ -194,8 +300,8 @@ export async function initializeDatabase(
 
   return json({
     ok: true,
-    message: "Database initialized. Existing data was kept.",
-    statements: results.length,
+    message: `Applied ${applied.length} migration(s): ${applied.join(', ')}. Current version: ${pending[pending.length - 1].version}.`,
+    migrationsApplied: applied,
     adminTokenSource,
   });
 }
