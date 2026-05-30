@@ -6,6 +6,7 @@ import {
   withSecurityHeaders,
   withServerTiming,
   cachedResponse,
+  cachedResponseV,
 } from "./utils";
 import { initializeDatabase } from "./db";
 import { getAntiAbuseChallenge } from "./anti-abuse";
@@ -89,7 +90,7 @@ async function handleApi(
 
   // Comments
   if (pathname === "/api/comments/config" && request.method === "GET") {
-    return cachedResponse(request, ctx, 300, () =>
+    return cachedResponseV(request, ctx, 300, env, "commentsConfig", () =>
       getCommentsConfig(env),
     );
   }
@@ -103,7 +104,7 @@ async function handleApi(
   // Friends
   if (pathname === "/api/friends") {
     if (request.method === "GET") {
-      return cachedResponse(request, ctx, 300, () =>
+      return cachedResponseV(request, ctx, 300, env, "friends", () =>
         getApprovedFriends(env),
       );
     }
@@ -114,7 +115,7 @@ async function handleApi(
 
   // Music
   if (pathname === "/api/music/tracks" && request.method === "GET") {
-    return cachedResponse(request, ctx, 300, () =>
+    return cachedResponseV(request, ctx, 300, env, "music", () =>
       getPublicMusicTracks(env),
     );
   }

@@ -112,7 +112,7 @@ export async function submitFriendLink(
 // Telegram notification helpers
 // ================================================================
 
-async function readTelegramSettings(env: Env): Promise<TelegramSettings> {
+export async function readTelegramSettings(env: Env): Promise<TelegramSettings> {
   const stored = await getAppSetting(env, TELEGRAM_SETTINGS_KEY);
   if (!stored) {
     return { enabled: false, botToken: "", chatId: "", threadId: "" };

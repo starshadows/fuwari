@@ -1,4 +1,4 @@
-import { SECURITY_HEADERS, RATE_LIMIT_MAX_AGE_SECONDS, STATS_SALT_SETTING_KEY } from "./constants";
+import { SECURITY_HEADERS, RATE_LIMIT_MAX_AGE_SECONDS, STATS_SALT_SETTING_KEY, CACHE_VERSION_DOMAINS, type CacheDomain } from "./constants";
 import type { Env } from "./types";
 import type {
   JsonRecord,
@@ -57,6 +57,87 @@ export async function cachedResponse(
 
   const cache = (caches as CacheStorage & { readonly default: Cache }).default;
   const cacheKey = new Request(request.url, request);
+  const cached = await cache.match(cacheKey);
+  if (cached) return cached;
+
+  const response = await producer();
+  const next = new Response(response.body, response);
+
+  if (next.status !== 200 || next.headers.has("set-cookie")) {
+    return next;
+  }
+
+  next.headers.set(
+    "cache-control",
+    `public, max-age=${ttlSeconds}, s-maxage=${ttlSeconds}`,
+  );
+  ctx.waitUntil(cache.put(cacheKey, next.clone()));
+  return next;
+}
+
+// ================================================================
+// Cache version (stale-while-revalidate via versioned cache keys)
+// ================================================================
+
+/**
+ * Read the current cache version for a domain from app_settings.
+ * Versions start at "1" and increment atomically on each mutation.
+ */
+async function getCacheVersion(env: Env, domain: CacheDomain): Promise<number> {
+  const key = CACHE_VERSION_DOMAINS[domain];
+  const row = await env.DB.prepare(
+    "SELECT value FROM app_settings WHERE key = ?",
+  )
+    .bind(key)
+    .first<{ value: string }>();
+  return Number(row?.value ?? "1");
+}
+
+/**
+ * Increment the cache version for a domain, invalidating all cached
+ * responses that were keyed under the old version.
+ */
+export async function incrementCacheVersion(
+  env: Env,
+  domain: CacheDomain,
+): Promise<number> {
+  const key = CACHE_VERSION_DOMAINS[domain];
+  await env.DB.prepare(
+    `INSERT INTO app_settings (key, value, updated_at)
+     VALUES (?, 1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+     ON CONFLICT(key) DO UPDATE SET
+       value = CAST(CAST(value AS INTEGER) + 1 AS TEXT),
+       updated_at = excluded.updated_at`,
+  )
+    .bind(key)
+    .run();
+  const row = await env.DB.prepare(
+    "SELECT value FROM app_settings WHERE key = ?",
+  )
+    .bind(key)
+    .first<{ value: string }>();
+  return Number(row?.value ?? "1");
+}
+
+/**
+ * Like `cachedResponse`, but scopes the cache key to a version domain.
+ * When `incrementCacheVersion()` is called, all cached entries for
+ * that domain become stale because subsequent requests use a different `_cv` value.
+ */
+export async function cachedResponseV(
+  request: Request,
+  ctx: ExecutionContext,
+  ttlSeconds: number,
+  env: Env,
+  domain: CacheDomain,
+  producer: () => Promise<Response> | Response,
+): Promise<Response> {
+  if (request.method !== "GET") return producer();
+
+  const version = await getCacheVersion(env, domain);
+  const cache = (caches as CacheStorage & { readonly default: Cache }).default;
+  const versionedUrl = `${request.url}${request.url.includes("?") ? "&" : "?"}_cv=${version}`;
+  const cacheKey = new Request(versionedUrl, request);
   const cached = await cache.match(cacheKey);
   if (cached) return cached;
 

@@ -12,6 +12,7 @@ import {
   safeDecodeURIComponent,
   isAvatarUrl,
   cachedResponse,
+  incrementCacheVersion,
 } from "./utils";
 import {
   MUSIC_PREFIX,
@@ -161,6 +162,7 @@ export async function importR2MusicObjects(
     sortOrder += 1;
   }
 
+  await incrementCacheVersion(env, "music");
   return json({ ok: true, imported }, 201);
 }
 
@@ -200,6 +202,7 @@ export async function createMusicTrack(
     .bind(title, artist, album, objectKey, coverUrl, isActive, sortOrder)
     .run();
 
+  await incrementCacheVersion(env, "music");
   return json({ ok: true, id: result.meta.last_row_id }, 201);
 }
 
@@ -253,6 +256,7 @@ export async function updateMusicTrack(
     .first<Record<string, unknown>>();
 
   if (!track) return json({ error: "歌曲不存在。" }, 404);
+  await incrementCacheVersion(env, "music");
   return json({ track });
 }
 
@@ -262,6 +266,7 @@ export async function deleteMusicTrack(
 ): Promise<Response> {
   if (!Number.isInteger(id)) return json({ error: "歌曲 ID 不正确。" }, 400);
   await env.DB.prepare("DELETE FROM music_tracks WHERE id = ?").bind(id).run();
+  await incrementCacheVersion(env, "music");
   return json({ ok: true });
 }
 

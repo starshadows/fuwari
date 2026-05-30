@@ -8,10 +8,24 @@
  * for Cloudflare Workers.
  */
 
+type CommentSubmittedEvent = {
+	id: string;
+	nick: string;
+	mail: string;
+	comment: string;
+	url: string;
+	href: string;
+	pid: string;
+	rid: string;
+	created: number;
+	isBlogger: boolean;
+};
+
 type TwikooWorkerEnv = {
 	DB: D1Database;
 	R2?: Pick<R2Bucket, "put" | "delete">;
 	R2_PUBLIC_URL?: string;
+	onCommentSubmit?: (event: CommentSubmittedEvent) => void | Promise<void>;
 };
 
 type JsonRecord = Record<string, unknown>;

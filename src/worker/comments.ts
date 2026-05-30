@@ -25,6 +25,7 @@ import {
   COMMENTS_SESSION_MAX_AGE_SECONDS,
 } from "./constants";
 import { safeNormalizeMediaKey } from "./utils";
+import { readTelegramSettings, sendTelegramMessage } from "./friends";
 import twikooWorker from "./twikoo-adapter.ts";
 
 // ================================================================
@@ -196,6 +197,38 @@ export async function handleTwikooRequest(
     DB: env.DB,
     R2: createTwikooR2Binding(env.MEDIA_BUCKET),
     R2_PUBLIC_URL: `${requestUrl.origin}/media/twikoo`,
+    onCommentSubmit: async (event) => {
+      const settings = await readTelegramSettings(env);
+      if (!settings.enabled || !settings.botToken || !settings.chatId) return;
+
+      const pageUrl = event.href || `${requestUrl.origin}${event.url}`;
+      const isReply = Boolean(event.pid);
+      const title = isReply ? "新的评论回复" : "新的评论";
+
+      const commentExcerpt = event.comment
+        .replace(/<\/?[^>]+(>|$)/g, "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 300);
+
+      const text = [
+        title,
+        "",
+        `昵称：${event.nick}`,
+        `邮箱：${event.mail}`,
+        `页面：${pageUrl}`,
+        isReply ? `回复：${event.pid.slice(0, 8)}` : "",
+        "",
+        commentExcerpt || "(无内容)",
+      ]
+        .filter(Boolean)
+        .join("\n");
+
+      const result = await sendTelegramMessage(settings, text);
+      if (!result.ok) {
+        console.warn("Telegram comment notification rejected", result.error);
+      }
+    },
   });
 }
 

@@ -50,6 +50,17 @@ export const RATE_LIMITS = {
 export const HUMAN_PROOF_CONTEXTS = new Set(["friends", "comments"]);
 
 // ----------------------------------------------------------------
+// Cache version domains
+// ----------------------------------------------------------------
+export const CACHE_VERSION_DOMAINS = {
+  friends: "cv_friends",
+  commentsConfig: "cv_comments_config",
+  music: "cv_music",
+} as const;
+
+export type CacheDomain = keyof typeof CACHE_VERSION_DOMAINS;
+
+// ----------------------------------------------------------------
 // Security headers
 // ----------------------------------------------------------------
 export const SECURITY_HEADERS: Record<string, string> = {

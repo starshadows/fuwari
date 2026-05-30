@@ -10,6 +10,7 @@ import {
   requireAdmin,
   getAppSetting,
   setAppSetting,
+  incrementCacheVersion,
   isHttpsUrl,
   isAvatarUrl,
   sanitizeFileName,
@@ -92,6 +93,7 @@ async function updateAdminCommentsSettings(
   const body = await readJson(request);
   const enabled = readBoolean(body.enabled, true);
   await setAppSetting(env, "comments_enabled", enabled ? "true" : "false");
+  await incrementCacheVersion(env, "commentsConfig");
   return json({ ok: true, enabled });
 }
 
