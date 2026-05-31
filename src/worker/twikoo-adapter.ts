@@ -10,11 +10,11 @@
 
 import sanitizeHtml from "sanitize-html";
 import {
-	readString,
-	readInteger,
 	clampInteger,
-	hashToken,
 	getClientIp,
+	hashToken,
+	readInteger,
+	readString,
 } from "./utils";
 
 type CommentSubmittedEvent = {

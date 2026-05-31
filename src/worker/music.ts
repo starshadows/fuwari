@@ -1,33 +1,26 @@
-import type { Env } from "./types";
-import type {
-	MusicObjectInfo,
-	MusicMetadata,
-	EmbeddedCover,
-} from "./types/aliases";
 import {
-	json,
-	readString,
-	readJson,
-	readInteger,
-	readBoolean,
-	safeNormalizeMediaKey,
-	stripMediaPrefix,
-	sanitizeFileName,
-	safeDecodeURIComponent,
-	isAvatarUrl,
-	cachedResponse,
-	incrementCacheVersion,
-	readMusicMetadataFromR2,
-	getMusicFileNameFromKey,
-	embeddedCoverUrlForMusicKey,
-} from "./utils";
-import {
-	MUSIC_PREFIX,
-	MUSIC_OBJECT_SCAN_LIMIT,
-	MUSIC_METADATA_READ_BYTES,
 	AUDIO_EXTENSIONS,
+	apiError,
+	MUSIC_OBJECT_SCAN_LIMIT,
+	MUSIC_PREFIX,
 } from "./constants";
-import { apiError } from "./constants";
+import type { Env } from "./types";
+import type { EmbeddedCover, MusicObjectInfo } from "./types/aliases";
+import {
+	embeddedCoverUrlForMusicKey,
+	getMusicFileNameFromKey,
+	incrementCacheVersion,
+	isAvatarUrl,
+	json,
+	readBoolean,
+	readInteger,
+	readJson,
+	readMusicMetadataFromR2,
+	readString,
+	safeNormalizeMediaKey,
+	sanitizeFileName,
+	stripMediaPrefix,
+} from "./utils";
 
 // ================================================================
 // Public: GET /api/music/tracks

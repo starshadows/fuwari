@@ -14,7 +14,7 @@ export let resetSignal = 0;
 
 const dispatch = createEventDispatcher<{
 	verified: { type: "altcha"; payload: string };
-	expired: void;
+	expired: undefined;
 	error: { message: string };
 }>();
 
@@ -28,11 +28,6 @@ let altchaWidget: HTMLElement & {
 	configure?: (config: Record<string, unknown>) => Promise<void>;
 	reset?: () => void;
 };
-
-$: if (mounted) {
-	resetSignal;
-	void loadChallenge();
-}
 
 const loadChallenge = async () => {
 	const currentLoad = ++loadId;
@@ -72,6 +67,11 @@ const loadChallenge = async () => {
 		dispatch("error", { message });
 	}
 };
+
+$: if (mounted) {
+	resetSignal;
+	void loadChallenge();
+}
 
 const handleAltchaVerified = (event: CustomEvent<{ payload: string }>) => {
 	const payload = event.detail?.payload;

@@ -31,6 +31,19 @@ const fakeResult: SearchResult[] = [
 	},
 ];
 
+const escapeHtml = (value: string): string =>
+	value
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;")
+		.replace(/'/g, "&#39;");
+
+const sanitizeSearchExcerpt = (excerpt: string): string =>
+	escapeHtml(excerpt)
+		.replace(/&lt;mark&gt;/g, "<mark>")
+		.replace(/&lt;\/mark&gt;/g, "</mark>");
+
 const togglePanel = () => {
 	const panel = document.getElementById("search-panel");
 	panel?.classList.toggle("float-panel-closed");
@@ -179,12 +192,12 @@ top-20 left-4 md:left-[unset] right-4 shadow-2xl rounded-2xl p-2">
        rounded-xl text-lg px-3 py-2 hover:bg-[var(--btn-plain-bg-hover)] active:bg-[var(--btn-plain-bg-active)]">
             <div class="transition text-90 inline-flex font-bold group-hover:text-[var(--primary)]">
                 {item.meta.title}<Icon icon="fa6-solid:chevron-right" class="transition text-[0.75rem] translate-x-1 my-auto text-[var(--primary)]"></Icon>
-            </div>
-            <div class="transition text-sm text-50">
-                {@html item.excerpt}
-            </div>
-        </a>
-    {/each}
+			</div>
+			<div class="transition text-sm text-50">
+				{@html sanitizeSearchExcerpt(item.excerpt)}
+			</div>
+		</a>
+	{/each}
 </div>
 
 <style>

@@ -1,21 +1,19 @@
 import {
-	SECURITY_HEADERS,
-	RATE_LIMIT_MAX_AGE_SECONDS,
-	STATS_SALT_SETTING_KEY,
-	CACHE_VERSION_DOMAINS,
-	MUSIC_METADATA_READ_BYTES,
 	apiError,
+	CACHE_VERSION_DOMAINS,
 	type CacheDomain,
+	MUSIC_METADATA_READ_BYTES,
+	RATE_LIMIT_MAX_AGE_SECONDS,
+	SECURITY_HEADERS,
 } from "./constants";
 import type { Env } from "./types";
 import type {
-	JsonRecord,
-	RateLimitConfig,
+	EmbeddedCover,
 	HumanProof,
 	HumanProofContext,
-	TelegramSettings,
+	JsonRecord,
 	MusicMetadata,
-	EmbeddedCover,
+	RateLimitConfig,
 } from "./types/aliases";
 
 // ================================================================
@@ -179,7 +177,7 @@ export async function hashToken(token: string): Promise<string> {
 }
 
 export async function signSessionValue(
-	env: Env,
+	_env: Env,
 	value: string,
 	salt: string,
 ): Promise<string> {
@@ -771,7 +769,7 @@ export function getRequestRegion(request: Request): string {
 // Shared music metadata helpers (used by music.ts and media.ts)
 // ================================================================
 
-import { parseId3Metadata, cleanMetadataText, truncateText } from "./id3";
+import { cleanMetadataText, parseId3Metadata, truncateText } from "./id3";
 
 /**
  * Read ID3 metadata from an R2 music object.

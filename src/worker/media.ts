@@ -1,12 +1,11 @@
+import { apiError } from "./constants";
 import type { Env } from "./types";
 import type { RangeResult } from "./types/aliases";
-import { apiError } from "./constants";
 import {
 	json,
-	safeNormalizeMediaKey,
-	safeDecodeURIComponent,
-	stripMediaPrefix,
 	readMusicMetadataFromR2,
+	safeDecodeURIComponent,
+	safeNormalizeMediaKey,
 } from "./utils";
 
 // ================================================================

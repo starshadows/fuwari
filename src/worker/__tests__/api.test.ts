@@ -5,8 +5,10 @@
  * by calling handler functions directly with mocked Env bindings.
  * vitest transpiles TypeScript automatically so worker imports work.
  */
-import { describe, it, expect, beforeAll, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { Env } from "../types";
+
+type JsonBody = Record<string, unknown>;
 
 // ================================================================
 // D1 mock helper that returns a D1Database-like object
@@ -258,9 +260,73 @@ describe("Anti-abuse challenge", () => {
 			{} as ExecutionContext,
 		);
 		expect(res.status).toBe(200);
-		const body = await res.json();
+		const body = (await res.json()) as JsonBody;
 		expect(body).toHaveProperty("challenge");
-		expect(body.challenge.algorithm || body.mode).toBeDefined();
+		const challenge = body.challenge as { algorithm?: unknown } | undefined;
+		expect(challenge?.algorithm || body.mode).toBeDefined();
+	});
+});
+
+// ================================================================
+// Comments settings and Twikoo gating
+// ================================================================
+describe("Comments settings", () => {
+	let worker: Awaited<typeof import("../index")>;
+
+	beforeAll(async () => {
+		worker = await import("../index");
+	});
+
+	it("returns a boolean comments setting for the admin panel", async () => {
+		const { db, stmt } = mockD1Result({ value: "false" });
+		const env = mockEnv({ DB: db });
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/admin/settings/comments", {
+				headers: { authorization: "Bearer test-admin-token" },
+			}),
+			env,
+			{} as ExecutionContext,
+		);
+
+		expect(res.status).toBe(200);
+		expect(stmt.first).toHaveBeenCalled();
+		expect((await res.json()) as JsonBody).toEqual({ enabled: false });
+	});
+
+	it("still lets Twikoo read/admin events reach the adapter when posting is disabled", async () => {
+		const { db } = mockD1Result({ value: "false" });
+		const env = mockEnv({ DB: db });
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/twikoo", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ event: "GET_FUNC_VERSION" }),
+			}),
+			env,
+			{} as ExecutionContext,
+		);
+
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as JsonBody;
+		expect(body.code).toBe(0);
+		expect(body.version).toBeDefined();
+	});
+
+	it("blocks comment submissions when comments are disabled", async () => {
+		const { db } = mockD1Result({ value: "false" });
+		const env = mockEnv({ DB: db });
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/twikoo", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ event: "COMMENT_SUBMIT" }),
+			}),
+			env,
+			{} as ExecutionContext,
+		);
+
+		expect(res.status).toBe(403);
+		expect((await res.json()) as JsonBody).toHaveProperty("error");
 	});
 });
 

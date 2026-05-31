@@ -1,21 +1,21 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-	readString,
-	readInteger,
-	readBoolean,
-	clampInteger,
-	safeNormalizeMediaKey,
-	safeDecodeURIComponent,
-	stripMediaPrefix,
-	base64UrlEncode,
 	base64UrlDecode,
-	timingSafeEqual,
-	maskSecret,
-	isSameOrigin,
-	isHttpsUrl,
+	base64UrlEncode,
+	clampInteger,
 	isAvatarUrl,
-	sanitizeFileName,
+	isHttpsUrl,
 	isLikelyBot,
+	isSameOrigin,
+	maskSecret,
+	readBoolean,
+	readInteger,
+	readString,
+	safeDecodeURIComponent,
+	safeNormalizeMediaKey,
+	sanitizeFileName,
+	stripMediaPrefix,
+	timingSafeEqual,
 } from "../utils";
 
 // ================================================================

@@ -1,6 +1,6 @@
 <script lang="ts">
-import { onMount, tick } from "svelte";
 import HumanProof from "@components/anti-abuse/HumanProof.svelte";
+import { onMount, tick } from "svelte";
 import "twikoo/dist/twikoo.css";
 
 type HumanProofDetail = { type: "altcha"; payload: string };

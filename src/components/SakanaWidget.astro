@@ -265,16 +265,38 @@ const characterImageUrl = url("/sakana/starshadow.webp");
 
 					const dialog = document.createElement("div");
 					dialog.id = "sakana-repo-confirm";
-					dialog.innerHTML = `
-						<div class="sakana-confirm-card" role="dialog" aria-modal="false" aria-labelledby="sakana-confirm-title">
-							<div id="sakana-confirm-title" class="sakana-confirm-title">${uiText.confirmTitle}</div>
-							<div class="sakana-confirm-text">${uiText.confirmBody}</div>
-							<div class="sakana-confirm-actions">
-								<button type="button" data-action="cancel">${uiText.cancel}</button>
-								<button type="button" data-action="open">${uiText.open}</button>
-							</div>
-						</div>
-					`;
+
+					const card = document.createElement("div");
+					card.className = "sakana-confirm-card";
+					card.setAttribute("role", "dialog");
+					card.setAttribute("aria-modal", "false");
+					card.setAttribute("aria-labelledby", "sakana-confirm-title");
+
+					const title = document.createElement("div");
+					title.id = "sakana-confirm-title";
+					title.className = "sakana-confirm-title";
+					title.textContent = uiText.confirmTitle;
+
+					const body = document.createElement("div");
+					body.className = "sakana-confirm-text";
+					body.textContent = uiText.confirmBody;
+
+					const actions = document.createElement("div");
+					actions.className = "sakana-confirm-actions";
+
+					const cancelButton = document.createElement("button");
+					cancelButton.type = "button";
+					cancelButton.dataset.action = "cancel";
+					cancelButton.textContent = uiText.cancel;
+
+					const openButton = document.createElement("button");
+					openButton.type = "button";
+					openButton.dataset.action = "open";
+					openButton.textContent = uiText.open;
+
+					actions.append(cancelButton, openButton);
+					card.append(title, body, actions);
+					dialog.append(card);
 
 					dialog.addEventListener("click", (event) => {
 						const target = event.target;
