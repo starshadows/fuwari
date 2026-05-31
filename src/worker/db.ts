@@ -1,14 +1,14 @@
+import { apiError } from "./constants";
 import type { Env } from "./types";
 import {
-	json,
-	hashToken,
-	saveStoredAdminTokenHash,
-	readBearerToken,
-	readString,
-	readJson,
 	ensureStatsSaltCached,
+	hashToken,
+	json,
+	readBearerToken,
+	readJson,
+	readString,
+	saveStoredAdminTokenHash,
 } from "./utils";
-import { apiError } from "./constants";
 
 const APP_SETTINGS_TABLE = `CREATE TABLE IF NOT EXISTS app_settings (
   key TEXT PRIMARY KEY,
@@ -80,9 +80,9 @@ const TWIKOO_INIT_STATEMENTS = [
     like TEXT NOT NULL, top INTEGER NOT NULL, avatar TEXT NOT NULL,
     PRIMARY KEY (url, created DESC)
   )`,
-	`CREATE INDEX IF NOT EXISTS idx_comment_created ON comment (created DESC)`,
-	`CREATE INDEX IF NOT EXISTS idx_comment_ip_created ON comment (ip, created DESC)`,
-	`CREATE TABLE IF NOT EXISTS config (value TEXT NOT NULL)`,
+	"CREATE INDEX IF NOT EXISTS idx_comment_created ON comment (created DESC)",
+	"CREATE INDEX IF NOT EXISTS idx_comment_ip_created ON comment (ip, created DESC)",
+	"CREATE TABLE IF NOT EXISTS config (value TEXT NOT NULL)",
 	`INSERT INTO config (value)
    SELECT '' WHERE NOT EXISTS (SELECT 1 FROM config)`,
 	`CREATE TABLE IF NOT EXISTS counter (

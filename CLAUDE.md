@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Setup
+
+Requires **Node >=22.22.0** and **pnpm >=9** (project uses `pnpm@9.14.4` via `packageManager`).
+
 ## Commands
 
 ```sh
@@ -26,6 +30,20 @@ pnpm test:watch       # vitest in watch mode
 
 # Content
 pnpm new-post <name>  # Scaffold a new blog post in src/content/posts/
+```
+
+For full local development, run both `pnpm dev` (frontend on 4321) and `pnpm worker:dev` (API on 8787) — the deployed site serves both from a single Worker (assets + API), but locally they run on separate ports.
+
+### Path aliases (tsconfig)
+
+```ts
+@components/*  → src/components/*
+@assets/*      → src/assets/*
+@constants/*   → src/constants/*
+@utils/*       → src/utils/*
+@i18n/*        → src/i18n/*
+@layouts/*     → src/layouts/*
+@/*            → src/*
 ```
 
 ## Architecture
@@ -63,17 +81,40 @@ Key frontend patterns:
 
 Runs as a Cloudflare Worker with `ASSETS` binding for static files, `DB` (D1 SQLite) for data, and `MEDIA_BUCKET` (R2) for uploads. Configuration: `wrangler.jsonc`.
 
-- **`index.ts`** — entry point with route dispatch: `/api/*` routes to `handleApi()`, `/media/*` to R2 media handler, everything else serves static assets.
+### API route map
+
+All routes dispatched in `src/worker/index.ts` → `handleApi()`:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/setup/init-db` | Apply pending D1 migrations (requires Bearer auth) |
+| `GET` | `/api/anti-abuse/challenge` | Generate an ALTCHA challenge |
+| `GET` | `/api/comments/config` | Get comment system settings (5-min cache) |
+| `POST` | `/api/comments/session` | Create a Twikoo-compatible session |
+| `ANY` | `/api/twikoo` | Twikoo comment CRUD (GET/POST) |
+| `GET` | `/api/friends` | List approved friend links (5-min cache) |
+| `POST` | `/api/friends` | Submit a friend link (rate-limited, ALTCHA required) |
+| `GET` | `/api/music/tracks` | List published music tracks (5-min cache) |
+| `GET` | `/api/stats/summary` | Visitor stats (60s cache) |
+| `POST` | `/api/stats/visit` | Record a page view |
+| `POST` | `/api/stats/heartbeat` | Heartbeat for online-visitor tracking |
+| `*` | `/api/admin/*` | Admin CRUD (requires `ADMIN_TOKEN` Bearer auth) |
+| `*` | `/media/*` | Serve files from R2 `MEDIA_BUCKET` |
+
+### Backend files
+
+- **`index.ts`** — entry point: `/api/*` → `handleApi()`, `/media/*` → R2, everything else → static assets.
 - **`db.ts`** — Versioned D1 migrations (MIGRATIONS array, 0001-0004). Incrementally applies pending migrations at `/api/setup/init-db`, tracks applied version in `app_settings`.
 - **`comments.ts`** — Twikoo-compatible comment API with session-based check. Enables/disables comments via admin settings. ALTCHA challenge required for posting. Sends Telegram notification on new comments.
 - **`twikoo-adapter.ts`** — Translates Twikoo request/response format to Worker's internal API.
-- **`friends.ts`** — `GET /api/friends` returns approved links; `POST /api/friends` submits with rate limiting, dedup by domain, human proof verification, Telegram notification for friends.
+- **`friends.ts`** — Friend link submission with rate limiting, dedup by domain, human proof verification, Telegram notification.
 - **`id3.ts`** — Shared ID3v2 tag parser (titles, artists, albums, embedded cover art).
 - **`music.ts`** — CRUD for music tracks, R2 object listing with ID3 metadata reading, auto-import from R2 `music/` prefix. Uses in-memory scan cache (5-min TTL) to avoid re-reading metadata on every admin page load.
 - **`stats.ts`** — Visitor counting: page views, unique visitors, daily aggregates, real-time online (5-min heartbeat window). Visitor identification via local random ID + SHA-256 (no raw IP storage).
-- **`admin.ts`** — Admin API (`/api/admin/*`) for friend management (approve/reject/sort), avatar upload to R2, comments toggle, Telegram settings, music management. All endpoints require `ADMIN_TOKEN` auth.
+- **`admin.ts`** — Admin API (`/api/admin/*`) for friend management (approve/reject/sort), avatar upload to R2, comments toggle, Telegram settings, music management.
 - **`anti-abuse.ts`** — ALTCHA challenge generation/verification for friend submissions and comments.
 - **`media.ts`** — Serves files from R2 `MEDIA_BUCKET` at `/media/avatars/*` and `/media/covers/*` with content-type detection.
+- **`constants.ts`** — Error code factory (`apiError`) and shared worker constants.
 - **`utils.ts`** — Shared utilities: response helpers (json, security headers, server timing, caching), versioned cache invalidation (`cachedResponseV`, `incrementCacheVersion`), input validation, rate limiting (D1-based sliding window), admin token verification (timing-safe via unified rate-limit-first gate), cross-site write protection. Also hosts shared worker helpers: `readMusicMetadataFromR2`, `inferMusicMetadataFromKey`, `getMusicFileNameFromKey`, `embeddedCoverUrlForMusicKey`, `getClientIp`, `getRequestRegion`, `clampInteger`.
 - **`types/index.ts`** — `Env` interface with `DB`, `MEDIA_BUCKET`, `ASSETS`, `ADMIN_TOKEN` bindings.
 
@@ -85,7 +126,7 @@ Key backend patterns:
 - Graceful 410 on old URL-based setup token pattern.
 - Twikoo comments use `sanitize-html` for robust XSS-safe HTML (not hand-rolled regex blacklist).
 - Twikoo CORS is same-origin only — Origin header is validated against the request hostname before being reflected with credentials.
-- Worker unit tests in `src/worker/__tests__/utils.test.ts`, run with `pnpm test`.
+- Worker tests in `src/worker/__tests__/` (test file pattern: `src/**/*.test.ts`). `utils.test.ts` covers utility functions; `api.test.ts` covers route dispatch and response shape using mocked D1/R2/ASSETS bindings. Run with `pnpm test`.
 - R2 music scan has a 5-minute in-memory result cache; `MUSIC_METADATA_READ_BYTES` is 256 KB.
 
 ### Deployment

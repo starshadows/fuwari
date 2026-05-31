@@ -1,6 +1,6 @@
 <script lang="ts">
-import { onMount } from "svelte";
 import HumanProof from "@components/anti-abuse/HumanProof.svelte";
+import { onMount } from "svelte";
 
 type Friend = {
 	id: number;

@@ -10,20 +10,20 @@ export const COMMENTS_SESSION_COOKIE = "fuwari_comments_session";
 // ----------------------------------------------------------------
 // Time / duration constants
 // ----------------------------------------------------------------
-export const COMMENTS_SESSION_MAX_AGE_SECONDS = 20 * 60;
-export const ALTCHA_CHALLENGE_TTL_SECONDS = 10 * 60;
-export const ALTCHA_COST = 800;
-export const STATS_ACTIVE_WINDOW_MS = 5 * 60 * 1000;
-export const STATS_TIMEZONE_OFFSET_MINUTES = 8 * 60;
-export const RATE_LIMIT_MAX_AGE_SECONDS = 24 * 60 * 60;
+export const COMMENTS_SESSION_MAX_AGE_SECONDS: number = 20 * 60;
+export const ALTCHA_CHALLENGE_TTL_SECONDS: number = 10 * 60;
+export const ALTCHA_COST: number = 800;
+export const STATS_ACTIVE_WINDOW_MS: number = 5 * 60 * 1000;
+export const STATS_TIMEZONE_OFFSET_MINUTES: number = 8 * 60;
+export const RATE_LIMIT_MAX_AGE_SECONDS: number = 24 * 60 * 60;
 
 // ----------------------------------------------------------------
 // Music constants
 // ----------------------------------------------------------------
 export const MUSIC_PREFIX = "music/";
 export const MUSIC_OBJECT_SCAN_LIMIT = 200;
-export const MUSIC_METADATA_READ_BYTES = 256 * 1024; // 256 KB — ID3v2 tags live at the start of MP3 files
-export const AUDIO_EXTENSIONS = new Set([
+export const MUSIC_METADATA_READ_BYTES: number = 256 * 1024; // 256 KB — ID3v2 tags live at the start of MP3 files
+export const AUDIO_EXTENSIONS: Set<string> = new Set([
 	"mp3",
 	"m4a",
 	"aac",
@@ -37,9 +37,9 @@ export const AUDIO_EXTENSIONS = new Set([
 // ----------------------------------------------------------------
 // Friend / media constants
 // ----------------------------------------------------------------
-export const FRIEND_STATUSES = new Set(["pending", "approved", "rejected"]);
-export const MAX_AVATAR_SIZE = 3 * 1024 * 1024;
-export const ALLOWED_AVATAR_MIME_TYPES = new Set([
+export const FRIEND_STATUSES: Set<string> = new Set(["pending", "approved", "rejected"]);
+export const MAX_AVATAR_SIZE: number = 3 * 1024 * 1024;
+export const ALLOWED_AVATAR_MIME_TYPES: Set<string> = new Set([
 	"image/avif",
 	"image/gif",
 	"image/jpeg",
@@ -50,7 +50,12 @@ export const ALLOWED_AVATAR_MIME_TYPES = new Set([
 // ----------------------------------------------------------------
 // Rate limits
 // ----------------------------------------------------------------
-export const RATE_LIMITS = {
+export interface RateLimitConfig {
+	scope: string;
+	limit: number;
+	windowSeconds: number;
+}
+export const RATE_LIMITS: Record<string, RateLimitConfig> = {
 	friendSubmit: { scope: "friend-submit", limit: 5, windowSeconds: 10 * 60 },
 	commentsSession: {
 		scope: "comments-session",
@@ -64,9 +69,9 @@ export const RATE_LIMITS = {
 	},
 	statsWrite: { scope: "stats-write", limit: 240, windowSeconds: 10 * 60 },
 	adminFailure: { scope: "admin-auth-fail", limit: 6, windowSeconds: 5 * 60 },
-} as const;
+};
 
-export const HUMAN_PROOF_CONTEXTS = new Set(["friends", "comments"]);
+export const HUMAN_PROOF_CONTEXTS: Set<string> = new Set(["friends", "comments"]);
 
 // ----------------------------------------------------------------
 // Cache version domains

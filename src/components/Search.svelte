@@ -31,6 +31,29 @@ const fakeResult: SearchResult[] = [
 	},
 ];
 
+// Strip all HTML tags except <mark> (used by pagefind for highlighting).
+// Defence-in-depth: pagefind indexes only site-owned content, but { @html }
+// should never render unsanitized markup from an external data source.
+const sanitizeExcerpt = (html: string): string => {
+	const doc = new DOMParser().parseFromString(html, "text/html");
+	const walk = (node: ChildNode): string => {
+		if (node.nodeType === Node.TEXT_NODE) {
+			return node.textContent ?? "";
+		}
+		if (node.nodeType === Node.ELEMENT_NODE) {
+			const el = node as Element;
+			if (el.tagName === "MARK") {
+				const children = Array.from(el.childNodes).map(walk).join("");
+				return `<mark>${children}</mark>`;
+			}
+			// For all other elements, only keep their text content
+			return Array.from(el.childNodes).map(walk).join("");
+		}
+		return "";
+	};
+	return Array.from(doc.body.childNodes).map(walk).join("");
+};
+
 const togglePanel = () => {
 	const panel = document.getElementById("search-panel");
 	panel?.classList.toggle("float-panel-closed");
@@ -181,7 +204,7 @@ top-20 left-4 md:left-[unset] right-4 shadow-2xl rounded-2xl p-2">
                 {item.meta.title}<Icon icon="fa6-solid:chevron-right" class="transition text-[0.75rem] translate-x-1 my-auto text-[var(--primary)]"></Icon>
             </div>
             <div class="transition text-sm text-50">
-                {@html item.excerpt}
+                {@html sanitizeExcerpt(item.excerpt)}
             </div>
         </a>
     {/each}

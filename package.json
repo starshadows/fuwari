@@ -16,7 +16,7 @@
 		"d1:migrate:local": "wrangler d1 migrations apply fuwari-data --local",
 		"d1:migrate:remote": "wrangler d1 migrations apply fuwari-data --remote",
 		"astro": "astro",
-		"type-check": "tsc --noEmit --isolatedDeclarations",
+		"type-check": "tsc --noEmit",
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"new-post": "node scripts/new-post.js",

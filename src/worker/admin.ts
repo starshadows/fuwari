@@ -1,40 +1,39 @@
-import type { Env } from "./types";
-import type { TelegramSettings } from "./types/aliases";
+import { areCommentsEnabled } from "./comments";
 import {
-	json,
-	readString,
-	readJson,
-	readInteger,
-	readBoolean,
-	rejectCrossSiteWrite,
-	requireAdmin,
-	getAppSetting,
-	setAppSetting,
-	incrementCacheVersion,
-	isHttpsUrl,
-	isAvatarUrl,
-	sanitizeFileName,
-	stripMediaPrefix,
-	maskSecret,
-} from "./utils";
-import {
-	FRIEND_STATUSES,
 	ALLOWED_AVATAR_MIME_TYPES,
+	apiError,
+	FRIEND_STATUSES,
 	MAX_AVATAR_SIZE,
 	TELEGRAM_SETTINGS_KEY,
 } from "./constants";
-import { apiError } from "./constants";
-import { getCommentsConfig } from "./comments";
-import { writeTelegramSettings, sendTelegramMessage } from "./friends";
+import { sendTelegramMessage, writeTelegramSettings } from "./friends";
 import {
+	createMusicTrack,
+	deleteMusicTrack,
+	importR2MusicObjects,
 	listAdminMusic,
 	listR2MusicObjects,
-	importR2MusicObjects,
-	createMusicTrack,
 	updateMusicTrack,
-	deleteMusicTrack,
 } from "./music";
-import type { HumanProofContext } from "./types/aliases";
+import type { Env } from "./types";
+import type { HumanProofContext, TelegramSettings } from "./types/aliases";
+import {
+	getAppSetting,
+	incrementCacheVersion,
+	isAvatarUrl,
+	isHttpsUrl,
+	json,
+	maskSecret,
+	readBoolean,
+	readInteger,
+	readJson,
+	readString,
+	rejectCrossSiteWrite,
+	requireAdmin,
+	sanitizeFileName,
+	setAppSetting,
+	stripMediaPrefix,
+} from "./utils";
 
 // ================================================================
 // Admin API dispatcher
@@ -107,7 +106,7 @@ export async function handleAdminApi(
 // ================================================================
 
 async function getAdminCommentsSettings(env: Env): Promise<Response> {
-	return json({ enabled: await getCommentsConfig(env) });
+	return json({ enabled: await areCommentsEnabled(env) });
 }
 
 async function updateAdminCommentsSettings(

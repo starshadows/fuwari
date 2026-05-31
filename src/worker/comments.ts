@@ -1,34 +1,34 @@
-import type { Env } from "./types";
-import type { CommentsSessionCookie } from "./types/aliases";
-import {
-	json,
-	readString,
-	readJson,
-	readHumanProof,
-	readCookie,
-	cachedResponse,
-	rejectCrossSiteWrite,
-	enforceRateLimit,
-	getAppSetting,
-	setAppSetting,
-	signSessionValue,
-	timingSafeEqual,
-	base64UrlEncode,
-	base64UrlDecode,
-	ensureStatsSaltCached,
-	getClientIp,
-} from "./utils";
 import { verifyHumanProof } from "./anti-abuse";
 import {
-	RATE_LIMITS,
+	apiError,
 	COMMENTS_ENABLED_SETTING_KEY,
 	COMMENTS_SESSION_COOKIE,
 	COMMENTS_SESSION_MAX_AGE_SECONDS,
+	RATE_LIMITS,
 } from "./constants";
-import { apiError } from "./constants";
-import { safeNormalizeMediaKey } from "./utils";
 import { readTelegramSettings, sendTelegramMessage } from "./friends";
 import twikooWorker from "./twikoo-adapter.ts";
+import type { Env } from "./types";
+import type { CommentsSessionCookie } from "./types/aliases";
+import {
+	base64UrlDecode,
+	base64UrlEncode,
+	cachedResponse,
+	enforceRateLimit,
+	ensureStatsSaltCached,
+	getAppSetting,
+	getClientIp,
+	json,
+	readCookie,
+	readHumanProof,
+	readJson,
+	readString,
+	rejectCrossSiteWrite,
+	safeNormalizeMediaKey,
+	setAppSetting,
+	signSessionValue,
+	timingSafeEqual,
+} from "./utils";
 
 // ================================================================
 // Comments config
@@ -38,7 +38,7 @@ export async function getCommentsConfig(env: Env): Promise<Response> {
 	return json({ enabled: await areCommentsEnabled(env) });
 }
 
-async function areCommentsEnabled(env: Env): Promise<boolean> {
+export async function areCommentsEnabled(env: Env): Promise<boolean> {
 	const value = await getAppSetting(env, COMMENTS_ENABLED_SETTING_KEY);
 	return value !== "false";
 }
@@ -175,21 +175,27 @@ export async function handleTwikooRequest(
 	env: Env,
 	requestUrl: URL,
 ): Promise<Response> {
-	if (!(await areCommentsEnabled(env))) {
-		return json({ error: apiError("COMMENTS_DISABLED") }, 403);
-	}
-
-	// 只对发帖等写操作要求人机验证 session
-	// 登录、管理、只读查询等由 twikooWorker 自行鉴权或无需鉴权
-	const needsSession = await (async (): Promise<boolean> => {
-		if (request.method === "OPTIONS") return false;
+	// Determine the Twikoo event type early so we can scope
+	// both the disabled check and the session check to write events only.
+	// Admin login, moderation, and read-only queries pass through
+	// unconditionally — twikooWorker handles its own auth for those.
+	const event = await (async (): Promise<string> => {
+		if (request.method === "OPTIONS") return "";
 		try {
 			const body = (await request.clone().json()) as { event?: string };
-			return SESSION_REQUIRED_EVENTS.has(body.event ?? "");
+			return body.event ?? "";
 		} catch {
-			return false; // 无法解析 JSON 时放行，交给 twikooWorker 处理
+			return "";
 		}
 	})();
+
+	const needsSession = SESSION_REQUIRED_EVENTS.has(event);
+
+	// Only gate write events when comments are globally disabled.
+	// Admin (login, moderation, get) and read-only queries still work.
+	if (needsSession && !(await areCommentsEnabled(env))) {
+		return json({ error: apiError("COMMENTS_DISABLED") }, 403);
+	}
 
 	if (needsSession && !(await hasValidCommentsSession(request, env))) {
 		return json({ error: apiError("TWIKOO_SESSION_REQUIRED") }, 401);

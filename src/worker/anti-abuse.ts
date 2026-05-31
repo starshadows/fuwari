@@ -1,13 +1,17 @@
-import { createChallenge, sha, verifySolution, type Payload } from "altcha/lib";
+import { createChallenge, type Payload, sha, verifySolution } from "altcha/lib";
+import {
+	ALTCHA_CHALLENGE_TTL_SECONDS,
+	ALTCHA_COST,
+	apiError,
+} from "./constants";
+import type { Env } from "./types";
 import type { HumanProof, HumanProofContext } from "./types/aliases";
 import {
-	json,
-	readString,
 	ensureStatsSaltCached,
 	incrementRateLimitCounter,
+	json,
+	readString,
 } from "./utils";
-import { ALTCHA_COST, ALTCHA_CHALLENGE_TTL_SECONDS } from "./constants";
-import { apiError } from "./constants";
 
 // ================================================================
 // Generate ALTCHA challenge

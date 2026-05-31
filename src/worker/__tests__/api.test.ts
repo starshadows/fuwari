@@ -5,7 +5,7 @@
  * by calling handler functions directly with mocked Env bindings.
  * vitest transpiles TypeScript automatically so worker imports work.
  */
-import { describe, it, expect, beforeAll, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { Env } from "../types";
 
 // ================================================================
@@ -258,9 +258,10 @@ describe("Anti-abuse challenge", () => {
 			{} as ExecutionContext,
 		);
 		expect(res.status).toBe(200);
-		const body = await res.json();
+		const body = (await res.json()) as Record<string, unknown>;
 		expect(body).toHaveProperty("challenge");
-		expect(body.challenge.algorithm || body.mode).toBeDefined();
+		const challenge = body.challenge as Record<string, unknown> | undefined;
+		expect(challenge?.algorithm || body.mode).toBeDefined();
 	});
 });
 
