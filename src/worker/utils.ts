@@ -166,6 +166,10 @@ export async function cachedResponseV(
 // Crypto / hash helpers
 // ================================================================
 
+/**
+ * Fast deterministic SHA-256 hash used for rate-limit actor identification
+ * and other non-sensitive hashing.  NOT suitable for stored credentials.
+ */
 export async function hashToken(token: string): Promise<string> {
 	const digest = await crypto.subtle.digest(
 		"SHA-256",
@@ -174,6 +178,102 @@ export async function hashToken(token: string): Promise<string> {
 	return Array.from(new Uint8Array(digest))
 		.map((byte) => byte.toString(16).padStart(2, "0"))
 		.join("");
+}
+
+/** PBKDF2 iteration count — tuned for Workers CPU (keeps latency ~100-200ms). */
+const PBKDF2_ITERATIONS = 100_000;
+
+/**
+ * Hash a token with PBKDF2-SHA-256 and a random 128-bit salt.
+ * Returns "pbkdf2:<salt_hex>:<hash_hex>" suitable for long-term storage.
+ */
+export async function hashTokenWithPbkdf2(token: string): Promise<string> {
+	const salt = crypto.getRandomValues(new Uint8Array(16));
+	const keyMaterial = await crypto.subtle.importKey(
+		"raw",
+		new TextEncoder().encode(token),
+		{ name: "PBKDF2" },
+		false,
+		["deriveBits"],
+	);
+	const derived = await crypto.subtle.deriveBits(
+		{
+			name: "PBKDF2",
+			salt,
+			iterations: PBKDF2_ITERATIONS,
+			hash: "SHA-256",
+		},
+		keyMaterial,
+		256,
+	);
+	const saltHex = Array.from(salt)
+		.map((b) => b.toString(16).padStart(2, "0"))
+		.join("");
+	const hashHex = Array.from(new Uint8Array(derived))
+		.map((b) => b.toString(16).padStart(2, "0"))
+		.join("");
+	return `pbkdf2:${saltHex}:${hashHex}`;
+}
+
+/**
+ * Verify a token against a stored hash (either legacy raw SHA-256 or
+ * modern PBKDF2 format).  Automatically upgrades legacy hashes on match.
+ * Returns the (possibly upgraded) hash when the token matches, or null.
+ */
+async function verifyAndMaybeUpgradeTokenHash(
+	env: Env,
+	token: string,
+	storedHash: string,
+): Promise<string | null> {
+	// Modern PBKDF2 format: "pbkdf2:<salt_hex>:<hash_hex>"
+	if (storedHash.startsWith("pbkdf2:")) {
+		const parts = storedHash.slice("pbkdf2:".length).split(":");
+		if (parts.length !== 2) return null;
+		const saltBytes = new Uint8Array(
+			(parts[0].match(/.{2}/g) ?? []).map((b) => Number.parseInt(b, 16)),
+		);
+		if (saltBytes.length !== 16) return null;
+		const keyMaterial = await crypto.subtle.importKey(
+			"raw",
+			new TextEncoder().encode(token),
+			{ name: "PBKDF2" },
+			false,
+			["deriveBits"],
+		);
+		const derived = await crypto.subtle.deriveBits(
+			{
+				name: "PBKDF2",
+				salt: saltBytes,
+				iterations: PBKDF2_ITERATIONS,
+				hash: "SHA-256",
+			},
+			keyMaterial,
+			256,
+		);
+		const hashHex = Array.from(new Uint8Array(derived))
+			.map((b) => b.toString(16).padStart(2, "0"))
+			.join("");
+		return timingSafeEqual(hashHex, parts[1]) ? storedHash : null;
+	}
+
+	// Legacy raw SHA-256 (64 hex chars) — verify and auto-upgrade.
+	const legacyHash = await hashToken(token);
+	if (timingSafeEqual(legacyHash, storedHash)) {
+		// Compute the PBKDF2 hash and persist it directly so we don't
+		// pay for PBKDF2 twice (saveStoredAdminTokenHash also hashes).
+		const upgraded = await hashTokenWithPbkdf2(token);
+		await env.DB.prepare(
+			`INSERT INTO app_settings (key, value, updated_at)
+	     VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+	     ON CONFLICT(key) DO UPDATE SET
+	       value = excluded.value,
+	       updated_at = excluded.updated_at`,
+		)
+			.bind("admin_token_sha256", upgraded)
+			.run();
+		return upgraded;
+	}
+	return null;
 }
 
 export async function signSessionValue(
@@ -414,25 +514,26 @@ export async function requireAdmin(
 		return json({ error: apiError("MISSING_TOKEN") }, 401);
 	}
 
-	// Always enforce rate limit before any auth verification.
-	// Previously rate-limiting was only applied on some failure paths,
-	// which leaked information about whether ADMIN_TOKEN was configured
-	// and whether the submitted token was correct (timing / 429 presence).
-	// Now every request with a token hits the same rate-limit check first.
+	// Lightweight rate-limit gate on all token-bearing requests to
+	// cap total auth attempt volume (success + failure).  This is a
+	// generous ceiling for legitimate admin traffic; the tight failure
+	// counter below is what actually stops brute-force.
 	const rl = await enforceRateLimit(request, env, {
-		scope: "admin-auth-fail",
+		scope: "admin-auth",
 		limit: 30,
 		windowSeconds: 5 * 60,
 	});
 	if (rl) return rl;
 
-	// Verify through environment variable (fast path)
-	if (env.ADMIN_TOKEN && token === env.ADMIN_TOKEN) return null;
+	// Verify through environment variable (timing-safe comparison).
+	let verified = false;
+	if (env.ADMIN_TOKEN) {
+		verified = timingSafeEqual(token, env.ADMIN_TOKEN);
+	} else if (env.DB) {
+		verified = await verifyStoredAdminToken(env, token);
+	}
 
-	// Verify through database-stored hash
-	if (env.DB && (await verifyStoredAdminToken(env, token))) return null;
-
-	// Token not yet initialized — guide the operator to set one up
+	// Not yet initialized — guide the operator to set one up.
 	if (!env.ADMIN_TOKEN && env.DB && !(await getStoredAdminTokenHash(env))) {
 		return json(
 			{
@@ -443,7 +544,20 @@ export async function requireAdmin(
 		);
 	}
 
-	return json({ error: apiError("INVALID_TOKEN") }, 401);
+	// On failure: increment a strict failure counter so brute-force
+	// attempts are throttled aggressively without affecting legitimate
+	// admin traffic that passes the generous gate above.
+	if (!verified) {
+		const failRl = await enforceRateLimit(request, env, {
+			scope: "admin-auth-fail",
+			limit: 6,
+			windowSeconds: 5 * 60,
+		});
+		if (failRl) return failRl;
+		return json({ error: apiError("INVALID_TOKEN") }, 401);
+	}
+
+	return null;
 }
 
 async function verifyStoredAdminToken(
@@ -452,7 +566,9 @@ async function verifyStoredAdminToken(
 ): Promise<boolean> {
 	const storedHash = await getStoredAdminTokenHash(env);
 	if (!storedHash) return false;
-	return storedHash === (await hashToken(token));
+	return (
+		(await verifyAndMaybeUpgradeTokenHash(env, token, storedHash)) !== null
+	);
 }
 
 export async function getStoredAdminTokenHash(
@@ -472,8 +588,9 @@ export async function getStoredAdminTokenHash(
 
 export async function saveStoredAdminTokenHash(
 	env: Env,
-	tokenHash: string,
+	token: string,
 ): Promise<void> {
+	const pbkdf2Hash = await hashTokenWithPbkdf2(token);
 	await env.DB.prepare(
 		`INSERT INTO app_settings (key, value, updated_at)
      VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
@@ -481,7 +598,7 @@ export async function saveStoredAdminTokenHash(
        value = excluded.value,
        updated_at = excluded.updated_at`,
 	)
-		.bind("admin_token_sha256", tokenHash)
+		.bind("admin_token_sha256", pbkdf2Hash)
 		.run();
 }
 

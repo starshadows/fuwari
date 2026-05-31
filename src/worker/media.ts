@@ -62,7 +62,7 @@ export async function handleMedia(
 		});
 	}
 
-	const headers = mediaHeaders(head);
+	const headers = mediaHeaders(head, kind);
 
 	if (range?.ok) {
 		headers.set(
@@ -184,15 +184,65 @@ function parseRange(rangeHeader: string, size: number): RangeResult {
 	return { ok: true, start, end, length: end - start + 1 };
 }
 
-function mediaHeaders(object: R2Object): Headers {
+/** MIME types allowed per media directory. Anything else is force-downloaded. */
+const SAFE_MIME_TYPES: Record<string, Set<string>> = {
+	avatars: new Set([
+		"image/avif",
+		"image/gif",
+		"image/jpeg",
+		"image/png",
+		"image/webp",
+	]),
+	covers: new Set([
+		"image/avif",
+		"image/gif",
+		"image/jpeg",
+		"image/png",
+		"image/webp",
+	]),
+	music: new Set([
+		"audio/aac",
+		"audio/flac",
+		"audio/mp3",
+		"audio/mpeg",
+		"audio/ogg",
+		"audio/opus",
+		"audio/wav",
+		"audio/webm",
+		"audio/x-flac",
+		"audio/x-m4a",
+		"audio/x-wav",
+	]),
+	// twikoo uploads can be images, but force-download everything else.
+	twikoo: new Set([
+		"image/avif",
+		"image/gif",
+		"image/jpeg",
+		"image/png",
+		"image/webp",
+	]),
+};
+
+function mediaHeaders(object: R2Object, kind: string): Headers {
 	const headers = new Headers();
 	object.writeHttpMetadata(headers);
 	headers.set("accept-ranges", "bytes");
 	headers.set("cache-control", "public, max-age=31536000, immutable");
 	headers.set("etag", object.httpEtag);
-	if (!headers.has("content-type")) {
+
+	const rawType = headers.get("content-type") ?? "";
+	const mimeType = rawType.split(";")[0]?.trim().toLowerCase() ?? "";
+	const allowed = SAFE_MIME_TYPES[kind];
+
+	if (!mimeType || (allowed && !allowed.has(mimeType))) {
+		// Force-download unknown or dangerous MIME types to prevent
+		// XSS via text/html or image/svg+xml served from the same origin.
+		headers.set("content-type", "application/octet-stream");
+		headers.set("content-disposition", "attachment");
+	} else if (!headers.has("content-type")) {
 		headers.set("content-type", "application/octet-stream");
 	}
+
 	return headers;
 }
 

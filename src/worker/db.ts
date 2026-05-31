@@ -2,12 +2,11 @@ import { apiError } from "./constants";
 import type { Env } from "./types";
 import {
 	ensureStatsSaltCached,
-	hashToken,
 	json,
 	readBearerToken,
 	readJson,
 	readString,
-	saveStoredAdminTokenHash,
+	timingSafeEqual,
 } from "./utils";
 
 const APP_SETTINGS_TABLE = `CREATE TABLE IF NOT EXISTS app_settings (
@@ -244,6 +243,21 @@ export async function initializeDatabase(
 		return json({ error: apiError("MISSING_D1") }, 503);
 	}
 
+	// Require ADMIN_TOKEN Cloudflare Secret to be configured before
+	// allowing any database initialization. This prevents the "first caller
+	// sets the admin token" class of vulnerability.
+	if (!env.ADMIN_TOKEN) {
+		return json(
+			{
+				error:
+					"ADMIN_TOKEN Cloudflare Secret is not configured. " +
+					"Set it via `wrangler secret put ADMIN_TOKEN` or the Cloudflare Dashboard, " +
+					"then call this endpoint again.",
+			},
+			503,
+		);
+	}
+
 	const tokenResult = await readSetupToken(request, requestUrl);
 	if (tokenResult instanceof Response) return tokenResult;
 	if (!tokenResult) {
@@ -256,6 +270,11 @@ export async function initializeDatabase(
 		);
 	}
 
+	// Use timing-safe comparison against the environment secret.
+	if (!timingSafeEqual(tokenResult, env.ADMIN_TOKEN)) {
+		return json({ error: apiError("INVALID_TOKEN") }, 401);
+	}
+
 	// --- Versioned migration logic ---
 
 	const currentVersion = await getAppliedMigrationVersion(env);
@@ -264,14 +283,10 @@ export async function initializeDatabase(
 	);
 
 	if (pending.length === 0) {
-		// Still run the admin token setup so it can't be skipped
-		const adminTokenSource = await setupAdminToken(env, tokenResult);
-		if (adminTokenSource instanceof Response) return adminTokenSource;
-
+		await ensureStatsSaltCached(env);
 		return json({
 			ok: true,
 			message: `Database is up to date at version ${currentVersion}. No pending migrations.`,
-			adminTokenSource,
 		});
 	}
 
@@ -305,53 +320,13 @@ export async function initializeDatabase(
 		applied.push(migration.version);
 	}
 
-	const adminTokenSource = await setupAdminToken(env, tokenResult);
-	if (adminTokenSource instanceof Response) return adminTokenSource;
 	await ensureStatsSaltCached(env);
 
 	return json({
 		ok: true,
 		message: `Applied ${applied.length} migration(s): ${applied.join(", ")}. Current version: ${pending[pending.length - 1].version}.`,
 		migrationsApplied: applied,
-		adminTokenSource,
 	});
-}
-
-async function setupAdminToken(
-	env: Env,
-	token: string,
-): Promise<Response | "env" | "database"> {
-	if (env.ADMIN_TOKEN) {
-		if (token !== env.ADMIN_TOKEN) {
-			return json({ error: apiError("INVALID_TOKEN") }, 401);
-		}
-		return "env";
-	}
-
-	const tokenHash = await hashToken(token);
-	const storedHash = await getStoredToken(env);
-	if (storedHash) {
-		if (storedHash !== tokenHash) {
-			return json({ error: apiError("INVALID_TOKEN") }, 401);
-		}
-		return "database";
-	}
-
-	await saveStoredAdminTokenHash(env, tokenHash);
-	return "database";
-}
-
-async function getStoredToken(env: Env): Promise<string | null> {
-	try {
-		const row = await env.DB.prepare(
-			"SELECT value FROM app_settings WHERE key = ?",
-		)
-			.bind("admin_token_sha256")
-			.first<{ value: string }>();
-		return row?.value ?? null;
-	} catch {
-		return null;
-	}
 }
 
 async function readSetupToken(
