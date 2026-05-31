@@ -18,7 +18,7 @@ import {
 // ================================================================
 
 export async function getAntiAbuseChallenge(
-	request: Request,
+	_request: Request,
 	env: Env,
 	requestUrl: URL,
 ): Promise<Response> {

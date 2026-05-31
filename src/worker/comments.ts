@@ -13,7 +13,6 @@ import type { CommentsSessionCookie } from "./types/aliases";
 import {
 	base64UrlDecode,
 	base64UrlEncode,
-	cachedResponse,
 	enforceRateLimit,
 	ensureStatsSaltCached,
 	getAppSetting,
@@ -22,10 +21,8 @@ import {
 	readCookie,
 	readHumanProof,
 	readJson,
-	readString,
 	rejectCrossSiteWrite,
 	safeNormalizeMediaKey,
-	setAppSetting,
 	signSessionValue,
 	timingSafeEqual,
 } from "./utils";

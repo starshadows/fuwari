@@ -37,7 +37,11 @@ export const AUDIO_EXTENSIONS: Set<string> = new Set([
 // ----------------------------------------------------------------
 // Friend / media constants
 // ----------------------------------------------------------------
-export const FRIEND_STATUSES: Set<string> = new Set(["pending", "approved", "rejected"]);
+export const FRIEND_STATUSES: Set<string> = new Set([
+	"pending",
+	"approved",
+	"rejected",
+]);
 export const MAX_AVATAR_SIZE: number = 3 * 1024 * 1024;
 export const ALLOWED_AVATAR_MIME_TYPES: Set<string> = new Set([
 	"image/avif",
@@ -71,7 +75,10 @@ export const RATE_LIMITS: Record<string, RateLimitConfig> = {
 	adminFailure: { scope: "admin-auth-fail", limit: 6, windowSeconds: 5 * 60 },
 };
 
-export const HUMAN_PROOF_CONTEXTS: Set<string> = new Set(["friends", "comments"]);
+export const HUMAN_PROOF_CONTEXTS: Set<string> = new Set([
+	"friends",
+	"comments",
+]);
 
 // ----------------------------------------------------------------
 // Cache version domains

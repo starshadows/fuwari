@@ -5,7 +5,6 @@ import {
 	MUSIC_METADATA_READ_BYTES,
 	RATE_LIMIT_MAX_AGE_SECONDS,
 	SECURITY_HEADERS,
-	STATS_SALT_SETTING_KEY,
 } from "./constants";
 import type { Env } from "./types";
 import type {
@@ -15,7 +14,6 @@ import type {
 	JsonRecord,
 	MusicMetadata,
 	RateLimitConfig,
-	TelegramSettings,
 } from "./types/aliases";
 
 // ================================================================
@@ -179,7 +177,7 @@ export async function hashToken(token: string): Promise<string> {
 }
 
 export async function signSessionValue(
-	env: Env,
+	_env: Env,
 	value: string,
 	salt: string,
 ): Promise<string> {

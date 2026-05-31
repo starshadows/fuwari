@@ -5,7 +5,7 @@
  * by calling handler functions directly with mocked Env bindings.
  * vitest transpiles TypeScript automatically so worker imports work.
  */
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Env } from "../types";
 
 // ================================================================
@@ -305,5 +305,80 @@ describe("Media path validation", () => {
 			{} as ExecutionContext,
 		);
 		expect(res.status).toBe(405);
+	});
+});
+
+// ================================================================
+// Admin comments settings
+// ================================================================
+describe("Admin comments settings", () => {
+	let worker: Awaited<typeof import("../index")>;
+
+	beforeAll(async () => {
+		vi.stubGlobal("caches", {
+			default: {
+				match: vi.fn().mockResolvedValue(undefined),
+				put: vi.fn().mockResolvedValue(undefined),
+			},
+		});
+		worker = await import("../index");
+	});
+
+	afterAll(() => {
+		vi.unstubAllGlobals();
+	});
+
+	function adminHeaders(): HeadersInit {
+		return { authorization: "Bearer test-admin-token" };
+	}
+
+	it("GET returns current comments enabled status", async () => {
+		const { db } = mockD1Result("true");
+		const env = mockEnv({ DB: db });
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/admin/settings/comments", {
+				headers: adminHeaders(),
+			}),
+			env,
+			{} as ExecutionContext,
+		);
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { enabled: boolean };
+		expect(body.enabled).toBe(true);
+	});
+
+	it("POST updates comments enabled status", async () => {
+		const { db } = mockD1Result("false");
+		const env = mockEnv({ DB: db });
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/admin/settings/comments", {
+				method: "POST",
+				headers: { ...adminHeaders(), "content-type": "application/json" },
+				body: JSON.stringify({ enabled: false }),
+			}),
+			env,
+			{} as ExecutionContext,
+		);
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { ok: boolean; enabled: boolean };
+		expect(body.ok).toBe(true);
+		expect(body.enabled).toBe(false);
+	});
+
+	it("rejects admin comments endpoint without token", async () => {
+		const env = mockEnv({ ADMIN_TOKEN: undefined });
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/admin/settings/comments"),
+			env,
+			{} as ExecutionContext,
+		);
+		expect(res.status).toBe(401);
+	});
+
+	it("areCommentsEnabled reads value from DB correctly", async () => {
+		const { db } = mockD1Result("true");
+		const env = mockEnv({ DB: db });
+		const { areCommentsEnabled } = await import("../comments");
+		expect(await areCommentsEnabled(env)).toBe(true);
 	});
 });

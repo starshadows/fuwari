@@ -2,6 +2,7 @@ import { areCommentsEnabled } from "./comments";
 import {
 	ALLOWED_AVATAR_MIME_TYPES,
 	apiError,
+	COMMENTS_ENABLED_SETTING_KEY,
 	FRIEND_STATUSES,
 	MAX_AVATAR_SIZE,
 	TELEGRAM_SETTINGS_KEY,
@@ -16,7 +17,7 @@ import {
 	updateMusicTrack,
 } from "./music";
 import type { Env } from "./types";
-import type { HumanProofContext, TelegramSettings } from "./types/aliases";
+import type { TelegramSettings } from "./types/aliases";
 import {
 	getAppSetting,
 	incrementCacheVersion,
@@ -28,7 +29,6 @@ import {
 	readInteger,
 	readJson,
 	readString,
-	rejectCrossSiteWrite,
 	requireAdmin,
 	sanitizeFileName,
 	setAppSetting,
@@ -115,7 +115,11 @@ async function updateAdminCommentsSettings(
 ): Promise<Response> {
 	const body = await readJson(request);
 	const enabled = readBoolean(body.enabled, true);
-	await setAppSetting(env, "comments_enabled", enabled ? "true" : "false");
+	await setAppSetting(
+		env,
+		COMMENTS_ENABLED_SETTING_KEY,
+		enabled ? "true" : "false",
+	);
 	await incrementCacheVersion(env, "commentsConfig");
 	return json({ ok: true, enabled });
 }

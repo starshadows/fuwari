@@ -20,7 +20,7 @@ export function GithubCardComponent(properties, children) {
 		]);
 	}
 
-	if (!properties.repo || !properties.repo.includes("/")) {
+	if (!properties.repo?.includes("/")) {
 		return h(
 			"div",
 			{ class: "hidden" },

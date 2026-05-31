@@ -3,13 +3,11 @@ import { apiError, RATE_LIMITS, TELEGRAM_SETTINGS_KEY } from "./constants";
 import type { Env } from "./types";
 import type { TelegramSettings } from "./types/aliases";
 import {
-	cachedResponse,
 	enforceRateLimit,
 	getAppSetting,
 	isAvatarUrl,
 	isHttpsUrl,
 	json,
-	readBoolean,
 	readHumanProof,
 	readJson,
 	readString,

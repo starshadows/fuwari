@@ -21,7 +21,7 @@
 		"test:watch": "vitest",
 		"new-post": "node scripts/new-post.js",
 		"format": "biome format --write .",
-		"lint": "biome check --write .",
+		"lint": "biome check .",
 		"preinstall": "npx only-allow pnpm"
 	},
 	"dependencies": {

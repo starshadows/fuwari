@@ -6,7 +6,6 @@ import {
 	readMusicMetadataFromR2,
 	safeDecodeURIComponent,
 	safeNormalizeMediaKey,
-	stripMediaPrefix,
 } from "./utils";
 
 // ================================================================

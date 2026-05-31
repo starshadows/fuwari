@@ -15,7 +15,11 @@
 			"!**/node_modules/**/*",
 			"!**/.astro/**/*",
 			"!**/.wrangler/**/*",
-			"!**/pnpm-lock.yaml"
+			"!**/pnpm-lock.yaml",
+			"!**/.claude/**",
+			"!**/public/vendor/**",
+			"!**/*.min.*",
+			"!**/*.map"
 		]
 	},
 	"formatter": {

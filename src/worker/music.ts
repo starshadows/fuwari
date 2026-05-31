@@ -1,18 +1,12 @@
 import {
 	AUDIO_EXTENSIONS,
 	apiError,
-	MUSIC_METADATA_READ_BYTES,
 	MUSIC_OBJECT_SCAN_LIMIT,
 	MUSIC_PREFIX,
 } from "./constants";
 import type { Env } from "./types";
-import type {
-	EmbeddedCover,
-	MusicMetadata,
-	MusicObjectInfo,
-} from "./types/aliases";
+import type { EmbeddedCover, MusicObjectInfo } from "./types/aliases";
 import {
-	cachedResponse,
 	embeddedCoverUrlForMusicKey,
 	getMusicFileNameFromKey,
 	incrementCacheVersion,
@@ -23,7 +17,6 @@ import {
 	readJson,
 	readMusicMetadataFromR2,
 	readString,
-	safeDecodeURIComponent,
 	safeNormalizeMediaKey,
 	sanitizeFileName,
 	stripMediaPrefix,
