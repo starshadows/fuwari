@@ -927,13 +927,10 @@ async function getRateLimitActorHash(
 	scope: string,
 ): Promise<string> {
 	const salt = await ensureStatsSalt(env);
-	const userAgent = request.headers.get("user-agent") ?? "";
-	const ip =
-		request.headers.get("cf-connecting-ip") ??
-		request.headers.get("x-real-ip") ??
-		request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-		"";
-	return hashToken(`${salt}:rate:${scope}:${ip}:${userAgent}`);
+	// Only use cf-connecting-ip (set by Cloudflare, cannot be spoofed).
+	// User-Agent is NOT included — it is trivially rotated by attackers.
+	const ip = request.headers.get("cf-connecting-ip") ?? "";
+	return hashToken(`${salt}:rate:${scope}:${ip}`);
 }
 
 export async function ensureStatsSaltCached(env: Env): Promise<string> {

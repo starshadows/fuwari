@@ -51,6 +51,10 @@ type TelegramSettings = {
 };
 
 const tokenKey = "fuwari-admin-token";
+const tokenLoginTimeKey = "fuwari-admin-login-time";
+const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+let inactivityTimer: ReturnType<typeof setTimeout> | null = null;
+
 const statusOptions: FriendStatus[] = [
 	"pending",
 	"approved",
@@ -128,8 +132,13 @@ const adminFetch = async (path: string, init: RequestInit = {}) => {
 	const response = await fetch(path, { ...init, headers });
 	const data = await response.json().catch(() => ({}));
 	if (!response.ok) {
+		if (response.status === 401) {
+			logout();
+			throw new Error("登录已过期，请重新登录。");
+		}
 		throw new Error(data.error ?? "请求失败。");
 	}
+	resetInactivityTimer();
 	return data;
 };
 
@@ -143,9 +152,11 @@ const login = async () => {
 	try {
 		await loadFriends();
 		sessionStorage.setItem(tokenKey, token);
+		sessionStorage.setItem(tokenLoginTimeKey, String(Date.now()));
 		isAuthed = true;
 		setMessage("已登录。");
 		await loadMusic();
+		startInactivityTimer();
 	} catch (err) {
 		token = "";
 		isAuthed = false;
@@ -158,6 +169,11 @@ const logout = () => {
 	tokenInput = "";
 	isAuthed = false;
 	sessionStorage.removeItem(tokenKey);
+	sessionStorage.removeItem(tokenLoginTimeKey);
+	if (inactivityTimer) {
+		clearTimeout(inactivityTimer);
+		inactivityTimer = null;
+	}
 };
 
 const loadFriends = async () => {
@@ -418,10 +434,33 @@ const normalizeTrackSort = async () => {
 	}
 };
 
+const resetInactivityTimer = () => {
+	if (inactivityTimer) clearTimeout(inactivityTimer);
+	inactivityTimer = setTimeout(logout, INACTIVITY_TIMEOUT_MS);
+};
+
+const startInactivityTimer = () => {
+	document.addEventListener("mousemove", resetInactivityTimer, {
+		passive: true,
+	});
+	document.addEventListener("keydown", resetInactivityTimer, { passive: true });
+	document.addEventListener("click", resetInactivityTimer, { passive: true });
+	resetInactivityTimer();
+};
+
 onMount(async () => {
 	tokenInput = sessionStorage.getItem(tokenKey) ?? "";
 	if (tokenInput) {
-		await login();
+		const loginTimeStr = sessionStorage.getItem(tokenLoginTimeKey);
+		const loginTime = loginTimeStr ? Number(loginTimeStr) : 0;
+		if (loginTime && Date.now() - loginTime > INACTIVITY_TIMEOUT_MS) {
+			sessionStorage.removeItem(tokenKey);
+			sessionStorage.removeItem(tokenLoginTimeKey);
+			tokenInput = "";
+			setError("登录已过期，请重新登录。");
+		} else {
+			await login();
+		}
 	}
 });
 </script>

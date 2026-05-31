@@ -34,24 +34,38 @@ const fakeResult: SearchResult[] = [
 // Strip all HTML tags except <mark> (used by pagefind for highlighting).
 // Defence-in-depth: pagefind indexes only site-owned content, but { @html }
 // should never render unsanitized markup from an external data source.
+//
+// Uses DOMParser for safe HTML parsing (never executes scripts).  Falls back
+// to stripping all tags when the parser is unavailable or the input is
+// suspiciously large.
 const sanitizeExcerpt = (html: string): string => {
-	const doc = new DOMParser().parseFromString(html, "text/html");
-	const walk = (node: ChildNode): string => {
-		if (node.nodeType === Node.TEXT_NODE) {
-			return node.textContent ?? "";
-		}
-		if (node.nodeType === Node.ELEMENT_NODE) {
-			const el = node as Element;
-			if (el.tagName === "MARK") {
-				const children = Array.from(el.childNodes).map(walk).join("");
-				return `<mark>${children}</mark>`;
+	// Guard against excessively long input (DoS / unexpected payload).
+	if (!html || html.length > 10_000) return "";
+
+	try {
+		const doc = new DOMParser().parseFromString(html, "text/html");
+		const walk = (node: ChildNode): string => {
+			if (node.nodeType === Node.TEXT_NODE) {
+				return node.textContent ?? "";
 			}
-			// For all other elements, only keep their text content
-			return Array.from(el.childNodes).map(walk).join("");
-		}
-		return "";
-	};
-	return Array.from(doc.body.childNodes).map(walk).join("");
+			if (node.nodeType === Node.ELEMENT_NODE) {
+				const el = node as Element;
+				if (el.tagName === "MARK") {
+					// Recurse into <mark> so nested content is preserved,
+					// but only text content survives the recursion.
+					const children = Array.from(el.childNodes).map(walk).join("");
+					return `<mark>${children}</mark>`;
+				}
+				// For all other elements, only keep their text content.
+				return Array.from(el.childNodes).map(walk).join("");
+			}
+			return "";
+		};
+		return Array.from(doc.body.childNodes).map(walk).join("");
+	} catch {
+		// If DOMParser fails for any reason, strip all HTML as a safe fallback.
+		return html.replace(/<[^>]*>/g, "");
+	}
 };
 
 const togglePanel = () => {

@@ -1,1 +1,3 @@
-ADMIN_TOKEN=change-this-admin-token
+# WARNING: Replace this with a strong random token before deploying!
+# Generate a secure token: openssl rand -hex 32
+ADMIN_TOKEN=REPLACE_ME_WITH_A_RANDOM_64_CHAR_HEX_STRING

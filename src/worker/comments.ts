@@ -91,10 +91,11 @@ async function createCommentsSessionCookie(
 	const actorHash = await getActorHash(request, env, "comments-session-cookie");
 	const expiresAt =
 		Math.floor(Date.now() / 1000) + COMMENTS_SESSION_MAX_AGE_SECONDS;
+	const nonce = crypto.randomUUID();
 	const salt = await ensureStatsSaltCached(env);
 	const signature = await signSessionValue(
 		env,
-		`comments:${actorHash}:${expiresAt}`,
+		`comments:${actorHash}:${nonce}:${expiresAt}`,
 		salt,
 	);
 	return base64UrlEncode(
@@ -102,6 +103,7 @@ async function createCommentsSessionCookie(
 			context: "comments",
 			expiresAt,
 			actorHash,
+			nonce,
 			signature,
 		} satisfies CommentsSessionCookie),
 	);
@@ -125,6 +127,7 @@ async function hasValidCommentsSession(
 		) {
 			return false;
 		}
+		if (!cookie.nonce) return false;
 
 		const actorHash = await getActorHash(
 			request,
@@ -136,7 +139,7 @@ async function hasValidCommentsSession(
 		const salt = await ensureStatsSaltCached(env);
 		const expected = await signSessionValue(
 			env,
-			`comments:${cookie.actorHash}:${cookie.expiresAt}`,
+			`comments:${cookie.actorHash}:${cookie.nonce}:${cookie.expiresAt}`,
 			salt,
 		);
 		return timingSafeEqual(cookie.signature, expected);
@@ -192,6 +195,12 @@ export async function handleTwikooRequest(
 	// Admin (login, moderation, get) and read-only queries still work.
 	if (needsSession && !(await areCommentsEnabled(env))) {
 		return json({ error: apiError("COMMENTS_DISABLED") }, 403);
+	}
+
+	// Reject cross-site writes to prevent CSRF on comment submission.
+	if (needsSession) {
+		const csrfError = rejectCrossSiteWrite(request);
+		if (csrfError) return csrfError;
 	}
 
 	if (needsSession && !(await hasValidCommentsSession(request, env))) {

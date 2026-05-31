@@ -41,6 +41,7 @@ export type CommentsSessionCookie = {
 	context: "comments";
 	expiresAt: number;
 	actorHash: string;
+	nonce: string;
 	signature: string;
 };
 

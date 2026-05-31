@@ -164,7 +164,7 @@ async function handleEvent(
 		case "SET_PASSWORD":
 			return setPassword(env.DB, event, config, accessToken);
 		case "LOGIN":
-			return login(event, config);
+			return login(event, config, env.DB);
 		case "GET_CONFIG":
 			return getPublicConfig(config, accessToken);
 		case "GET_CONFIG_FOR_ADMIN":
@@ -599,13 +599,16 @@ async function setPassword(
 	}
 	const password = readString(event.password, 256);
 	if (!password) throw new Error('参数"password"不合法');
-	await writeConfig(db, { ...config, ADMIN_PASS: await hashToken(password) });
+	// Clear any active session when the password changes.
+	const { ADMIN_SESSION: _, ...rest } = config;
+	await writeConfig(db, { ...rest, ADMIN_PASS: await hashToken(password) });
 	return { code: RES_CODE.SUCCESS };
 }
 
 async function login(
 	event: JsonRecord,
 	config: TwikooConfig,
+	db: D1Database,
 ): Promise<JsonRecord> {
 	if (!config.ADMIN_PASS) {
 		return { code: RES_CODE.PASS_NOT_EXIST, message: "未配置管理密码" };
@@ -614,9 +617,17 @@ async function login(
 	if (config.ADMIN_PASS !== (await hashToken(password))) {
 		return { code: RES_CODE.PASS_NOT_MATCH, message: "密码错误" };
 	}
+	// Issue a random session token instead of returning the password hash.
+	// The session token expires after 24 hours.
+	const sessionToken = crypto.randomUUID().replace(/-/g, "");
+	const expiresAt = Math.floor(Date.now() / 1000) + 24 * 60 * 60;
+	await writeConfig(db, {
+		...config,
+		ADMIN_SESSION: `${sessionToken}:${expiresAt}`,
+	});
 	return {
 		code: RES_CODE.SUCCESS,
-		accessToken: config.ADMIN_PASS,
+		accessToken: sessionToken,
 	};
 }
 
@@ -659,7 +670,11 @@ function getConfigForAdmin(
 	if (!isAdmin(config, accessToken)) {
 		return { code: RES_CODE.NEED_LOGIN, message: "请先登录" };
 	}
-	const { ADMIN_PASS: _adminPass, ...safeConfig } = config;
+	const {
+		ADMIN_PASS: _adminPass,
+		ADMIN_SESSION: _adminSession,
+		...safeConfig
+	} = config;
 	return { code: RES_CODE.SUCCESS, config: safeConfig };
 }
 
@@ -1050,6 +1065,17 @@ function validate(event: JsonRecord, requiredParams: string[]): void {
 }
 
 function isAdmin(config: TwikooConfig, accessToken: string): boolean {
+	// Accept the session token issued by login(), or fall back to the
+	// legacy ADMIN_PASS-as-token for compatibility during migration.
+	if (config.ADMIN_SESSION && typeof config.ADMIN_SESSION === "string") {
+		const [token, expiryStr] = config.ADMIN_SESSION.split(":");
+		const expiry = Number(expiryStr);
+		if (token && Number.isFinite(expiry)) {
+			if (expiry < Math.floor(Date.now() / 1000)) return false;
+			return token === accessToken;
+		}
+	}
+	// Legacy: accept the stored password hash as the access token.
 	return Boolean(config.ADMIN_PASS && config.ADMIN_PASS === accessToken);
 }
 

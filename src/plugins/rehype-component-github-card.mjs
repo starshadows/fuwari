@@ -31,6 +31,16 @@ export function GithubCardComponent(properties, children) {
 	const repo = properties.repo;
 	const [repoOwner, repoName] = repo.split("/");
 
+	// Validate owner and repo names to prevent CSS injection via url().
+	const ghNameRe = /^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$/;
+	if (!ghNameRe.test(repoOwner) || !ghNameRe.test(repoName)) {
+		return h(
+			"div",
+			{ class: "hidden" },
+			'Invalid repository. ("repo" must contain valid GitHub owner and repo names)',
+		);
+	}
+
 	const avatar = h("div", {
 		class: "gc-avatar",
 		style: `background-image: url("https://github.com/${repoOwner}.png?size=80"); background-color: transparent;`,
