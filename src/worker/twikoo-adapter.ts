@@ -12,6 +12,7 @@ import sanitizeHtml from "sanitize-html";
 import {
 	clampInteger,
 	getClientIp,
+	getRequestRegion,
 	hashToken,
 	readInteger,
 	readString,
@@ -1057,11 +1058,6 @@ function getAccessToken(event: JsonRecord): string {
 	return (
 		readString(event.accessToken, 128) || crypto.randomUUID().replace(/-/g, "")
 	);
-}
-
-function getRequestRegion(request: Request): string {
-	const cf = request.cf as IncomingRequestCfProperties | undefined;
-	return `${cf?.country || ""}|0|${cf?.region || ""}|${cf?.city || ""}|`;
 }
 
 function formatIpRegion(region: string): string {

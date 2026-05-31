@@ -17,7 +17,7 @@ import {
 	updateMusicTrack,
 } from "./music";
 import type { Env } from "./types";
-import type { TelegramSettings } from "./types/aliases";
+import type { FriendDto, TelegramSettings } from "./types/aliases";
 import {
 	getAppSetting,
 	incrementCacheVersion,
@@ -305,10 +305,7 @@ async function deleteFriend(env: Env, id: number): Promise<Response> {
 	return json({ ok: true });
 }
 
-async function getFriend(
-	env: Env,
-	id: number,
-): Promise<Record<string, unknown> | null> {
+async function getFriend(env: Env, id: number): Promise<FriendDto | null> {
 	const friend = await env.DB.prepare(
 		`SELECT id, name, description, url, avatar_url AS avatarUrl, status,
             is_active AS isActive, sort_order AS sortOrder, created_at AS createdAt,
@@ -316,7 +313,7 @@ async function getFriend(
      FROM friend_links WHERE id = ?`,
 	)
 		.bind(id)
-		.first<Record<string, unknown>>();
+		.first<FriendDto>();
 	return friend ?? null;
 }
 
