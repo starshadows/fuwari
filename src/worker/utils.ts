@@ -434,6 +434,86 @@ export function isAvatarUrl(value: string): boolean {
 	return false;
 }
 
+/**
+ * Validate a friend link URL with strict rules.
+ * Rejects IP addresses, localhost, credentials in URL, and URLs with @ in authority.
+ */
+export function isValidFriendUrl(value: string): boolean {
+	if (!isHttpsUrl(value)) return false;
+	try {
+		const url = new URL(value);
+		// Reject credentials in URL
+		if (url.username || url.password) return false;
+		// Reject @ in hostname (bypass attempt)
+		if (url.hostname.includes("@")) return false;
+		// Reject raw IP addresses (IPv4 and IPv6)
+		if (/^[\d.]+$/.test(url.hostname)) {
+			const parts = url.hostname.split(".");
+			if (
+				parts.length === 4 &&
+				parts.every((p) => {
+					const n = Number(p);
+					return n >= 0 && n <= 255 && String(n) === p;
+				})
+			)
+				return false;
+		}
+		if (url.hostname.startsWith("[")) return false; // IPv6
+		// Reject localhost and common internal hostnames
+		const hostLower = url.hostname.toLowerCase();
+		if (["localhost", "127.0.0.1", "::1", "[::1]"].includes(hostLower))
+			return false;
+		if (hostLower === "0.0.0.0") return false;
+		// Require at least one dot in hostname (reject bare TLD-like names)
+		if (!hostLower.includes(".")) return false;
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Validate an avatar URL: only https:// URLs and internal /media/* paths.
+ * Blocks data:, javascript:, file:, and other dangerous schemes.
+ */
+export function isValidAvatarUrl(value: string): boolean {
+	if (value.startsWith("/media/")) {
+		return isAvatarUrl(value); // delegates to safeNormalizeMediaKey
+	}
+	if (!isHttpsUrl(value)) return false;
+	try {
+		const url = new URL(value);
+		// Reject credentials
+		if (url.username || url.password) return false;
+		// Reject @ in hostname
+		if (url.hostname.includes("@")) return false;
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Validate a display name: no HTML tags, no URLs, 1–40 chars after trim.
+ */
+export function isValidDisplayName(value: string): boolean {
+	const trimmed = value.trim();
+	if (!trimmed || trimmed.length > 40) return false;
+	if (/<[^>]*>/.test(trimmed)) return false;
+	if (/https?:\/\//.test(trimmed)) return false;
+	return true;
+}
+
+/**
+ * Validate a description: no HTML tags, 1–120 chars after trim.
+ */
+export function isValidDescription(value: string): boolean {
+	const trimmed = value.trim();
+	if (!trimmed || trimmed.length > 120) return false;
+	if (/<[^>]*>/.test(trimmed)) return false;
+	return true;
+}
+
 export function rejectCrossSiteWrite(request: Request): Response | null {
 	const origin = request.headers.get("origin");
 	if (origin && !isSameOrigin(origin, request.url)) {
@@ -880,6 +960,33 @@ export function getClientIp(request: Request): string {
 export function getRequestRegion(request: Request): string {
 	const cf = (request as Request & { cf?: Record<string, unknown> }).cf;
 	return `${cf?.country || ""}|0|${cf?.region || ""}|${cf?.city || ""}|`;
+}
+
+// ================================================================
+// Admin audit logging
+// ================================================================
+
+export async function auditAdminAction(
+	env: Env,
+	request: Request,
+	action: string,
+	resource: string,
+	resourceId: string | number = "",
+	details = "",
+): Promise<void> {
+	try {
+		const token = readBearerToken(request);
+		const actorHash = await hashToken(token || "unknown");
+		const ip = getClientIp(request);
+		await env.DB.prepare(
+			`INSERT INTO admin_audit_log (actor_hash, action, resource, resource_id, details, ip)
+	     VALUES (?, ?, ?, ?, ?, ?)`,
+		)
+			.bind(actorHash, action, resource, String(resourceId), details, ip)
+			.run();
+	} catch {
+		// Audit logging failures should never affect the main request.
+	}
 }
 
 // ================================================================

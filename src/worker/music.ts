@@ -7,6 +7,7 @@ import {
 import type { Env } from "./types";
 import type { EmbeddedCover, MusicObjectInfo } from "./types/aliases";
 import {
+	auditAdminAction,
 	embeddedCoverUrlForMusicKey,
 	getMusicFileNameFromKey,
 	incrementCacheVersion,
@@ -160,6 +161,14 @@ export async function importR2MusicObjects(
 
 	invalidateScanCache();
 	await incrementCacheVersion(env, "music");
+	void auditAdminAction(
+		env,
+		request,
+		"import",
+		"music",
+		"",
+		JSON.stringify({ count: imported.length }),
+	);
 	return json({ ok: true, imported }, 201);
 }
 
@@ -201,6 +210,14 @@ export async function createMusicTrack(
 
 	invalidateScanCache();
 	await incrementCacheVersion(env, "music");
+	void auditAdminAction(
+		env,
+		request,
+		"create",
+		"music",
+		String(result.meta.last_row_id ?? 0),
+		JSON.stringify({ title, artist, album, objectKey }),
+	);
 	return json({ ok: true, id: result.meta.last_row_id }, 201);
 }
 
@@ -273,10 +290,19 @@ export async function updateMusicTrack(
 	if (!track) return json({ error: apiError("MUSIC_NOT_FOUND") }, 404);
 	invalidateScanCache();
 	await incrementCacheVersion(env, "music");
+	void auditAdminAction(
+		env,
+		request,
+		"update",
+		"music",
+		id,
+		JSON.stringify(body),
+	);
 	return json({ track });
 }
 
 export async function deleteMusicTrack(
+	request: Request,
 	env: Env,
 	id: number,
 ): Promise<Response> {
@@ -285,6 +311,7 @@ export async function deleteMusicTrack(
 	await env.DB.prepare("DELETE FROM music_tracks WHERE id = ?").bind(id).run();
 	invalidateScanCache();
 	await incrementCacheVersion(env, "music");
+	void auditAdminAction(env, request, "delete", "music", id);
 	return json({ ok: true });
 }
 

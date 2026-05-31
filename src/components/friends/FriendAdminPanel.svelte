@@ -46,7 +46,6 @@ type CommentSettings = {
 type TelegramSettings = {
 	enabled: boolean;
 	botTokenConfigured: boolean;
-	botTokenHint: string;
 	chatId: string;
 	threadId: string;
 };
@@ -70,7 +69,6 @@ let musicObjects: MusicObject[] = [];
 let unimportedMusicObjects: MusicObject[] = [];
 let message = "";
 let error = "";
-let avatarFileInput: HTMLInputElement;
 let isScanningMusic = false;
 let isImportingMusic = false;
 let isSavingComments = false;
@@ -84,7 +82,6 @@ let commentSettings: CommentSettings = {
 let telegramSettings: TelegramSettings = {
 	enabled: false,
 	botTokenConfigured: false,
-	botTokenHint: "",
 	chatId: "",
 	threadId: "",
 };
@@ -201,7 +198,6 @@ const loadTelegramSettings = async () => {
 	telegramSettings = {
 		enabled: Boolean(data.enabled),
 		botTokenConfigured: Boolean(data.botTokenConfigured),
-		botTokenHint: data.botTokenHint ?? "",
 		chatId: data.chatId ?? "",
 		threadId: data.threadId ?? "",
 	};
@@ -223,7 +219,6 @@ const saveTelegramSettings = async () => {
 		telegramSettings = {
 			enabled: Boolean(data.enabled),
 			botTokenConfigured: Boolean(data.botTokenConfigured),
-			botTokenHint: data.botTokenHint ?? "",
 			chatId: data.chatId ?? "",
 			threadId: data.threadId ?? "",
 		};
@@ -347,27 +342,6 @@ const deleteFriend = async (friend: Friend) => {
 		setMessage("友链已删除。");
 	} catch (err) {
 		setError(err instanceof Error ? err.message : "删除失败。");
-	}
-};
-
-const uploadAvatar = async () => {
-	const file = avatarFileInput?.files?.[0];
-	if (!file) {
-		setError("请选择头像文件。");
-		return;
-	}
-
-	const formData = new FormData();
-	formData.append("file", file);
-
-	try {
-		const data = await adminFetch("/api/admin/avatar", {
-			method: "POST",
-			body: formData,
-		});
-		setMessage(`头像已上传：${data.avatarUrl}`);
-	} catch (err) {
-		setError(err instanceof Error ? err.message : "头像上传失败。");
 	}
 };
 
@@ -529,21 +503,7 @@ onMount(async () => {
                 {/each}
             </div>
 
-            <div class="mb-4 rounded-xl bg-[var(--btn-plain-bg-hover)] p-4">
-                <div class="mb-3 font-bold text-75">上传头像到 R2</div>
-                <div class="flex flex-col gap-3 md:flex-row">
-                    <input
-                        bind:this={avatarFileInput}
-                        type="file"
-                        accept="image/avif,image/gif,image/jpeg,image/png,image/webp"
-                        class="min-h-11 flex-1 rounded-xl bg-[var(--card-bg)] px-4 py-2 text-sm text-75"
-                    />
-                    <button class="btn-regular h-11 rounded-xl px-5 font-bold" on:click={uploadAvatar}>
-                        上传
-                    </button>
-                </div>
-            </div>
-
+            
             <div class="flex flex-col gap-3">
                 {#each friends as friend}
                     <div class="rounded-xl bg-[var(--btn-plain-bg-hover)] p-4">
@@ -730,7 +690,7 @@ onMount(async () => {
                     <input
                         bind:value={telegramTokenInput}
                         type="password"
-                        placeholder={telegramSettings.botTokenConfigured ? `Bot Token 已配置：${telegramSettings.botTokenHint}` : "Bot Token"}
+                        placeholder={telegramSettings.botTokenConfigured ? "Bot Token 已配置" : "Bot Token"}
                         class="admin-input md:col-span-2"
                     />
                     <input bind:value={telegramSettings.chatId} placeholder="Chat ID" class="admin-input" />

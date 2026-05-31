@@ -35,20 +35,12 @@ export const AUDIO_EXTENSIONS: Set<string> = new Set([
 ]);
 
 // ----------------------------------------------------------------
-// Friend / media constants
+// Friend constants
 // ----------------------------------------------------------------
 export const FRIEND_STATUSES: Set<string> = new Set([
 	"pending",
 	"approved",
 	"rejected",
-]);
-export const MAX_AVATAR_SIZE: number = 3 * 1024 * 1024;
-export const ALLOWED_AVATAR_MIME_TYPES: Set<string> = new Set([
-	"image/avif",
-	"image/gif",
-	"image/jpeg",
-	"image/png",
-	"image/webp",
 ]);
 
 // ----------------------------------------------------------------
@@ -122,9 +114,14 @@ export const API_ERROR = {
 	FRIEND_ID_INVALID: "友链 ID 不正确。",
 	FRIEND_NOT_FOUND: "友链不存在。",
 	FRIEND_FIELDS_MISSING: "请填写完整的名称、简介、链接和头像。",
+	FRIEND_NAME_INVALID: "名称不能包含 HTML 或链接，且长度为 1-40 个字符。",
+	FRIEND_DESC_INVALID: "简介不能包含 HTML，且长度为 1-120 个字符。",
 	FRIEND_URL_NOT_HTTPS: "链接必须是 https 地址。",
+	FRIEND_URL_INVALID: "链接格式不正确，不能是 IP 地址或本地地址。",
 	FRIEND_AVATAR_INVALID: "头像需要使用公网 https 地址或站内头像地址。",
 	FRIEND_DUPLICATE: "这个站点已经提交过申请或已经在友链中。",
+	FRIEND_DOMAIN_DUPLICATE: "该域名的站点已经提交过申请或已经在友链中。",
+	FRIEND_PENDING_LIMIT: "待审核申请过多，请稍后再试。",
 	MUSIC_FIELDS_MISSING: "请填写歌曲名称和 R2 音频 Key。",
 	MUSIC_ID_INVALID: "歌曲 ID 不正确。",
 	MUSIC_NOT_FOUND: "歌曲不存在。",
@@ -132,9 +129,6 @@ export const API_ERROR = {
 	MUSIC_COVER_R2: "封面地址需要是公网图片或站内头像地址。",
 	MUSIC_OBJECT_KEY_INVALID: "R2 音频 Key 不正确。",
 	MUSIC_IMPORT_EMPTY: "没有可导入的新音乐。",
-	AVATAR_FILE_MISSING: "请选择头像文件。",
-	AVATAR_TYPE_INVALID: "头像必须是 JPG、PNG、WebP、AVIF 或 GIF 图片。",
-	AVATAR_SIZE_TOO_LARGE: "头像文件不能超过 3 MB。",
 	TELEGRAM_INCOMPLETE: "Telegram 通知尚未完整配置。",
 	TELEGRAM_FAILED: "Telegram API 返回错误。",
 	TWIKOO_SESSION_REQUIRED: "请先完成评论区人机验证。",

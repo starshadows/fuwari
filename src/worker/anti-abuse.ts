@@ -92,6 +92,12 @@ export async function verifyHumanProof(
 		return json({ error: apiError("HUMAN_PROOF_MISSING") }, 400);
 	}
 
+	// Validate base64 format before attempting decode.
+	if (payload.length < 50 || !/^[A-Za-z0-9+/=]+$/.test(payload)) {
+		await recordHumanProofFailure(request, env, context);
+		return json({ error: apiError("HUMAN_PROOF_FAILED") }, 400);
+	}
+
 	const ok = await verifyAltchaPayload(env, payload, context);
 	if (!ok) {
 		await recordHumanProofFailure(request, env, context);

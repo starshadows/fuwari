@@ -1,10 +1,8 @@
 import { areCommentsEnabled } from "./comments";
 import {
-	ALLOWED_AVATAR_MIME_TYPES,
 	apiError,
 	COMMENTS_ENABLED_SETTING_KEY,
 	FRIEND_STATUSES,
-	MAX_AVATAR_SIZE,
 	TELEGRAM_SETTINGS_KEY,
 } from "./constants";
 import { sendTelegramMessage, writeTelegramSettings } from "./friends";
@@ -19,20 +17,18 @@ import {
 import type { Env } from "./types";
 import type { TelegramSettings } from "./types/aliases";
 import {
+	auditAdminAction,
 	getAppSetting,
 	incrementCacheVersion,
-	isAvatarUrl,
-	isHttpsUrl,
+	isValidAvatarUrl,
+	isValidFriendUrl,
 	json,
-	maskSecret,
 	readBoolean,
 	readInteger,
 	readJson,
 	readString,
 	requireAdmin,
-	sanitizeFileName,
 	setAppSetting,
-	stripMediaPrefix,
 } from "./utils";
 
 // ================================================================
@@ -48,14 +44,6 @@ export async function handleAdminApi(
 	if (auth) return auth;
 
 	const segments = requestUrl.pathname.split("/").filter(Boolean);
-
-	// Avatar upload
-	if (
-		requestUrl.pathname === "/api/admin/avatar" &&
-		request.method === "POST"
-	) {
-		return uploadAvatar(request, env);
-	}
 
 	// Settings
 	if (segments[2] === "settings") {
@@ -80,7 +68,8 @@ export async function handleAdminApi(
 		if (request.method === "GET" && !id)
 			return listAdminFriends(env, requestUrl);
 		if (request.method === "PATCH" && id) return updateFriend(request, env, id);
-		if (request.method === "DELETE" && id) return deleteFriend(env, id);
+		if (request.method === "DELETE" && id)
+			return deleteFriend(request, env, id);
 	}
 
 	// Music
@@ -95,7 +84,8 @@ export async function handleAdminApi(
 		if (request.method === "POST" && !id) return createMusicTrack(request, env);
 		if (request.method === "PATCH" && id)
 			return updateMusicTrack(request, env, id);
-		if (request.method === "DELETE" && id) return deleteMusicTrack(env, id);
+		if (request.method === "DELETE" && id)
+			return deleteMusicTrack(request, env, id);
 	}
 
 	return json({ error: apiError("NOT_FOUND") }, 404);
@@ -121,6 +111,14 @@ async function updateAdminCommentsSettings(
 		enabled ? "true" : "false",
 	);
 	await incrementCacheVersion(env, "commentsConfig");
+	void auditAdminAction(
+		env,
+		request,
+		"toggle",
+		"comment",
+		"",
+		JSON.stringify({ enabled }),
+	);
 	return json({ ok: true, enabled });
 }
 
@@ -133,7 +131,6 @@ async function getAdminTelegramSettings(env: Env): Promise<Response> {
 	return json({
 		enabled: settings.enabled,
 		botTokenConfigured: Boolean(settings.botToken),
-		botTokenHint: maskSecret(settings.botToken),
 		chatId: settings.chatId,
 		threadId: settings.threadId,
 	});
@@ -156,11 +153,18 @@ async function updateAdminTelegramSettings(
 	};
 
 	await writeTelegramSettings(env, settings);
+	void auditAdminAction(
+		env,
+		request,
+		"update",
+		"telegram",
+		"",
+		JSON.stringify({ enabled: settings.enabled }),
+	);
 	return json({
 		ok: true,
 		enabled: settings.enabled,
 		botTokenConfigured: Boolean(settings.botToken),
-		botTokenHint: maskSecret(settings.botToken),
 		chatId: settings.chatId,
 		threadId: settings.threadId,
 	});
@@ -254,14 +258,14 @@ async function updateFriend(
 	}
 	if (typeof body.url === "string") {
 		const v = readString(body.url, 400);
-		if (!isHttpsUrl(v))
-			return json({ error: apiError("FRIEND_URL_NOT_HTTPS") }, 400);
+		if (!isValidFriendUrl(v))
+			return json({ error: apiError("FRIEND_URL_INVALID") }, 400);
 		fields.push("url = ?");
 		values.push(v);
 	}
 	if (typeof body.avatarUrl === "string") {
 		const v = readString(body.avatarUrl, 600);
-		if (!isAvatarUrl(v))
+		if (!isValidAvatarUrl(v))
 			return json({ error: apiError("FRIEND_AVATAR_INVALID") }, 400);
 		fields.push("avatar_url = ?");
 		values.push(v);
@@ -291,6 +295,14 @@ async function updateFriend(
 		)
 			.bind(...values, id)
 			.run();
+		void auditAdminAction(
+			env,
+			request,
+			"update",
+			"friend",
+			id,
+			JSON.stringify(body),
+		);
 	}
 
 	const friend = await getFriend(env, id);
@@ -298,10 +310,15 @@ async function updateFriend(
 	return json({ friend });
 }
 
-async function deleteFriend(env: Env, id: number): Promise<Response> {
+async function deleteFriend(
+	request: Request,
+	env: Env,
+	id: number,
+): Promise<Response> {
 	if (!Number.isInteger(id))
 		return json({ error: apiError("FRIEND_ID_INVALID") }, 400);
 	await env.DB.prepare("DELETE FROM friend_links WHERE id = ?").bind(id).run();
+	void auditAdminAction(env, request, "delete", "friend", id);
 	return json({ ok: true });
 }
 
@@ -318,34 +335,4 @@ async function getFriend(
 		.bind(id)
 		.first<Record<string, unknown>>();
 	return friend ?? null;
-}
-
-// ================================================================
-// Avatar upload
-// ================================================================
-
-async function uploadAvatar(request: Request, env: Env): Promise<Response> {
-	const form = await request.formData();
-	const file = form.get("file");
-
-	if (!(file instanceof File)) {
-		return json({ error: apiError("AVATAR_FILE_MISSING") }, 400);
-	}
-
-	if (!ALLOWED_AVATAR_MIME_TYPES.has(file.type)) {
-		return json({ error: apiError("AVATAR_TYPE_INVALID") }, 400);
-	}
-
-	if (file.size > MAX_AVATAR_SIZE) {
-		return json({ error: apiError("AVATAR_SIZE_TOO_LARGE") }, 400);
-	}
-
-	const key = `avatars/${crypto.randomUUID()}-${sanitizeFileName(file.name)}`;
-	await env.MEDIA_BUCKET.put(key, await file.arrayBuffer(), {
-		httpMetadata: { contentType: file.type },
-	});
-
-	return json({
-		avatarUrl: `/media/avatars/${stripMediaPrefix(key, "avatars")}`,
-	});
 }

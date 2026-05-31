@@ -5,8 +5,10 @@ import type { TelegramSettings } from "./types/aliases";
 import {
 	enforceRateLimit,
 	getAppSetting,
-	isAvatarUrl,
-	isHttpsUrl,
+	isValidAvatarUrl,
+	isValidDescription,
+	isValidDisplayName,
+	isValidFriendUrl,
 	json,
 	readHumanProof,
 	readJson,
@@ -60,12 +62,50 @@ export async function submitFriendLink(
 		return json({ error: apiError("FRIEND_FIELDS_MISSING") }, 400);
 	}
 
-	if (!isHttpsUrl(linkUrl)) {
-		return json({ error: apiError("FRIEND_URL_NOT_HTTPS") }, 400);
+	if (!isValidDisplayName(name)) {
+		return json({ error: apiError("FRIEND_NAME_INVALID") }, 400);
 	}
 
-	if (!isAvatarUrl(avatarUrl)) {
+	if (!isValidDescription(description)) {
+		return json({ error: apiError("FRIEND_DESC_INVALID") }, 400);
+	}
+
+	if (!isValidFriendUrl(linkUrl)) {
+		return json({ error: apiError("FRIEND_URL_INVALID") }, 400);
+	}
+
+	if (!isValidAvatarUrl(avatarUrl)) {
 		return json({ error: apiError("FRIEND_AVATAR_INVALID") }, 400);
+	}
+
+	// Domain-level dedup: prevent the same domain from submitting again.
+	let domain = "";
+	try {
+		domain = new URL(linkUrl).hostname.toLowerCase();
+	} catch {
+		/* validated above */
+	}
+	if (domain) {
+		const domainDup = await env.DB.prepare(
+			`SELECT id FROM friend_links
+	     WHERE LOWER(url) LIKE ? AND status IN ('pending', 'approved')
+	     LIMIT 1`,
+		)
+			.bind(`%://${domain}%`)
+			.first<{ id: number }>();
+		if (domainDup) {
+			return json({ error: apiError("FRIEND_DOMAIN_DUPLICATE") }, 409);
+		}
+	}
+
+	// Pending flood protection: limit pending submissions per actor.
+	const pendingCount = await env.DB.prepare(
+		`SELECT COUNT(*) AS count FROM friend_links
+	     WHERE status = 'pending'
+	     AND created_at > datetime('now', '-1 hour')`,
+	).first<{ count: number }>();
+	if ((pendingCount?.count ?? 0) > 10) {
+		return json({ error: apiError("FRIEND_PENDING_LIMIT") }, 429);
 	}
 
 	const duplicate = await env.DB.prepare(
@@ -210,10 +250,15 @@ export async function sendTelegramMessage(
 		}
 		return { ok: true };
 	} catch (error) {
+		// Strip bot token from error messages so the token never
+		// appears in logs or API responses.
+		const message = error instanceof Error ? error.message : "";
+		const sanitized = settings.botToken
+			? message.replaceAll(settings.botToken, "***")
+			: message;
 		return {
 			ok: false,
-			error:
-				error instanceof Error ? error.message : "Telegram request failed.",
+			error: sanitized || "Telegram request failed.",
 		};
 	}
 }
