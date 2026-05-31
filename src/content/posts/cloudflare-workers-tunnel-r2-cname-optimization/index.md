@@ -2,7 +2,7 @@
 title: Cloudflare Workers、Tunnel 和 R2 优选：用 SaaS + CNAME 给入口换线路
 published: 2026-05-22
 description: 记录一次用 Cloudflare for SaaS、自定义主机名和 CNAME 优选入口的过程，分别覆盖 Tunnel、Workers/Pages 和 R2 三种场景。
-image: 'cover.png'
+image: 'cover.webp'
 tags: [Cloudflare, Workers, Tunnel, R2, CNAME, 优选]
 category: 折腾记录
 draft: false

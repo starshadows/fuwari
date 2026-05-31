@@ -22,8 +22,8 @@ pnpm d1:migrate:local # Run D1 migrations for local dev
 pnpm d1:migrate:remote
 
 # Code quality
-pnpm format           # Biome format (tab indent, double quotes)
-pnpm lint             # Biome lint + autofix
+pnpm format           # Biome format + autofix (writes files)
+pnpm lint             # Biome CI check (read-only)
 pnpm type-check       # tsc --noEmit
 pnpm test             # vitest run (unit tests)
 pnpm test:watch       # vitest in watch mode

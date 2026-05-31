@@ -11,6 +11,7 @@ import {
 	getPostContentDir,
 	getPostSlugById,
 	getPostUrlBySlug,
+	url,
 } from "@utils/url-utils";
 import { Icon } from "astro-icon/components";
 import { licenseConfig } from "@/config";
@@ -30,6 +31,33 @@ export async function getStaticPaths() {
 
 const { entry } = Astro.props;
 const { Content, headings, remarkPluginFrontmatter } = await render(entry);
+const postImages = import.meta.glob<ImageMetadata>(
+	"../../content/posts/**/*.{avif,gif,jpeg,jpg,png,webp}",
+	{
+		import: "default",
+	},
+);
+const siteUrl = Astro.site ?? new URL("https://blog.starshadow.cc/");
+
+async function resolveJsonLdImage(): Promise<string | undefined> {
+	const image = entry.data.image?.trim();
+	if (!image) return undefined;
+	if (image.startsWith("http://") || image.startsWith("https://")) return image;
+	if (image.startsWith("/")) return new URL(url(image), siteUrl).toString();
+
+	const imagePath = path
+		.normalize(
+			path.join("../../content/posts/", getPostContentDir(entry), image),
+		)
+		.replace(/\\/g, "/");
+	const loadImage = postImages[imagePath];
+	if (!loadImage) return undefined;
+
+	const metadata = await loadImage();
+	return new URL(metadata.src, siteUrl).toString();
+}
+
+const jsonLdImage = await resolveJsonLdImage();
 
 const jsonLd = {
 	"@context": "https://schema.org",
@@ -46,7 +74,7 @@ const jsonLd = {
 	inLanguage: entry.data.lang
 		? entry.data.lang.replace("_", "-")
 		: siteConfig.lang.replace("_", "-"),
-	// TODO include cover image here
+	image: jsonLdImage ? [jsonLdImage] : undefined,
 };
 ---
 <MainGridLayout banner={entry.data.image} title={entry.data.title} description={entry.data.description} lang={entry.data.lang} setOGTypeArticle={true} headings={headings}>

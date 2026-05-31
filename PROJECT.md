@@ -87,8 +87,8 @@ pnpm check           # Astro 类型检查
 pnpm type-check      # tsc 类型检查
 pnpm test            # 运行所有测试
 pnpm test:watch      # 监听模式测试
-pnpm format          # Biome 格式化
-pnpm lint            # Biome lint + 自动修复
+pnpm format          # Biome 格式化 + 可自动修复的 lint
+pnpm lint            # Biome CI 检查（不改文件）
 pnpm new-post <name> # 创建新文章
 pnpm worker:dev      # Worker 本地开发
 pnpm worker:deploy   # 构建并部署 Worker
@@ -97,7 +97,9 @@ pnpm worker:deploy   # 构建并部署 Worker
 ### 开始写文章前必须执行
 
 ```bash
-corepack pnpm check    # 检查类型错误
+corepack pnpm lint     # 检查格式和 lint
+corepack pnpm type-check # TypeScript 类型检查
+corepack pnpm check    # Astro 检查
 corepack pnpm test     # 确保测试通过
 corepack pnpm build    # 确保能正常构建
 ```
@@ -478,6 +480,8 @@ licenseConfig           // 文章版权声明
 3. 发帖时携带 session cookie，Worker 验证通过后写入 D1
 4. 博主评论自动标记（通过邮箱匹配）
 
+评论总开关只拦截 `COMMENT_SUBMIT` 等发帖写入动作。Twikoo 的只读事件和管理端事件仍会交给 Twikoo adapter 处理，避免关闭前台评论时把后台管理、登录和历史评论读取一并锁死。
+
 **安全措施：**
 - 发帖需要 ALTCHA + session cookie
 - 评论内容用 sanitize-html 白名单净化（只允许 b/i/em/strong/a/code/pre/blockquote/br/p/ul/ol/li）
@@ -614,7 +618,7 @@ pnpm worker:deploy
 ### wrangler.jsonc 配置要点
 
 - `keep_vars: true` 保留 Dashboard 手动设置的环境变量
-- D1/R2 绑定不写资源名或 UUID，让 Dashboard 管理
+- D1/R2 绑定当前采用 Dashboard 管理资源名和 UUID；新环境部署时必须在 Cloudflare 控制台把 `DB`、`MEDIA_BUCKET` 绑定到实际资源，再执行 D1 migration
 - `run_worker_first: [/api/*, /media/*]` 让 API 和媒体路径优先走 Worker
 
 ---
@@ -624,16 +628,19 @@ pnpm worker:deploy
 ### 提交前检查清单
 
 ```bash
-pnpm check    # Astro 类型检查（通过不代表能构建）
-pnpm test     # 所有测试
-pnpm build    # 生产构建
+pnpm lint        # Biome CI 检查（不改文件）
+pnpm type-check  # TypeScript 类型检查
+pnpm check       # Astro 检查（通过不代表能构建）
+pnpm test        # 所有测试
+pnpm build       # 生产构建
 ```
 
 ### 代码规范
 
 - Biome 格式化：tab 缩进、双引号
 - Biome lint：推荐的规则 + 额外 style 规则
-- 格式化命令：`pnpm format`（覆盖全项目）
+- 格式化命令：`pnpm format`（会写入可自动修复的格式和 lint 变更）
+- 检查命令：`pnpm lint`（CI 模式，不写文件）
 - Worker 代码不要硬编码中文错误消息——使用 `apiError()` 从 `constants.ts` 获取
 
 ### 新增 D1 迁移
@@ -660,6 +667,18 @@ pnpm build    # 生产构建
 ---
 
 ## 11. 已完成的改进
+
+### 2026-05 第三轮（质量门禁 + 性能）
+
+- 修复 `pnpm type-check` 失败：`anti-abuse.ts` 补齐 Env 类型导入，测试中的 JSON 响应做显式收窄
+- 修复后台评论设置接口返回值：`GET /api/admin/settings/comments` 现在返回布尔值 `enabled`
+- 调整 Twikoo 评论开关：关闭评论时只阻止发帖，保留只读和后台管理事件
+- 新增评论开关与 Twikoo gate 的集成测试，测试总数提升到 63 个
+- 收敛 Biome 配置：排除 vendor/minified/map 文件，固定 CRLF 行尾，`lint` 改为只检查不写文件
+- CI 改为使用 `.node-version`，并在构建流水线中执行 type-check、test、Astro check 和 build
+- 将 4 张文章封面由 PNG 转为 WebP，源图体积从约 31.1 MB 降到约 0.65 MB
+- 搜索摘要渲染仅允许 Pagefind 的 `<mark>` 高亮，摇摆挂件确认弹窗改为 DOM API 构建
+- 文章 JSON-LD 增加封面图片 `image` 字段
 
 ### 2026-05 第二轮（安全 + 重构）
 
@@ -701,6 +720,6 @@ pnpm build    # 生产构建
 
 ---
 
-> 文档最后更新：2026-05-30
+> 文档最后更新：2026-05-31
 > 项目仓库：https://github.com/starshadows/fuwari
 > 博客地址：https://blog.starshadow.cc/

@@ -2,7 +2,7 @@
 title: 用 Cloud Mail + Resend 搭建域名邮箱：收信、发信和 Gmail 代发
 published: 2026-05-13
 description: 使用 Cloud Mail、Resend 和 Gmail 搭建自己的域名邮箱，实现收信、发信和 Gmail 代发。
-image: 'cover.png'
+image: 'cover.webp'
 tags: [域名邮箱, Cloudflare, Resend, Gmail]
 category: 折腾记录
 draft: false

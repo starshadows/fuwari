@@ -2,7 +2,7 @@
 title: 用 Cloudflare SaaS + CNAME 优选普通网站：单域名和双域名方案
 published: 2026-05-20
 description: 记录一次用 Cloudflare SaaS、自定义主机名和 CNAME 做普通网站优选的过程，包含单域名和双域名两种做法，以及默认回退源触发 1000、自定义源服务器触发 421 的排查。
-image: 'cover.png'
+image: 'cover.webp'
 tags: [Cloudflare, SaaS, CNAME, 优选 IP, Caddy, 双域名]
 category: 折腾记录
 draft: false

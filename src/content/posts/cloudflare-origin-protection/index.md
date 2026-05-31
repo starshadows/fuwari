@@ -2,7 +2,7 @@
 title: 用 Cloudflare、Caddy 和 UFW 保护源站：只接受可信回源
 published: 2026-05-16
 description: 记录一次在 AWS EC2 + Docker + Caddy 上做源站保护的思路：Cloudflare IP 白名单、ufw-docker、Full Strict、Host 校验和 Authenticated Origin Pulls。
-image: 'cover.png'
+image: 'cover.webp'
 tags: [源站保护, Cloudflare, Caddy, Docker, UFW]
 category: 折腾记录
 draft: false
