@@ -13,8 +13,11 @@ import {
 	getRateLimitCount,
 	incrementRateLimitCounter,
 	json,
+	normalizeHumanProofContext,
 	readString,
 } from "./utils";
+
+const VALID_HUMAN_PROOF_CONTEXTS = new Set<string>(["friends", "comments"]);
 
 // ================================================================
 // Generate ALTCHA challenge
@@ -33,7 +36,10 @@ export async function getAntiAbuseChallenge(
 	});
 	if (rl) return rl;
 
-	const context = normalizeContext(requestUrl.searchParams.get("context"));
+	const context = normalizeHumanProofContext(
+		requestUrl.searchParams.get("context"),
+		VALID_HUMAN_PROOF_CONTEXTS,
+	);
 	const salt = await ensureStatsSaltCached(env);
 	const challenge = await createChallenge({
 		algorithm: "SHA-256",
@@ -45,14 +51,6 @@ export async function getAntiAbuseChallenge(
 	});
 
 	return json({ mode: "altcha", challenge });
-}
-
-function normalizeContext(value: string | null): HumanProofContext {
-	const ctx = value?.trim() ?? "";
-	const valid = new Set<HumanProofContext>(["friends", "comments"]);
-	return valid.has(ctx as HumanProofContext)
-		? (ctx as HumanProofContext)
-		: "friends";
 }
 
 // ================================================================

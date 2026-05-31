@@ -245,7 +245,3 @@ function mediaHeaders(object: R2Object, kind: string): Headers {
 
 	return headers;
 }
-
-// ================================================================
-// Music metadata reading (ID3 parsing)
-// ================================================================

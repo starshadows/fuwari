@@ -7,7 +7,7 @@ import {
 	RATE_LIMITS,
 } from "./constants";
 import { readTelegramSettings, sendTelegramMessage } from "./friends";
-import twikooWorker from "./twikoo-adapter.ts";
+import twikooWorker from "./twikoo-adapter";
 import type { Env } from "./types";
 import type { CommentsSessionCookie } from "./types/aliases";
 import {
@@ -17,6 +17,7 @@ import {
 	ensureStatsSaltCached,
 	getAppSetting,
 	getClientIp,
+	hashToken,
 	json,
 	readCookie,
 	readHumanProof,
@@ -153,10 +154,11 @@ async function getActorHash(
 	env: Env,
 	scope: string,
 ): Promise<string> {
-	const { hashToken: h } = await import("./utils");
 	const salt = await ensureStatsSaltCached(env);
 	const userAgent = request.headers.get("user-agent") ?? "";
-	return h(`${salt}:rate:${scope}:${getClientIp(request)}:${userAgent}`);
+	return hashToken(
+		`${salt}:rate:${scope}:${getClientIp(request)}:${userAgent}`,
+	);
 }
 
 // ================================================================

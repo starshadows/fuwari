@@ -2,6 +2,57 @@
 
 export type JsonRecord = Record<string, unknown>;
 
+export type FriendDto = {
+	id: number;
+	name: string;
+	description: string;
+	url: string;
+	avatarUrl: string;
+	status: string;
+	isActive: number;
+	sortOrder: number;
+	createdAt: string;
+	updatedAt: string;
+};
+
+export type MusicTrackDto = {
+	id: number;
+	title: string;
+	artist: string;
+	album: string;
+	objectKey: string;
+	coverUrl: string;
+	isActive: number;
+	sortOrder: number;
+	createdAt: string;
+	updatedAt: string;
+};
+
+export type StatsSummaryDto = {
+	site: {
+		totalPv: number;
+		todayPv: number;
+		todayUv: number;
+		yesterdayPv: number;
+		monthPv: number;
+		totalUv: number;
+		realtimeVisitors: number;
+	};
+	page: {
+		path: string;
+		totalPv: number;
+		todayPv: number;
+		todayUv: number;
+		totalUv: number;
+	};
+	trend: Array<{
+		day: string;
+		pv: number;
+		uv: number;
+	}>;
+	windowSeconds: number;
+};
+
 export type RangeResult =
 	| { ok: true; start: number; end: number; length: number }
 	| { ok: false };

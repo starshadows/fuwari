@@ -5,7 +5,11 @@ import {
 	MUSIC_PREFIX,
 } from "./constants";
 import type { Env } from "./types";
-import type { EmbeddedCover, MusicObjectInfo } from "./types/aliases";
+import type {
+	EmbeddedCover,
+	MusicObjectInfo,
+	MusicTrackDto,
+} from "./types/aliases";
 import {
 	auditAdminAction,
 	embeddedCoverUrlForMusicKey,
@@ -285,7 +289,7 @@ export async function updateMusicTrack(
      FROM music_tracks WHERE id = ?`,
 	)
 		.bind(id)
-		.first<Record<string, unknown>>();
+		.first<MusicTrackDto>();
 
 	if (!track) return json({ error: apiError("MUSIC_NOT_FOUND") }, 404);
 	invalidateScanCache();

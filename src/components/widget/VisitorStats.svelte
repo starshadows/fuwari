@@ -24,6 +24,7 @@ type StatsSummary = {
 const VISITOR_ID_KEY = "starshadow-visitor-id";
 const MIN_HEARTBEAT_DELAY_MS = 60 * 1000;
 const MAX_HEARTBEAT_DELAY_MS = 120 * 1000;
+const SUMMARY_REFRESH_AFTER_BEACON_MS = 200;
 
 let stats: StatsSummary | null = null;
 let isLoading = true;
@@ -101,14 +102,14 @@ const statsPayload = (path: string) =>
 const sendStatsPost = (
 	endpoint: "visit" | "heartbeat",
 	path = currentPath(),
-) => {
+): boolean => {
 	const url = `/api/stats/${endpoint}`;
 	const body = statsPayload(path);
 
 	try {
 		if (navigator.sendBeacon) {
 			const blob = new Blob([body], { type: "application/json" });
-			if (navigator.sendBeacon(url, blob)) return;
+			if (navigator.sendBeacon(url, blob)) return true;
 		}
 	} catch {
 		// Ignore write failures; stats must never block navigation or rendering.
@@ -122,6 +123,7 @@ const sendStatsPost = (
 	}).catch(() => {
 		// Ignore write failures; the next visit or heartbeat can recover.
 	});
+	return false;
 };
 
 const loadStatsSummary = async (path = currentPath()) => {
@@ -144,11 +146,17 @@ const recordVisit = () => {
 
 	lastTrackedPath = path;
 	lastTrackedAt = now;
-	sendStatsPost("visit", path);
-	void loadStatsSummary(path).catch((err) => {
-		error = err instanceof Error ? err.message : "统计加载失败。";
-		isLoading = false;
-	});
+	const usedBeacon = sendStatsPost("visit", path);
+	const refresh = () =>
+		void loadStatsSummary(path).catch((err) => {
+			error = err instanceof Error ? err.message : "统计加载失败。";
+			isLoading = false;
+		});
+	if (usedBeacon) {
+		window.setTimeout(refresh, SUMMARY_REFRESH_AFTER_BEACON_MS);
+	} else {
+		refresh();
+	}
 };
 
 const clearHeartbeat = () => {
@@ -168,10 +176,16 @@ const scheduleHeartbeat = () => {
 };
 
 const sendHeartbeat = () => {
-	sendStatsPost("heartbeat");
-	void loadStatsSummary().catch(() => {
-		// Keep the last visible stats; the next page view or heartbeat can recover.
-	});
+	const usedBeacon = sendStatsPost("heartbeat");
+	const refresh = () =>
+		void loadStatsSummary().catch(() => {
+			// Keep the last visible stats; the next page view or heartbeat can recover.
+		});
+	if (usedBeacon) {
+		window.setTimeout(refresh, SUMMARY_REFRESH_AFTER_BEACON_MS);
+	} else {
+		refresh();
+	}
 };
 
 const handleVisibilityChange = () => {

@@ -4,6 +4,7 @@ import {
 	STATS_TIMEZONE_OFFSET_MINUTES,
 } from "./constants";
 import type { Env } from "./types";
+import type { StatsSummaryDto } from "./types/aliases";
 import {
 	enforceRateLimit,
 	ensureStatsSaltCached,
@@ -240,7 +241,7 @@ export async function getStatsSummaryResponse(
 async function getStatsSummary(
 	env: Env,
 	path: string,
-): Promise<Record<string, unknown>> {
+): Promise<StatsSummaryDto> {
 	const day = getStatsDay();
 	const yesterday = getStatsDay(Date.now() - 24 * 60 * 60 * 1000);
 	const monthStart = `${day.slice(0, 7)}-01`;
