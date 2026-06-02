@@ -1,11 +1,13 @@
-import { apiError } from "./constants";
+import { apiError, MAX_JSON_BODY_BYTES, RATE_LIMITS } from "./constants";
 import type { Env } from "./types";
 import {
+	enforceRateLimit,
 	ensureStatsSaltCached,
 	json,
 	readBearerToken,
 	readJson,
 	readString,
+	rejectOversizedBody,
 	timingSafeEqual,
 } from "./utils";
 
@@ -278,6 +280,13 @@ export async function initializeDatabase(
 		);
 	}
 
+	const rateLimit = await enforceRateLimit(
+		request,
+		env,
+		RATE_LIMITS.setupInitDb,
+	);
+	if (rateLimit) return rateLimit;
+
 	const tokenResult = await readSetupToken(request, requestUrl);
 	if (tokenResult instanceof Response) return tokenResult;
 	if (!tokenResult) {
@@ -367,6 +376,9 @@ async function readSetupToken(
 	if (bearerToken) return bearerToken;
 
 	if (request.method === "POST") {
+		const bodyError = rejectOversizedBody(request, MAX_JSON_BODY_BYTES);
+		if (bodyError) return bodyError;
+
 		const body = await readJson(request);
 		return (
 			readString(body.token, 512) ||

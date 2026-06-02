@@ -252,6 +252,7 @@ onDestroy(() => {
 						src={activeCoverUrl}
 						alt={activeTrack.title}
 						class="h-full w-full object-cover"
+							referrerpolicy="no-referrer"
 						on:error={() => hideCover(activeCoverUrl)}
 					/>
 				{:else}
@@ -337,6 +338,7 @@ onDestroy(() => {
 									src={track.coverUrl}
 									alt={track.title}
 									class="h-full w-full object-cover"
+							referrerpolicy="no-referrer"
 									on:error={() => hideCover(track.coverUrl)}
 								/>
 							{:else}

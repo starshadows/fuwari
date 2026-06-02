@@ -4,6 +4,7 @@ import {
 	COMMENTS_ENABLED_SETTING_KEY,
 	COMMENTS_SESSION_COOKIE,
 	COMMENTS_SESSION_MAX_AGE_SECONDS,
+	MAX_JSON_BODY_BYTES,
 	MAX_TWIKOO_BODY_BYTES,
 	RATE_LIMITS,
 } from "./constants";
@@ -65,6 +66,9 @@ export async function createCommentsSession(
 	if (!(await areCommentsEnabled(env))) {
 		return json({ error: apiError("COMMENTS_DISABLED") }, 403);
 	}
+
+	const bodyError = rejectOversizedBody(request, MAX_JSON_BODY_BYTES);
+	if (bodyError) return bodyError;
 
 	const body = await readJson(request);
 	const proofError = await verifyHumanProof(
@@ -258,6 +262,22 @@ export async function handleTwikooRequest(
 			limit: 200,
 			windowSeconds: 10 * 60,
 		});
+		if (rl) return rl;
+	}
+	if (event === "GET_COMMENTS_COUNT") {
+		const rl = await enforceRateLimit(
+			request,
+			env,
+			RATE_LIMITS.twikooCommentsCount,
+		);
+		if (rl) return rl;
+	}
+	if (event === "GET_RECENT_COMMENTS") {
+		const rl = await enforceRateLimit(
+			request,
+			env,
+			RATE_LIMITS.twikooRecentComments,
+		);
 		if (rl) return rl;
 	}
 

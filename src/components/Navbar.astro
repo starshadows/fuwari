@@ -36,6 +36,7 @@ let links: NavBarLink[] = navBarConfig.links.map(
                 if (l.children?.length) {
                     return <div class="relative group">
                         <a aria-label={l.name} href={l.external ? l.url : url(l.url)} target={l.external ? "_blank" : null}
+                           rel={l.external ? "noopener noreferrer" : null}
                            class="btn-plain scale-animation rounded-lg h-11 font-bold px-5 active:scale-95"
                         >
                             <div class="flex items-center gap-1">
@@ -51,6 +52,7 @@ let links: NavBarLink[] = navBarConfig.links.map(
                                         aria-label={child.name}
                                         href={child.external ? child.url : url(child.url)}
                                         target={child.external ? "_blank" : null}
+                                        rel={child.external ? "noopener noreferrer" : null}
                                         class="group/item flex h-10 items-center justify-between gap-4 rounded-lg px-3 font-bold transition hover:bg-[var(--btn-plain-bg-hover)] active:bg-[var(--btn-plain-bg-active)]"
                                     >
                                         <span class="whitespace-nowrap text-black/75 transition group-hover/item:text-[var(--primary)] dark:text-white/75">
@@ -69,6 +71,7 @@ let links: NavBarLink[] = navBarConfig.links.map(
                 }
 
                 return <a aria-label={l.name} href={l.external ? l.url : url(l.url)} target={l.external ? "_blank" : null}
+                          rel={l.external ? "noopener noreferrer" : null}
                           class="btn-plain scale-animation rounded-lg h-11 font-bold px-5 active:scale-95"
                 >
                     <div class="flex items-center">

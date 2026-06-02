@@ -1,6 +1,7 @@
 import {
 	AUDIO_EXTENSIONS,
 	apiError,
+	MAX_JSON_BODY_BYTES,
 	MUSIC_OBJECT_SCAN_LIMIT,
 	MUSIC_PREFIX,
 } from "./constants";
@@ -22,6 +23,7 @@ import {
 	readJson,
 	readMusicMetadataFromR2,
 	readString,
+	rejectOversizedBody,
 	safeNormalizeMediaKey,
 	sanitizeFileName,
 	stripMediaPrefix,
@@ -98,6 +100,9 @@ export async function importR2MusicObjects(
 	if (!env.MEDIA_BUCKET) {
 		return json({ error: apiError("MISSING_R2") }, 503);
 	}
+
+	const bodyError = rejectOversizedBody(request, MAX_JSON_BODY_BYTES);
+	if (bodyError) return bodyError;
 
 	const body = await readJson(request);
 	const requestedKeys = Array.isArray(body.objectKeys)
@@ -188,6 +193,9 @@ export async function createMusicTrack(
 	env: Env,
 	ctx: ExecutionContext,
 ): Promise<Response> {
+	const bodyError = rejectOversizedBody(request, MAX_JSON_BODY_BYTES);
+	if (bodyError) return bodyError;
+
 	const body = await readJson(request);
 	const title = readString(body.title, 80);
 	const artist = readString(body.artist, 80);
@@ -239,6 +247,9 @@ export async function updateMusicTrack(
 ): Promise<Response> {
 	if (!Number.isInteger(id))
 		return json({ error: apiError("MUSIC_ID_INVALID") }, 400);
+
+	const bodyError = rejectOversizedBody(request, MAX_JSON_BODY_BYTES);
+	if (bodyError) return bodyError;
 
 	const body = await readJson(request);
 	const fields: string[] = [];

@@ -1,5 +1,10 @@
 import { verifyHumanProof } from "./anti-abuse";
-import { apiError, RATE_LIMITS, TELEGRAM_SETTINGS_KEY } from "./constants";
+import {
+	apiError,
+	MAX_JSON_BODY_BYTES,
+	RATE_LIMITS,
+	TELEGRAM_SETTINGS_KEY,
+} from "./constants";
 import type { Env } from "./types";
 import type { TelegramSettings } from "./types/aliases";
 import {
@@ -14,6 +19,7 @@ import {
 	readJson,
 	readString,
 	rejectCrossSiteWrite,
+	rejectOversizedBody,
 	setAppSetting,
 } from "./utils";
 
@@ -50,6 +56,9 @@ export async function submitFriendLink(
 		RATE_LIMITS.friendSubmit,
 	);
 	if (rateLimit) return rateLimit;
+
+	const bodyError = rejectOversizedBody(request, MAX_JSON_BODY_BYTES);
+	if (bodyError) return bodyError;
 
 	const body = await readJson(request);
 	const name = readString(body.name, 40);

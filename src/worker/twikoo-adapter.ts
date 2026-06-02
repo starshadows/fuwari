@@ -95,6 +95,7 @@ const RES_CODE = {
 const VERSION = "1.6.44-cloudflare-lite";
 const MAX_TIMESTAMP_MILLIS = 41025312000000;
 const MAX_QUERY_LIMIT = 500;
+const MAX_TWIKOO_URLS_PER_REQUEST = 100;
 const DEFAULT_COMMENT_PAGE_SIZE = 8;
 const DEFAULT_LIMIT_PER_MINUTE = 10;
 const DEFAULT_LIMIT_LENGTH = 500;
@@ -533,6 +534,9 @@ async function getCommentsCount(
 	event: JsonRecord,
 ): Promise<JsonRecord> {
 	if (!Array.isArray(event.urls)) throw new Error('参数"urls"不合法');
+	if (event.urls.length > MAX_TWIKOO_URLS_PER_REQUEST) {
+		throw new Error(`参数"urls"最多支持 ${MAX_TWIKOO_URLS_PER_REQUEST} 个`);
+	}
 
 	const includeReply = Boolean(event.includeReply);
 	const data = await Promise.all(
@@ -558,6 +562,12 @@ async function getRecentComments(
 ): Promise<JsonRecord> {
 	const includeReply = Boolean(event.includeReply);
 	const pageSize = clampInteger(readInteger(event.pageSize, 10), 1, 100);
+	if (
+		Array.isArray(event.urls) &&
+		event.urls.length > MAX_TWIKOO_URLS_PER_REQUEST
+	) {
+		throw new Error(`参数"urls"最多支持 ${MAX_TWIKOO_URLS_PER_REQUEST} 个`);
+	}
 	const urls = Array.isArray(event.urls)
 		? event.urls.map((value) => readString(value, 500)).filter(Boolean)
 		: [];

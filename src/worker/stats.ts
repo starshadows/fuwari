@@ -1,4 +1,5 @@
 import {
+	MAX_JSON_BODY_BYTES,
 	RATE_LIMITS,
 	STATS_ACTIVE_WINDOW_MS,
 	STATS_TIMEZONE_OFFSET_MINUTES,
@@ -15,6 +16,7 @@ import {
 	readJson,
 	readString,
 	rejectCrossSiteWrite,
+	rejectOversizedBody,
 } from "./utils";
 
 let statsSchemaReady = false;
@@ -146,6 +148,9 @@ export async function recordStatsVisit(
 
 	// Periodic data retention cleanup (~once per day, non-blocking)
 	ctx.waitUntil(cleanupRetiredStats(env).catch(() => {}));
+
+	const bodyError = rejectOversizedBody(request, MAX_JSON_BODY_BYTES);
+	if (bodyError) return bodyError;
 
 	const body = await readJson(request);
 	const path = normalizeStatsPath(readString(body.path, 400) || "/");

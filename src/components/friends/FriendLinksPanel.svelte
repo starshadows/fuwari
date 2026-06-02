@@ -120,12 +120,13 @@ onMount(() => {
 				>
 					<div class="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[var(--btn-regular-bg)] text-xl font-bold text-[var(--btn-content)]">
 						{#if friend.avatarUrl && !brokenAvatarUrls.has(friend.avatarUrl)}
-							<img
-								src={friend.avatarUrl}
-								alt={friend.name}
-								class="h-full w-full shrink-0 object-cover"
-								on:error={() => markBrokenAvatar(friend.avatarUrl)}
-							/>
+								<img
+									src={friend.avatarUrl}
+									alt={friend.name}
+									class="h-full w-full shrink-0 object-cover"
+									referrerpolicy="no-referrer"
+									on:error={() => markBrokenAvatar(friend.avatarUrl)}
+								/>
 						{:else}
 							<span>{friend.name.slice(0, 1)}</span>
 						{/if}

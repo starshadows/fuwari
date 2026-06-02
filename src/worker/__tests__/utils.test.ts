@@ -12,6 +12,7 @@ import {
 	readBoolean,
 	readInteger,
 	readString,
+	rejectOversizedBody,
 	safeDecodeURIComponent,
 	safeNormalizeMediaKey,
 	sanitizeFileName,
@@ -202,6 +203,41 @@ describe("timingSafeEqual", () => {
 
 	it("returns false for different lengths", () => {
 		expect(timingSafeEqual("abc", "ab")).toBe(false);
+	});
+});
+
+// ================================================================
+// rejectOversizedBody
+// ================================================================
+describe("rejectOversizedBody", () => {
+	function requestWithLength(length?: string): Request {
+		const headers: Record<string, string> = {};
+		if (length !== undefined) headers["content-length"] = length;
+		return new Request("https://example.com/api/test", {
+			method: "POST",
+			headers,
+			body: "{}",
+		});
+	}
+
+	it("allows body sizes within the limit", () => {
+		expect(rejectOversizedBody(requestWithLength("10"), 10)).toBeNull();
+	});
+
+	it("rejects body sizes over the limit", () => {
+		const res = rejectOversizedBody(requestWithLength("11"), 10);
+		expect(res?.status).toBe(413);
+	});
+
+	it("rejects invalid content-length values", () => {
+		expect(rejectOversizedBody(requestWithLength("invalid"), 10)?.status).toBe(
+			413,
+		);
+		expect(rejectOversizedBody(requestWithLength("-1"), 10)?.status).toBe(413);
+	});
+
+	it("allows requests without content-length", () => {
+		expect(rejectOversizedBody(requestWithLength(), 10)).toBeNull();
 	});
 });
 

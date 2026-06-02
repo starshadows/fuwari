@@ -214,6 +214,89 @@ describe("Cross-site protection", () => {
 });
 
 // ================================================================
+// JSON body size limits
+// ================================================================
+describe("JSON body size limits", () => {
+	let worker: Awaited<typeof import("../index")>;
+
+	beforeAll(async () => {
+		vi.stubGlobal("caches", {
+			default: {
+				match: vi.fn().mockResolvedValue(undefined),
+				put: vi.fn().mockResolvedValue(undefined),
+			},
+		});
+		worker = await import("../index");
+	});
+
+	afterAll(() => {
+		vi.unstubAllGlobals();
+	});
+
+	function oversizedJsonRequest(
+		path: string,
+		headers: HeadersInit = {},
+	): Request {
+		const body = JSON.stringify({ value: "x".repeat(70 * 1024) });
+		return new Request(`https://blog.example.com${path}`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				"content-length": String(body.length),
+				origin: "https://blog.example.com",
+				...headers,
+			},
+			body,
+		});
+	}
+
+	it("rejects oversized comment session JSON bodies", async () => {
+		const { db } = mockD1Result("true");
+		const env = mockEnv({ DB: db });
+		const res = await worker.default.fetch(
+			oversizedJsonRequest("/api/comments/session"),
+			env,
+			mockCtx(),
+		);
+		expect(res.status).toBe(413);
+	});
+
+	it("rejects oversized friend submission JSON bodies", async () => {
+		const env = mockEnv();
+		const res = await worker.default.fetch(
+			oversizedJsonRequest("/api/friends"),
+			env,
+			mockCtx(),
+		);
+		expect(res.status).toBe(413);
+	});
+
+	it("rejects oversized authorized admin JSON bodies", async () => {
+		const env = mockEnv();
+		const res = await worker.default.fetch(
+			oversizedJsonRequest("/api/admin/settings/comments", {
+				authorization: "Bearer test-admin-token",
+			}),
+			env,
+			mockCtx(),
+		);
+		expect(res.status).toBe(413);
+	});
+
+	it("rejects oversized setup POST JSON bodies", async () => {
+		const env = mockEnv();
+		const res = await worker.default.fetch(
+			oversizedJsonRequest("/api/setup/init-db", {
+				authorization: "",
+			}),
+			env,
+			mockCtx(),
+		);
+		expect(res.status).toBe(413);
+	});
+});
+
+// ================================================================
 // Admin auth
 // ================================================================
 describe("Admin auth", () => {
@@ -677,6 +760,32 @@ describe("Twikoo adapter upload validation", () => {
 		);
 		const body = (await res.json()) as { code: number };
 		expect(body.code).toBe(0);
+	});
+
+	it("GET_COMMENTS_COUNT rejects too many urls", async () => {
+		const env = twikooEnv();
+		const res = await twikooWorker.default.fetch(
+			twikooBody("GET_COMMENTS_COUNT", {
+				urls: Array.from({ length: 101 }, (_, index) => `/post/${index}`),
+			}),
+			env,
+		);
+		const body = (await res.json()) as { code: number; message: string };
+		expect(body.code).toBe(1000);
+		expect(body.message).toContain("urls");
+	});
+
+	it("GET_RECENT_COMMENTS rejects too many urls", async () => {
+		const env = twikooEnv();
+		const res = await twikooWorker.default.fetch(
+			twikooBody("GET_RECENT_COMMENTS", {
+				urls: Array.from({ length: 101 }, (_, index) => `/post/${index}`),
+			}),
+			env,
+		);
+		const body = (await res.json()) as { code: number; message: string };
+		expect(body.code).toBe(1000);
+		expect(body.message).toContain("urls");
 	});
 
 	it("LOGIN succeeds with correct TWIKOO_ADMIN_PASSWORD", async () => {

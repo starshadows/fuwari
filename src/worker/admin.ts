@@ -3,6 +3,7 @@ import {
 	apiError,
 	COMMENTS_ENABLED_SETTING_KEY,
 	FRIEND_STATUSES,
+	MAX_JSON_BODY_BYTES,
 	TELEGRAM_SETTINGS_KEY,
 } from "./constants";
 import { sendTelegramMessage, writeTelegramSettings } from "./friends";
@@ -27,6 +28,7 @@ import {
 	readInteger,
 	readJson,
 	readString,
+	rejectOversizedBody,
 	requireAdmin,
 	setAppSetting,
 } from "./utils";
@@ -107,6 +109,9 @@ async function updateAdminCommentsSettings(
 	env: Env,
 	ctx: ExecutionContext,
 ): Promise<Response> {
+	const bodyError = rejectOversizedBody(request, MAX_JSON_BODY_BYTES);
+	if (bodyError) return bodyError;
+
 	const body = await readJson(request);
 	const enabled = readBoolean(body.enabled, true);
 	await setAppSetting(
@@ -148,6 +153,9 @@ async function updateAdminTelegramSettings(
 	ctx: ExecutionContext,
 ): Promise<Response> {
 	const current = await readAdminTelegramSettings(env);
+	const bodyError = rejectOversizedBody(request, MAX_JSON_BODY_BYTES);
+	if (bodyError) return bodyError;
+
 	const body = await readJson(request);
 	const botToken = readString(body.botToken, 256);
 	const settings: TelegramSettings = {
@@ -253,6 +261,9 @@ async function updateFriend(
 ): Promise<Response> {
 	if (!Number.isInteger(id))
 		return json({ error: apiError("FRIEND_ID_INVALID") }, 400);
+
+	const bodyError = rejectOversizedBody(request, MAX_JSON_BODY_BYTES);
+	if (bodyError) return bodyError;
 
 	const body = await readJson(request);
 	const fields: string[] = [];
