@@ -260,9 +260,16 @@ export async function handleTwikooRequest(
 		if (rl) return rl;
 	}
 
+	// Pre-compute the SHA-256 hash of TWIKOO_ADMIN_PASSWORD so the
+	// Twikoo adapter can verify LOGIN attempts without touching D1 config.
+	const adminPasswordHash = env.TWIKOO_ADMIN_PASSWORD
+		? await hashToken(env.TWIKOO_ADMIN_PASSWORD)
+		: undefined;
+
 	return twikooWorker.fetch(request, {
 		DB: env.DB,
 		preParsedBody,
+		adminPasswordHash,
 		R2: createTwikooR2Binding(env.MEDIA_BUCKET),
 		R2_PUBLIC_URL: `${requestUrl.origin}/media/twikoo`,
 		onLoginAttempt: () =>

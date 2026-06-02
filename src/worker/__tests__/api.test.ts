@@ -519,12 +519,11 @@ describe("Twikoo security", () => {
 		expect(body.error).toContain("跨站");
 	});
 
-	it("allows first-time SET_PASSWORD without admin token", async () => {
-		// Config table returns '{}' — no ADMIN_PASS set yet.
-		// First-time password setup is allowed via the browser UI;
-		// CSRF + aggressive rate limiting (5/10min) protect it.
+	it("SET_PASSWORD succeeds as no-op (password managed via env var)", async () => {
+		// SET_PASSWORD is accepted (code 0) but does nothing — the actual
+		// admin password is managed via TWIKOO_ADMIN_PASSWORD Cloudflare secret.
 		const { db } = mockD1Result("{}");
-		const env = mockEnv({ DB: db, ADMIN_TOKEN: "test-admin-token" });
+		const env = mockEnv({ DB: db });
 
 		const res = await worker.default.fetch(
 			new Request("https://blog.example.com/api/twikoo", {
@@ -541,28 +540,6 @@ describe("Twikoo security", () => {
 		expect(res.status).toBe(200);
 		const body = (await res.json()) as { code?: number };
 		expect(body.code).toBe(0);
-	});
-
-	it("LOGIN auto-sets password on first call (SET + LOGIN)", async () => {
-		// Config table has no ADMIN_PASS — login should auto-set
-		// the password (PBKDF2) and then issue a session token,
-		// so the blog owner can set up admin access via the browser UI.
-		const { db } = mockD1Result("{}");
-		const env = mockEnv({ DB: db });
-
-		const res = await worker.default.fetch(
-			new Request("https://blog.example.com/api/twikoo", {
-				method: "POST",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify({ event: "LOGIN", password: "my-secret" }),
-			}),
-			env,
-			mockCtx(),
-		);
-		expect(res.status).toBe(200);
-		const body = (await res.json()) as { code: number; accessToken?: string };
-		expect(body.code).toBe(0);
-		expect(body.accessToken).toBeTruthy();
 	});
 
 	it("allows read-only Twikoo events without a session", async () => {
@@ -692,7 +669,7 @@ describe("Twikoo adapter upload validation", () => {
 		expect(body.data?.url).toContain("/media/twikoo/");
 	});
 
-	it("SET_PASSWORD succeeds when no password exists", async () => {
+	it("SET_PASSWORD succeeds as no-op", async () => {
 		const env = twikooEnv();
 		const res = await twikooWorker.default.fetch(
 			twikooBody("SET_PASSWORD", { password: "new-secure-password" }),
@@ -700,5 +677,44 @@ describe("Twikoo adapter upload validation", () => {
 		);
 		const body = (await res.json()) as { code: number };
 		expect(body.code).toBe(0);
+	});
+
+	it("LOGIN succeeds with correct TWIKOO_ADMIN_PASSWORD", async () => {
+		const password = "my-secret";
+		const adminPasswordHash = await (await import("../utils")).hashToken(
+			password,
+		);
+		const env = twikooEnv({ adminPasswordHash });
+		const res = await twikooWorker.default.fetch(
+			twikooBody("LOGIN", { password }),
+			env,
+		);
+		const body = (await res.json()) as { code: number; accessToken?: string };
+		expect(body.code).toBe(0);
+		expect(body.accessToken).toBeTruthy();
+	});
+
+	it("LOGIN with wrong password returns PASS_NOT_MATCH", async () => {
+		const password = "correct-password";
+		const adminPasswordHash = await (await import("../utils")).hashToken(
+			password,
+		);
+		const env = twikooEnv({ adminPasswordHash });
+		const res = await twikooWorker.default.fetch(
+			twikooBody("LOGIN", { password: "wrong-password" }),
+			env,
+		);
+		const body = (await res.json()) as { code: number };
+		expect(body.code).toBe(1023); // PASS_NOT_MATCH
+	});
+
+	it("LOGIN without configured env var returns PASS_NOT_EXIST", async () => {
+		const env = twikooEnv();
+		const res = await twikooWorker.default.fetch(
+			twikooBody("LOGIN", { password: "guess" }),
+			env,
+		);
+		const body = (await res.json()) as { code: number };
+		expect(body.code).toBe(1022); // PASS_NOT_EXIST
 	});
 });

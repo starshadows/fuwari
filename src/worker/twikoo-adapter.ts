@@ -15,7 +15,6 @@ import {
 	getClientIp,
 	getRequestRegion,
 	hashToken,
-	hashTokenWithPbkdf2,
 	readInteger,
 	readString,
 	timingSafeEqual,
@@ -40,6 +39,9 @@ type TwikooWorkerEnv = {
 	R2_PUBLIC_URL?: string;
 	/** Pre-parsed JSON body from the caller, to avoid re-parsing. */
 	preParsedBody?: Record<string, unknown>;
+	/** SHA-256 hex hash of the Twikoo admin password, pre-computed from
+	 *  the TWIKOO_ADMIN_PASSWORD Cloudflare secret. */
+	adminPasswordHash?: string;
 	onCommentSubmit?: (event: CommentSubmittedEvent) => void | Promise<void>;
 	/** Called before each LOGIN attempt to enforce rate limiting.
 	 *  Must return null if the attempt is allowed, or a Response (429) if rate-limited. */
@@ -173,7 +175,7 @@ async function handleEvent(
 		case "GET_RECENT_COMMENTS":
 			return getRecentComments(env.DB, event, config);
 		case "GET_PASSWORD_STATUS":
-			return getPasswordStatus(config);
+			return getPasswordStatus(config, env.adminPasswordHash);
 		case "SET_PASSWORD":
 			return setPassword(env, event, config, accessToken);
 		case "LOGIN":
@@ -608,34 +610,28 @@ async function getRecentComments(
 	};
 }
 
-function getPasswordStatus(config: TwikooConfig): JsonRecord {
+function getPasswordStatus(
+	_config: TwikooConfig,
+	adminPasswordHash?: string,
+): JsonRecord {
 	return {
 		code: RES_CODE.SUCCESS,
-		status: Boolean(config.ADMIN_PASS),
+		status: Boolean(adminPasswordHash),
 		credentials: false,
 		version: VERSION,
 	};
 }
 
 async function setPassword(
-	env: TwikooWorkerEnv,
-	event: JsonRecord,
-	config: TwikooConfig,
-	accessToken: string,
+	_env: TwikooWorkerEnv,
+	_event: JsonRecord,
+	_config: TwikooConfig,
+	_accessToken: string,
 ): Promise<JsonRecord> {
-	const admin = isAdmin(config, accessToken);
-	// If a password already exists, require valid admin credentials to change it.
-	if (config.ADMIN_PASS && !admin) {
-		return { code: RES_CODE.PASS_EXIST, message: "请先登录再修改密码" };
-	}
-	const password = readString(event.password, 256);
-	if (!password) throw new Error('参数"password"不合法');
-	// Clear any active session when the password changes.
-	const { ADMIN_SESSION: _, ...rest } = config;
-	await writeConfig(env.DB, {
-		...rest,
-		ADMIN_PASS: await hashTokenWithPbkdf2(password),
-	});
+	// Password is managed via TWIKOO_ADMIN_PASSWORD Cloudflare secret.
+	// The Twikoo frontend may call SET_PASSWORD before LOGIN; we accept
+	// it to avoid breaking the UI flow but the actual password is set
+	// in the Cloudflare Dashboard.
 	return { code: RES_CODE.SUCCESS };
 }
 
@@ -649,36 +645,25 @@ async function login(
 		const error = await env.onLoginAttempt();
 		if (error) return JSON.parse(await error.text()) as JsonRecord;
 	}
-	// If no password has been set yet, this first LOGIN attempt becomes
-	// the initial password (SET_PASSWORD + LOGIN in one step).
-	// Protected by CSRF (LOGIN is in WRITE_EVENTS) and rate limiting
-	// (onLoginAttempt callback, 10 attempts per 10 minutes).
-	if (!config.ADMIN_PASS) {
-		const password = readString(event.password, 256);
-		if (!password) throw new Error('参数"password"不合法');
-		const hashed = await hashTokenWithPbkdf2(password);
-		await writeConfig(env.DB, { ...config, ADMIN_PASS: hashed });
-		config.ADMIN_PASS = hashed;
+	// Password is sourced from TWIKOO_ADMIN_PASSWORD Cloudflare secret.
+	if (!env.adminPasswordHash) {
+		return { code: RES_CODE.PASS_NOT_EXIST, message: "未配置管理密码" };
 	}
 	const password = readString(event.password, 256);
-	const pwResult = await verifyTwikooPassword(
-		password,
-		String(config.ADMIN_PASS),
-	);
-	if (!pwResult.valid) {
+	if (!password) throw new Error('参数"password"不合法');
+	// Hash the user input with SHA-256 and compare against the pre-computed
+	// hash of the env var. Same approach as the admin API Bearer token check.
+	const inputHash = await hashToken(password);
+	if (!timingSafeEqual(inputHash, env.adminPasswordHash)) {
 		return { code: RES_CODE.PASS_NOT_MATCH, message: "密码错误" };
-	}
-	// Auto-upgrade legacy SHA-256 hash to PBKDF2 on successful login.
-	if (pwResult.upgradedHash) {
-		const { ADMIN_SESSION: _, ...cfg } = config;
-		await writeConfig(env.DB, { ...cfg, ADMIN_PASS: pwResult.upgradedHash });
 	}
 	// Issue a random session token instead of returning the password hash.
 	// The session token expires after 24 hours.
 	const sessionToken = crypto.randomUUID().replace(/-/g, "");
 	const expiresAt = Math.floor(Date.now() / 1000) + 24 * 60 * 60;
+	const { ADMIN_SESSION: _, ...cfg } = config;
 	await writeConfig(env.DB, {
-		...config,
+		...cfg,
 		ADMIN_SESSION: `${sessionToken}:${expiresAt}`,
 	});
 	return {
@@ -951,56 +936,6 @@ async function uploadImageToR2(
 			url: `${publicBase}/${key}`,
 		},
 	};
-}
-
-/**
- * Verify a Twikoo admin password against a stored hash.
- * Supports modern PBKDF2 format ("pbkdf2:<salt_hex>:<hash_hex>") and
- * legacy raw SHA-256 (64 hex chars).  On legacy match, returns the
- * upgraded PBKDF2 hash so the caller can persist it.
- */
-async function verifyTwikooPassword(
-	password: string,
-	storedHash: string,
-): Promise<{ valid: boolean; upgradedHash?: string }> {
-	// Modern PBKDF2 format
-	if (storedHash.startsWith("pbkdf2:")) {
-		const parts = storedHash.slice("pbkdf2:".length).split(":");
-		if (parts.length !== 2) return { valid: false };
-		const saltBytes = new Uint8Array(
-			(parts[0].match(/.{2}/g) ?? []).map((b) => Number.parseInt(b, 16)),
-		);
-		if (saltBytes.length !== 16) return { valid: false };
-		const keyMaterial = await crypto.subtle.importKey(
-			"raw",
-			new TextEncoder().encode(password),
-			{ name: "PBKDF2" },
-			false,
-			["deriveBits"],
-		);
-		const derived = await crypto.subtle.deriveBits(
-			{
-				name: "PBKDF2",
-				salt: saltBytes,
-				iterations: 100_000,
-				hash: "SHA-256",
-			},
-			keyMaterial,
-			256,
-		);
-		const hashHex = Array.from(new Uint8Array(derived))
-			.map((b) => b.toString(16).padStart(2, "0"))
-			.join("");
-		return { valid: timingSafeEqual(hashHex, parts[1]) };
-	}
-
-	// Legacy raw SHA-256 — auto-upgrade on match
-	const legacyHash = await hashToken(password);
-	if (timingSafeEqual(legacyHash, storedHash)) {
-		const upgraded = await hashTokenWithPbkdf2(password);
-		return { valid: true, upgradedHash: upgraded };
-	}
-	return { valid: false };
 }
 
 async function readConfig(db: D1Database): Promise<TwikooConfig> {

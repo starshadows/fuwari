@@ -5,4 +5,5 @@ export type Env = {
 	MEDIA_BUCKET: R2Bucket;
 	ASSETS: Fetcher;
 	ADMIN_TOKEN?: string;
+	TWIKOO_ADMIN_PASSWORD?: string;
 };
