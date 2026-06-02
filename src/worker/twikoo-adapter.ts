@@ -36,6 +36,12 @@ type TwikooWorkerEnv = {
 	R2?: Pick<R2Bucket, "put" | "delete">;
 	R2_PUBLIC_URL?: string;
 	onCommentSubmit?: (event: CommentSubmittedEvent) => void | Promise<void>;
+	/** Called when SET_PASSWORD is invoked but no ADMIN_PASS exists yet.
+	 *  Must return null if the caller is authorized, or a Response (error) if not. */
+	requireFirstTimeSetup?: () => Promise<Response | null>;
+	/** Called before each LOGIN attempt to enforce rate limiting.
+	 *  Must return null if the attempt is allowed, or a Response (429) if rate-limited. */
+	onLoginAttempt?: () => Promise<Response | null>;
 };
 
 type JsonRecord = Record<string, unknown>;
@@ -163,9 +169,9 @@ async function handleEvent(
 		case "GET_PASSWORD_STATUS":
 			return getPasswordStatus(config);
 		case "SET_PASSWORD":
-			return setPassword(env.DB, event, config, accessToken);
+			return setPassword(env, event, config, accessToken);
 		case "LOGIN":
-			return login(event, config, env.DB);
+			return login(env, event, config);
 		case "GET_CONFIG":
 			return getPublicConfig(config, accessToken);
 		case "GET_CONFIG_FOR_ADMIN":
@@ -589,30 +595,42 @@ function getPasswordStatus(config: TwikooConfig): JsonRecord {
 }
 
 async function setPassword(
-	db: D1Database,
+	env: TwikooWorkerEnv,
 	event: JsonRecord,
 	config: TwikooConfig,
 	accessToken: string,
 ): Promise<JsonRecord> {
 	const admin = isAdmin(config, accessToken);
+	// If a password already exists, require valid admin credentials to change it.
 	if (config.ADMIN_PASS && !admin) {
 		return { code: RES_CODE.PASS_EXIST, message: "请先登录再修改密码" };
+	}
+	// If no password has been set yet, require the blog admin token to
+	// prevent the "first caller sets the password" class of vulnerability.
+	if (!config.ADMIN_PASS && env.requireFirstTimeSetup) {
+		const error = await env.requireFirstTimeSetup();
+		if (error) return JSON.parse(await error.text()) as JsonRecord;
 	}
 	const password = readString(event.password, 256);
 	if (!password) throw new Error('参数"password"不合法');
 	// Clear any active session when the password changes.
 	const { ADMIN_SESSION: _, ...rest } = config;
-	await writeConfig(db, { ...rest, ADMIN_PASS: await hashToken(password) });
+	await writeConfig(env.DB, { ...rest, ADMIN_PASS: await hashToken(password) });
 	return { code: RES_CODE.SUCCESS };
 }
 
 async function login(
+	env: TwikooWorkerEnv,
 	event: JsonRecord,
 	config: TwikooConfig,
-	db: D1Database,
 ): Promise<JsonRecord> {
 	if (!config.ADMIN_PASS) {
 		return { code: RES_CODE.PASS_NOT_EXIST, message: "未配置管理密码" };
+	}
+	// Rate-limit login attempts to prevent brute-force.
+	if (env.onLoginAttempt) {
+		const error = await env.onLoginAttempt();
+		if (error) return JSON.parse(await error.text()) as JsonRecord;
 	}
 	const password = readString(event.password, 256);
 	if (config.ADMIN_PASS !== (await hashToken(password))) {
@@ -622,7 +640,7 @@ async function login(
 	// The session token expires after 24 hours.
 	const sessionToken = crypto.randomUUID().replace(/-/g, "");
 	const expiresAt = Math.floor(Date.now() / 1000) + 24 * 60 * 60;
-	await writeConfig(db, {
+	await writeConfig(env.DB, {
 		...config,
 		ADMIN_SESSION: `${sessionToken}:${expiresAt}`,
 	});

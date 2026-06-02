@@ -39,6 +39,7 @@ export async function handleAdminApi(
 	request: Request,
 	env: Env,
 	requestUrl: URL,
+	ctx: ExecutionContext,
 ): Promise<Response> {
 	const auth = await requireAdmin(request, env);
 	if (auth) return auth;
@@ -50,13 +51,13 @@ export async function handleAdminApi(
 		if (segments[3] === "comments") {
 			if (request.method === "GET") return getAdminCommentsSettings(env);
 			if (request.method === "POST")
-				return updateAdminCommentsSettings(request, env);
+				return updateAdminCommentsSettings(request, env, ctx);
 		}
 		if (segments[3] === "telegram") {
 			if (!segments[4] && request.method === "GET")
 				return getAdminTelegramSettings(env);
 			if (!segments[4] && request.method === "POST")
-				return updateAdminTelegramSettings(request, env);
+				return updateAdminTelegramSettings(request, env, ctx);
 			if (segments[4] === "test" && request.method === "POST")
 				return sendAdminTelegramTest(env);
 		}
@@ -67,9 +68,9 @@ export async function handleAdminApi(
 		const id = segments[3] ? Number.parseInt(segments[3], 10) : null;
 		if (request.method === "GET" && !id)
 			return listAdminFriends(env, requestUrl);
-		if (request.method === "PATCH" && id) return updateFriend(request, env, id);
+		if (request.method === "PATCH" && id) return updateFriend(request, env, id, ctx);
 		if (request.method === "DELETE" && id)
-			return deleteFriend(request, env, id);
+			return deleteFriend(request, env, id, ctx);
 	}
 
 	// Music
@@ -77,15 +78,15 @@ export async function handleAdminApi(
 		if (segments[3] === "objects" && request.method === "GET")
 			return listR2MusicObjects(env);
 		if (segments[3] === "import" && request.method === "POST")
-			return importR2MusicObjects(request, env);
+			return importR2MusicObjects(request, env, ctx);
 
 		const id = segments[3] ? Number.parseInt(segments[3], 10) : null;
 		if (request.method === "GET" && !id) return listAdminMusic(env);
-		if (request.method === "POST" && !id) return createMusicTrack(request, env);
+		if (request.method === "POST" && !id) return createMusicTrack(request, env, ctx);
 		if (request.method === "PATCH" && id)
-			return updateMusicTrack(request, env, id);
+			return updateMusicTrack(request, env, id, ctx);
 		if (request.method === "DELETE" && id)
-			return deleteMusicTrack(request, env, id);
+			return deleteMusicTrack(request, env, id, ctx);
 	}
 
 	return json({ error: apiError("NOT_FOUND") }, 404);
@@ -102,6 +103,7 @@ async function getAdminCommentsSettings(env: Env): Promise<Response> {
 async function updateAdminCommentsSettings(
 	request: Request,
 	env: Env,
+	ctx: ExecutionContext,
 ): Promise<Response> {
 	const body = await readJson(request);
 	const enabled = readBoolean(body.enabled, true);
@@ -111,14 +113,14 @@ async function updateAdminCommentsSettings(
 		enabled ? "true" : "false",
 	);
 	await incrementCacheVersion(env, "commentsConfig");
-	void auditAdminAction(
+	ctx.waitUntil(auditAdminAction(
 		env,
 		request,
 		"toggle",
 		"comment",
 		"",
 		JSON.stringify({ enabled }),
-	);
+	));
 	return json({ ok: true, enabled });
 }
 
@@ -139,6 +141,7 @@ async function getAdminTelegramSettings(env: Env): Promise<Response> {
 async function updateAdminTelegramSettings(
 	request: Request,
 	env: Env,
+	ctx: ExecutionContext,
 ): Promise<Response> {
 	const current = await readAdminTelegramSettings(env);
 	const body = await readJson(request);
@@ -153,14 +156,14 @@ async function updateAdminTelegramSettings(
 	};
 
 	await writeTelegramSettings(env, settings);
-	void auditAdminAction(
+	ctx.waitUntil(auditAdminAction(
 		env,
 		request,
 		"update",
 		"telegram",
 		"",
 		JSON.stringify({ enabled: settings.enabled }),
-	);
+	));
 	return json({
 		ok: true,
 		enabled: settings.enabled,
@@ -240,6 +243,7 @@ async function updateFriend(
 	request: Request,
 	env: Env,
 	id: number,
+	ctx: ExecutionContext,
 ): Promise<Response> {
 	if (!Number.isInteger(id))
 		return json({ error: apiError("FRIEND_ID_INVALID") }, 400);
@@ -295,14 +299,14 @@ async function updateFriend(
 		)
 			.bind(...values, id)
 			.run();
-		void auditAdminAction(
+		ctx.waitUntil(auditAdminAction(
 			env,
 			request,
 			"update",
 			"friend",
 			id,
 			JSON.stringify(body),
-		);
+		));
 	}
 
 	const friend = await getFriend(env, id);
@@ -314,11 +318,12 @@ async function deleteFriend(
 	request: Request,
 	env: Env,
 	id: number,
+	ctx: ExecutionContext,
 ): Promise<Response> {
 	if (!Number.isInteger(id))
 		return json({ error: apiError("FRIEND_ID_INVALID") }, 400);
 	await env.DB.prepare("DELETE FROM friend_links WHERE id = ?").bind(id).run();
-	void auditAdminAction(env, request, "delete", "friend", id);
+	ctx.waitUntil(auditAdminAction(env, request, "delete", "friend", id));
 	return json({ ok: true });
 }
 

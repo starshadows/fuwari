@@ -93,6 +93,7 @@ export async function listR2MusicObjects(env: Env): Promise<Response> {
 export async function importR2MusicObjects(
 	request: Request,
 	env: Env,
+	ctx: ExecutionContext,
 ): Promise<Response> {
 	if (!env.MEDIA_BUCKET) {
 		return json({ error: apiError("MISSING_R2") }, 503);
@@ -165,14 +166,14 @@ export async function importR2MusicObjects(
 
 	invalidateScanCache();
 	await incrementCacheVersion(env, "music");
-	void auditAdminAction(
+	ctx.waitUntil(auditAdminAction(
 		env,
 		request,
 		"import",
 		"music",
 		"",
 		JSON.stringify({ count: imported.length }),
-	);
+	));
 	return json({ ok: true, imported }, 201);
 }
 
@@ -183,6 +184,7 @@ export async function importR2MusicObjects(
 export async function createMusicTrack(
 	request: Request,
 	env: Env,
+	ctx: ExecutionContext,
 ): Promise<Response> {
 	const body = await readJson(request);
 	const title = readString(body.title, 80);
@@ -214,14 +216,14 @@ export async function createMusicTrack(
 
 	invalidateScanCache();
 	await incrementCacheVersion(env, "music");
-	void auditAdminAction(
+	ctx.waitUntil(auditAdminAction(
 		env,
 		request,
 		"create",
 		"music",
 		String(result.meta.last_row_id ?? 0),
 		JSON.stringify({ title, artist, album, objectKey }),
-	);
+	));
 	return json({ ok: true, id: result.meta.last_row_id }, 201);
 }
 
@@ -229,6 +231,7 @@ export async function updateMusicTrack(
 	request: Request,
 	env: Env,
 	id: number,
+	ctx: ExecutionContext,
 ): Promise<Response> {
 	if (!Number.isInteger(id))
 		return json({ error: apiError("MUSIC_ID_INVALID") }, 400);
@@ -294,14 +297,14 @@ export async function updateMusicTrack(
 	if (!track) return json({ error: apiError("MUSIC_NOT_FOUND") }, 404);
 	invalidateScanCache();
 	await incrementCacheVersion(env, "music");
-	void auditAdminAction(
+	ctx.waitUntil(auditAdminAction(
 		env,
 		request,
 		"update",
 		"music",
 		id,
 		JSON.stringify(body),
-	);
+	));
 	return json({ track });
 }
 
@@ -309,13 +312,14 @@ export async function deleteMusicTrack(
 	request: Request,
 	env: Env,
 	id: number,
+	ctx: ExecutionContext,
 ): Promise<Response> {
 	if (!Number.isInteger(id))
 		return json({ error: apiError("MUSIC_ID_INVALID") }, 400);
 	await env.DB.prepare("DELETE FROM music_tracks WHERE id = ?").bind(id).run();
 	invalidateScanCache();
 	await incrementCacheVersion(env, "music");
-	void auditAdminAction(env, request, "delete", "music", id);
+	ctx.waitUntil(auditAdminAction(env, request, "delete", "music", id));
 	return json({ ok: true });
 }
 

@@ -57,6 +57,14 @@ function mockEnv(overrides: Partial<Env> = {}): Env {
 	} as Env;
 }
 
+function mockCtx(): ExecutionContext {
+	return {
+		waitUntil: vi.fn().mockResolvedValue(undefined),
+		passThroughOnException: vi.fn(),
+		props: {},
+	} as unknown as ExecutionContext;
+}
+
 // ================================================================
 // Route dispatch tests
 // ================================================================
@@ -74,7 +82,7 @@ describe("Route dispatch", () => {
 				"https://blog.example.com/api/anti-abuse/challenge?context=friends",
 			),
 			env,
-			{} as ExecutionContext,
+			mockCtx(),
 		);
 		expect(res.status).toBe(200);
 		const body = await res.json();
@@ -86,7 +94,7 @@ describe("Route dispatch", () => {
 		const res = await worker.default.fetch(
 			new Request("https://blog.example.com/api/nonexistent"),
 			env,
-			{} as ExecutionContext,
+			mockCtx(),
 		);
 		expect(res.status).toBe(404);
 		const body = await res.json();
@@ -98,7 +106,7 @@ describe("Route dispatch", () => {
 		const res = await worker.default.fetch(
 			new Request("https://blog.example.com/setup/init-db"),
 			env,
-			{} as ExecutionContext,
+			mockCtx(),
 		);
 		expect(res.status).toBe(410);
 	});
@@ -108,7 +116,7 @@ describe("Route dispatch", () => {
 		const res = await worker.default.fetch(
 			new Request("https://blog.example.com/"),
 			env,
-			{} as ExecutionContext,
+			mockCtx(),
 		);
 		expect(res.status).toBe(200);
 	});
@@ -131,7 +139,7 @@ describe("Security headers", () => {
 				"https://blog.example.com/api/anti-abuse/challenge?context=friends",
 			),
 			env,
-			{} as ExecutionContext,
+			mockCtx(),
 		);
 		const csp = res.headers.get("content-security-policy");
 		expect(csp).toBeTruthy();
@@ -149,7 +157,7 @@ describe("Security headers", () => {
 				"https://blog.example.com/api/anti-abuse/challenge?context=friends",
 			),
 			env,
-			{} as ExecutionContext,
+			mockCtx(),
 		);
 		expect(res.headers.get("x-content-type-options")).toBe("nosniff");
 		expect(res.headers.get("referrer-policy")).toBe(
@@ -180,7 +188,7 @@ describe("Cross-site protection", () => {
 				body: JSON.stringify({}),
 			}),
 			env,
-			{} as ExecutionContext,
+			mockCtx(),
 		);
 		expect(res.status).toBe(403);
 	});
@@ -197,7 +205,7 @@ describe("Cross-site protection", () => {
 				body: JSON.stringify({}),
 			}),
 			env,
-			{} as ExecutionContext,
+			mockCtx(),
 		);
 		// Should be 400 (missing required fields passed through validation),
 		// NOT 403 (cross-site rejection)
@@ -220,7 +228,7 @@ describe("Admin auth", () => {
 		const res = await worker.default.fetch(
 			new Request("https://blog.example.com/api/admin/friends"),
 			env,
-			{} as ExecutionContext,
+			mockCtx(),
 		);
 		expect(res.status).toBe(401);
 	});
@@ -232,7 +240,7 @@ describe("Admin auth", () => {
 				headers: { authorization: "Bearer test-admin-token" },
 			}),
 			env,
-			{} as ExecutionContext,
+			mockCtx(),
 		);
 		expect(res.status).toBe(200);
 	});
@@ -255,7 +263,7 @@ describe("Anti-abuse challenge", () => {
 				"https://blog.example.com/api/anti-abuse/challenge?context=friends",
 			),
 			env,
-			{} as ExecutionContext,
+			mockCtx(),
 		);
 		expect(res.status).toBe(200);
 		const body = (await res.json()) as Record<string, unknown>;
@@ -280,7 +288,7 @@ describe("Media path validation", () => {
 		const res = await worker.default.fetch(
 			new Request("https://blog.example.com/media/unknown/file.txt"),
 			env,
-			{} as ExecutionContext,
+			mockCtx(),
 		);
 		expect(res.status).toBe(404);
 	});
@@ -302,7 +310,7 @@ describe("Media path validation", () => {
 				method: "POST",
 			}),
 			env,
-			{} as ExecutionContext,
+			mockCtx(),
 		);
 		expect(res.status).toBe(405);
 	});
@@ -340,7 +348,7 @@ describe("Admin comments settings", () => {
 				headers: adminHeaders(),
 			}),
 			env,
-			{} as ExecutionContext,
+			mockCtx(),
 		);
 		expect(res.status).toBe(200);
 		const body = (await res.json()) as { enabled: boolean };
@@ -357,7 +365,7 @@ describe("Admin comments settings", () => {
 				body: JSON.stringify({ enabled: false }),
 			}),
 			env,
-			{} as ExecutionContext,
+			mockCtx(),
 		);
 		expect(res.status).toBe(200);
 		const body = (await res.json()) as { ok: boolean; enabled: boolean };
@@ -370,7 +378,7 @@ describe("Admin comments settings", () => {
 		const res = await worker.default.fetch(
 			new Request("https://blog.example.com/api/admin/settings/comments"),
 			env,
-			{} as ExecutionContext,
+			mockCtx(),
 		);
 		expect(res.status).toBe(401);
 	});

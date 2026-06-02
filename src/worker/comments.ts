@@ -23,6 +23,7 @@ import {
 	readHumanProof,
 	readJson,
 	rejectCrossSiteWrite,
+	requireAdmin,
 	safeNormalizeMediaKey,
 	signSessionValue,
 	timingSafeEqual,
@@ -167,10 +168,10 @@ async function getActorHash(
 
 /** 需要人机验证 session 的 Twikoo 事件
  *
- * 只保护发帖操作。其他事件（登录、管理、只读查询等）
+ * 保护发帖与图片上传操作。其他事件（登录、管理、只读查询等）
  * 由 twikooWorker 自行鉴权或无需鉴权。
  */
-const SESSION_REQUIRED_EVENTS = new Set<string>(["COMMENT_SUBMIT"]);
+const SESSION_REQUIRED_EVENTS = new Set<string>(["COMMENT_SUBMIT", "UPLOAD_IMAGE"]);
 
 export async function handleTwikooRequest(
 	request: Request,
@@ -213,6 +214,13 @@ export async function handleTwikooRequest(
 		DB: env.DB,
 		R2: createTwikooR2Binding(env.MEDIA_BUCKET),
 		R2_PUBLIC_URL: `${requestUrl.origin}/media/twikoo`,
+		requireFirstTimeSetup: () => requireAdmin(request, env),
+		onLoginAttempt: () =>
+			enforceRateLimit(request, env, {
+				scope: "twikoo-login",
+				limit: 10,
+				windowSeconds: 10 * 60,
+			}),
 		onCommentSubmit: async (event) => {
 			const settings = await readTelegramSettings(env);
 			if (!settings.enabled || !settings.botToken || !settings.chatId) return;

@@ -129,7 +129,7 @@ async function handleApi(
 
 	// Admin API
 	if (pathname.startsWith("/api/admin/")) {
-		return handleAdminApi(request, env, requestUrl);
+		return handleAdminApi(request, env, requestUrl, ctx);
 	}
 
 	return json({ error: apiError("NOT_FOUND") }, 404);
