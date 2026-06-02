@@ -1,88 +1,168 @@
-# 🍥Fuwari  
-![Node.js >= 22](https://img.shields.io/badge/node.js-%3E%3D22-brightgreen) 
-![pnpm >= 9](https://img.shields.io/badge/pnpm-%3E%3D9-blue) 
-[![DeepWiki](https://img.shields.io/badge/DeepWiki-saicaca%2Ffuwari-blue.svg?logo=data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACwAAAAyCAYAAAAnWDnqAAAAAXNSR0IArs4c6QAAA05JREFUaEPtmUtyEzEQhtWTQyQLHNak2AB7ZnyXZMEjXMGeK/AIi+QuHrMnbChYY7MIh8g01fJoopFb0uhhEqqcbWTp06/uv1saEDv4O3n3dV60RfP947Mm9/SQc0ICFQgzfc4CYZoTPAswgSJCCUJUnAAoRHOAUOcATwbmVLWdGoH//PB8mnKqScAhsD0kYP3j/Yt5LPQe2KvcXmGvRHcDnpxfL2zOYJ1mFwrryWTz0advv1Ut4CJgf5uhDuDj5eUcAUoahrdY/56ebRWeraTjMt/00Sh3UDtjgHtQNHwcRGOC98BJEAEymycmYcWwOprTgcB6VZ5JK5TAJ+fXGLBm3FDAmn6oPPjR4rKCAoJCal2eAiQp2x0vxTPB3ALO2CRkwmDy5WohzBDwSEFKRwPbknEggCPB/imwrycgxX2NzoMCHhPkDwqYMr9tRcP5qNrMZHkVnOjRMWwLCcr8ohBVb1OMjxLwGCvjTikrsBOiA6fNyCrm8V1rP93iVPpwaE+gO0SsWmPiXB+jikdf6SizrT5qKasx5j8ABbHpFTx+vFXp9EnYQmLx02h1QTTrl6eDqxLnGjporxl3NL3agEvXdT0WmEost648sQOYAeJS9Q7bfUVoMGnjo4AZdUMQku50McDcMWcBPvr0SzbTAFDfvJqwLzgxwATnCgnp4wDl6Aa+Ax283gghmj+vj7feE2KBBRMW3FzOpLOADl0Isb5587h/U4gGvkt5v60Z1VLG8BhYjbzRwyQZemwAd6cCR5/XFWLYZRIMpX39AR0tjaGGiGzLVyhse5C9RKC6ai42ppWPKiBagOvaYk8lO7DajerabOZP46Lby5wKjw1HCRx7p9sVMOWGzb/vA1hwiWc6jm3MvQDTogQkiqIhJV0nBQBTU+3okKCFDy9WwferkHjtxib7t3xIUQtHxnIwtx4mpg26/HfwVNVDb4oI9RHmx5WGelRVlrtiw43zboCLaxv46AZeB3IlTkwouebTr1y2NjSpHz68WNFjHvupy3q8TFn3Hos2IAk4Ju5dCo8B3wP7VPr/FGaKiG+T+v+TQqIrOqMTL1VdWV1DdmcbO8KXBz6esmYWYKPwDL5b5FA1a0hwapHiom0r/cKaoqr+27/XcrS5UwSMbQAAAABJRU5ErkJggg==)](https://deepwiki.com/saicaca/fuwari)
-[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fsaicaca%2Ffuwari.svg?type=shield&issueType=license)](https://app.fossa.com/projects/git%2Bgithub.com%2Fsaicaca%2Ffuwari?ref=badge_shield&issueType=license)
+# 星影的博客
 
-A static blog template built with [Astro](https://astro.build).
+![Node.js >= 22](https://img.shields.io/badge/node.js-%3E%3D22-brightgreen)
+![pnpm >= 9](https://img.shields.io/badge/pnpm-%3E%3D9-blue)
+![Astro 6](https://img.shields.io/badge/Astro-6-orange)
+![Cloudflare Worker](https://img.shields.io/badge/Cloudflare-Worker-f38020)
 
-[**🖥️ Live Demo (Vercel)**](https://fuwari.vercel.app)
+这里是 **星影** 的个人博客项目，用来记录踩过的坑、学到的东西和一些日常内容。
 
-![Preview Image](https://raw.githubusercontent.com/saicaca/resource/main/fuwari/home.png)
+站点基于 Fuwari 主题二次开发，前端使用 Astro + Svelte + Tailwind CSS，后端通过 Cloudflare Worker 提供 API，并使用 D1 / R2 支撑评论、友链、音乐和访问统计等动态功能。
 
-🌏 README in
-[**中文**](https://github.com/saicaca/fuwari/blob/main/docs/README.zh-CN.md) /
-[**日本語**](https://github.com/saicaca/fuwari/blob/main/docs/README.ja.md) /
-[**한국어**](https://github.com/saicaca/fuwari/blob/main/docs/README.ko.md) /
-[**Español**](https://github.com/saicaca/fuwari/blob/main/docs/README.es.md) /
-[**ไทย**](https://github.com/saicaca/fuwari/blob/main/docs/README.th.md) /
-[**Tiếng Việt**](https://github.com/saicaca/fuwari/blob/main/docs/README.vi.md) /
-[**Bahasa Indonesia**](https://github.com/saicaca/fuwari/blob/main/docs/README.id.md) (Provided by the community and may not always be up-to-date)
+## ✨ 功能特性
 
-## ✨ Features
+- Astro 静态博客页面，支持文章、归档、关于页、RSS、站点地图。
+- Svelte 交互组件，包括搜索、音乐播放器、访客统计、友链申请和后台管理。
+- Pagefind 本地全文搜索。
+- Twikoo 兼容评论区，支持 ALTCHA 人机验证、评论开关和 Telegram 通知。
+- 友链系统，支持公开申请、后台审核和 Telegram 通知。
+- 音乐列表，支持从 R2 `music/` 前缀扫描音频并读取 ID3 元数据。
+- 访问统计，支持 PV / UV / 今日 / 昨日 / 月访问量和实时在线人数。
+- Cloudflare Worker 一体化部署：静态资源、API、R2 媒体访问都由同一个 Worker 提供。
+- 安全加固：Origin/Referer 写保护、公开写接口限流、ALTCHA、D1 prepared statements、R2 key 规范化、安全响应头。
 
-- [x] Built with [Astro](https://astro.build) and [Tailwind CSS](https://tailwindcss.com)
-- [x] Smooth animations and page transitions
-- [x] Light / dark mode
-- [x] Customizable theme colors & banner
-- [x] Responsive design
-- [x] Search functionality with [Pagefind](https://pagefind.app/)
-- [x] [Markdown extended features](https://github.com/saicaca/fuwari?tab=readme-ov-file#-markdown-extended-syntax)
-- [x] Table of contents
-- [x] RSS feed
+## 🧱 技术栈
 
-## 🚀 Getting Started
+- **Frontend**: Astro 6, Svelte 5, Tailwind CSS, Pagefind
+- **Worker API**: Cloudflare Workers, TypeScript
+- **Database**: Cloudflare D1
+- **Object Storage**: Cloudflare R2
+- **Quality**: Biome, Vitest, TypeScript
+- **Package Manager**: pnpm 9
 
-1. Create your blog repository:
-    - [Generate a new repository](https://github.com/saicaca/fuwari/generate) from this template or fork this repository.
-    - Or run one of the following commands:
-       ```sh
-       npm create fuwari@latest
-       yarn create fuwari
-       pnpm create fuwari@latest
-       bun create fuwari@latest
-       deno run -A npm:create-fuwari@latest
-       ```
-2. To edit your blog locally, clone your repository, run `pnpm install` to install dependencies.
-    - Install [pnpm](https://pnpm.io) `npm install -g pnpm` if you haven't.
-3. Edit the config file `src/config.ts` to customize your blog.
-4. Run `pnpm new-post <filename>` to create a new post and edit it in `src/content/posts/`.
-5. Deploy this fork as a Cloudflare Worker (static assets + API). See [Cloudflare Worker deployment](#-cloudflare-worker-deployment) for D1/R2 bindings, secrets, and migration steps.
+## 📁 项目结构
 
-## ☁️ Cloudflare Worker Deployment
+```text
+src/
+  components/          # Astro / Svelte 组件
+  content/             # 博客文章与 about 内容
+  layouts/             # 页面布局
+  pages/               # Astro 路由
+  styles/              # 全局样式
+  utils/               # 前端工具函数
+  worker/              # Cloudflare Worker 后端 API
+    admin.ts           # 后台管理 API
+    anti-abuse.ts      # ALTCHA challenge / verify
+    comments.ts        # 评论配置、评论 session、Twikoo 代理
+    twikoo-adapter.ts  # Twikoo 协议兼容层
+    friends.ts         # 友链提交与通知
+    music.ts           # 音乐管理与 R2 扫描
+    stats.ts           # 访问统计
+    db.ts              # D1 migration / 初始化
+    media.ts           # R2 媒体访问
+migrations/            # Wrangler D1 migrations
+wrangler.jsonc         # Cloudflare Worker 配置
+```
 
-This fork is not a pure static Astro deployment. The built `dist/` assets are served by a Cloudflare Worker, and the same Worker also handles `/api/*` and `/media/*` routes.
+## 🚀 本地开发
 
-Required Cloudflare resources:
+环境要求：
 
-- **Worker** using `src/worker/index.ts` as the entrypoint.
-- **Worker Assets** binding named `ASSETS`, serving `./dist`.
-- **D1 database** binding named `DB`.
-- **R2 bucket** binding named `MEDIA_BUCKET`.
-- **Secrets / environment variables**:
-  - `ADMIN_TOKEN` — Bearer token for `/api/admin/*` and `/api/setup/init-db`.
-  - `TWIKOO_ADMIN_PASSWORD` — Twikoo admin password. The Worker hashes this value for Twikoo-compatible login.
+- Node.js `>=22.22.0`
+- pnpm `>=9`
 
-### 1. Install and build
+安装依赖：
 
 ```sh
 corepack enable
-corepack pnpm install --frozen-lockfile
-corepack pnpm build
+pnpm install
 ```
 
-The build writes static assets to `dist/` and generates the Pagefind search index.
+启动前端开发服务器：
 
-### 2. Create Cloudflare resources
+```sh
+pnpm dev
+```
 
-Create one D1 database and one R2 bucket in Cloudflare. Bind them to the Worker with these exact binding names:
+前端默认运行在：
 
 ```text
-DB
-MEDIA_BUCKET
+http://localhost:4321
 ```
 
-`wrangler.jsonc` currently declares the binding names and migration directory, while the concrete Cloudflare resource names/IDs may be managed from the Cloudflare Dashboard:
+启动 Cloudflare Worker 本地开发服务器：
+
+```sh
+pnpm worker:dev
+```
+
+Worker 默认运行在：
+
+```text
+http://localhost:8787
+```
+
+完整本地开发时通常需要同时运行 `pnpm dev` 和 `pnpm worker:dev`。线上部署后，静态资源和 API 会由同一个 Cloudflare Worker 提供。
+
+## ✍️ 写文章
+
+创建新文章：
+
+```sh
+pnpm new-post <filename>
+```
+
+文章位于：
+
+```text
+src/content/posts/
+```
+
+Frontmatter 示例：
+
+```yaml
+---
+title: 我的第一篇文章
+published: 2026-01-01
+description: 文章摘要
+tags: [Cloudflare, Astro]
+category: 技术
+draft: false
+---
+```
+
+常用配置入口：
+
+- 站点标题、导航、个人资料：`src/config.ts`
+- 内容 schema：`src/content.config.ts`
+- 国际化文本：`src/i18n/`
+
+## ⚡ 常用命令
+
+| Command | Action |
+|:--|:--|
+| `pnpm dev` | 启动 Astro 开发服务器 |
+| `pnpm worker:dev` | 启动 Cloudflare Worker 本地开发服务器 |
+| `pnpm build` | 构建站点并生成 Pagefind 索引 |
+| `pnpm preview` | 本地预览构建产物 |
+| `pnpm check` | Astro 类型检查 |
+| `pnpm type-check` | TypeScript 类型检查 |
+| `pnpm lint` | Biome 只读检查 |
+| `pnpm format` | Biome 格式化并自动修复 |
+| `pnpm test` | 运行 Vitest 测试 |
+| `pnpm new-post <name>` | 创建新文章 |
+| `pnpm d1:migrate:local` | 执行本地 D1 migrations |
+| `pnpm d1:migrate:remote` | 执行远端 D1 migrations |
+| `pnpm worker:deploy` | 构建并部署 Cloudflare Worker |
+
+## ☁️ Cloudflare Worker 部署
+
+这个项目不是纯静态 Astro 部署。构建后的 `dist/` 会作为 Worker Assets 发布，同时 Worker 负责处理：
+
+- `/api/*`
+- `/media/*`
+- 静态页面和资源
+
+### 1. 创建 Cloudflare 资源
+
+需要准备：
+
+- Cloudflare Worker
+- D1 数据库，binding 名称必须是 `DB`
+- R2 bucket，binding 名称必须是 `MEDIA_BUCKET`
+- Worker Assets，binding 名称是 `ASSETS`，目录是 `./dist`
+
+`wrangler.jsonc` 当前声明了 binding 名称和 migrations 目录：
 
 ```jsonc
 "d1_databases": [
@@ -98,107 +178,111 @@ MEDIA_BUCKET
 ]
 ```
 
-If you prefer fully reproducible Wrangler deployments, add the real `database_name`, `database_id`, and `bucket_name` from your Cloudflare account. Do not commit placeholder IDs.
+如果希望部署完全可复现，可以在确认 Cloudflare 资源后补充真实的：
 
-### 3. Configure secrets
+- `database_name`
+- `database_id`
+- `bucket_name`
 
-Set secrets with Wrangler or the Cloudflare Dashboard:
+不要提交占位 ID 或测试资源 ID。
+
+### 2. 配置 Secrets
+
+必须配置：
 
 ```sh
 wrangler secret put ADMIN_TOKEN
 wrangler secret put TWIKOO_ADMIN_PASSWORD
 ```
 
-Keep these values out of Git, `wrangler.jsonc`, and GitHub Actions plaintext environment variables.
+说明：
 
-### 4. Initialize / migrate D1
+- `ADMIN_TOKEN` 用于 `/api/admin/*` 和 `/api/setup/init-db`。
+- `TWIKOO_ADMIN_PASSWORD` 用于 Twikoo 管理员登录。
+- 不要把 secret 写入 Git、`wrangler.jsonc` 或 GitHub Actions 明文环境变量。
 
-After the Worker has the `DB` binding and `ADMIN_TOKEN` secret, apply migrations with one of these approaches:
+### 3. 初始化 / 迁移 D1
+
+远端迁移：
 
 ```sh
 pnpm d1:migrate:remote
 ```
 
-or call the setup endpoint after deployment:
+或者部署后调用初始化接口：
 
 ```sh
 curl -H "Authorization: Bearer <ADMIN_TOKEN>" \
   https://<your-domain>/api/setup/init-db
 ```
 
-The setup endpoint is rate-limited and no longer accepts tokens in the URL query/path. Use the `Authorization: Bearer ...` header, or a POST JSON body if needed.
+初始化接口已经限流，并且不接受 token 放在 URL path / query 中。请使用 `Authorization: Bearer ...` 请求头，或在必要时使用 POST JSON body。
 
-For local development, run local migrations with:
+本地迁移：
 
 ```sh
 pnpm d1:migrate:local
 ```
 
-### 5. Deploy
+### 4. 构建与部署
 
 ```sh
 pnpm worker:deploy
 ```
 
-This runs `pnpm build` first, then deploys the Worker with assets.
+该命令会先执行 `pnpm build`，再执行 `wrangler deploy`。
 
-### 6. Post-deploy checks
+GitHub 自动部署可使用类似命令：
 
-After deployment, verify:
-
-- `/api/comments/config` returns the comments config.
-- `/api/anti-abuse/challenge?context=comments` returns an ALTCHA challenge.
-- Comment submission works after completing ALTCHA.
-- Twikoo admin login works with `TWIKOO_ADMIN_PASSWORD`.
-- `/media/*` can serve expected R2 objects.
-- Admin APIs require `Authorization: Bearer <ADMIN_TOKEN>`.
-
-## 📝 Frontmatter of Posts
-
-```yaml
----
-title: My First Blog Post
-published: 2023-09-09
-description: This is the first post of my new Astro blog.
-image: ./cover.jpg
-tags: [Foo, Bar]
-category: Front-end
-draft: false
-lang: jp      # Set only if the post's language differs from the site's language in `config.ts`
----
+```sh
+corepack enable && corepack pnpm install --frozen-lockfile && corepack pnpm build
 ```
 
-## 🧩 Markdown Extended Syntax
+### 5. 部署后检查
 
-In addition to Astro's default support for [GitHub Flavored Markdown](https://github.github.com/gfm/), several extra Markdown features are included:
+部署完成后建议检查：
 
-- Admonitions ([Preview and Usage](https://fuwari.vercel.app/posts/markdown-extended/#admonitions))
-- GitHub repository cards ([Preview and Usage](https://fuwari.vercel.app/posts/markdown-extended/#github-repository-cards))
-- Enhanced code blocks with Expressive Code ([Preview](https://fuwari.vercel.app/posts/expressive-code/) / [Docs](https://expressive-code.com/))
+- `/api/comments/config` 是否返回评论配置。
+- `/api/anti-abuse/challenge?context=comments` 是否返回 ALTCHA challenge。
+- 评论区是否可以完成人机验证并提交评论。
+- Twikoo 管理员是否可以用 `TWIKOO_ADMIN_PASSWORD` 登录。
+- `/api/friends` 是否能返回友链列表。
+- `/api/music/tracks` 是否能返回音乐列表。
+- `/api/stats/summary` 是否能返回访问统计。
+- `/media/*` 是否能访问预期 R2 对象。
+- `/api/admin/*` 是否必须携带 `Authorization: Bearer <ADMIN_TOKEN>`。
 
-## ⚡ Commands
+## 🔐 安全说明
 
-All commands are run from the root of the project, from a terminal:
+项目中的公开写接口会尽量使用：
 
-| Command                    | Action                                              |
-|:---------------------------|:----------------------------------------------------|
-| `pnpm install`             | Installs dependencies                               |
-| `pnpm dev`                 | Starts local dev server at `localhost:4321`         |
-| `pnpm build`               | Build your production site to `./dist/`             |
-| `pnpm preview`             | Preview your build locally, before deploying        |
-| `pnpm check`               | Run checks for errors in your code                  |
-| `pnpm test`                | Run unit tests with Vitest                          |
-| `pnpm format`              | Format your code using Biome                        |
-| `pnpm new-post <filename>` | Create a new post                                   |
-| `pnpm astro ...`           | Run CLI commands like `astro add`, `astro check`    |
-| `pnpm astro --help`        | Get help using the Astro CLI                        |
+- Origin / Referer same-origin 检查
+- D1 rate limiting
+- ALTCHA 人机验证
+- JSON body size 限制
+- R2 object key 规范化
+- D1 prepared statements
+- 安全响应头
 
-## ✏️ Contributing
+部署和维护时请注意：
 
-Check out the [Contributing Guide](https://github.com/saicaca/fuwari/blob/main/CONTRIBUTING.md) for details on how to contribute to this project.
+- 使用高强度 `ADMIN_TOKEN` 和 `TWIKOO_ADMIN_PASSWORD`。
+- 定期查看 Cloudflare Worker 日志和 GitHub Actions 结果。
+- 不要在仓库中提交 `.env`、Cloudflare token、R2/D1 secret 或任何私钥。
+- 修改认证、评论、友链、媒体上传相关代码后务必运行测试和线上回归。
+
+## ✅ 质量检查
+
+提交前建议运行：
+
+```sh
+pnpm lint
+pnpm test
+pnpm type-check
+pnpm build
+git diff --check
+```
 
 ## 📄 License
 
-This project is licensed under the MIT License.
-
-[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fsaicaca%2Ffuwari.svg?type=large&issueType=license)](https://app.fossa.com/projects/git%2Bgithub.com%2Fsaicaca%2Ffuwari?ref=badge_large&issueType=license)
+本项目基于 Fuwari / Astro 生态二次开发，遵循仓库中的许可证文件。
