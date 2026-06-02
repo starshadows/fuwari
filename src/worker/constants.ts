@@ -16,6 +16,9 @@ export const ALTCHA_COST: number = 800;
 export const STATS_ACTIVE_WINDOW_MS: number = 5 * 60 * 1000;
 export const STATS_TIMEZONE_OFFSET_MINUTES: number = 8 * 60;
 export const RATE_LIMIT_MAX_AGE_SECONDS: number = 24 * 60 * 60;
+export const MAX_JSON_BODY_BYTES: number = 64 * 1024; // 64 KB — general JSON endpoints
+export const MAX_TWIKOO_BODY_BYTES: number = 10 * 1024 * 1024; // 10 MB — Twikoo (includes uploads)
+export const MAX_IMAGE_UPLOAD_BYTES: number = 5 * 1024 * 1024; // 5 MB — decoded image payload
 
 // ----------------------------------------------------------------
 // Music constants
@@ -95,6 +98,7 @@ export const API_ERROR = {
 	SERVER_ERROR: "服务器暂时开小差了，请稍后再试。",
 	RATE_LIMITED: "请求过于频繁，请稍后再试。",
 	CROSS_SITE: "跨站请求已被拒绝。",
+	BODY_TOO_LARGE: "请求体过大。",
 	MISSING_TOKEN: "Missing admin token.",
 	INVALID_TOKEN: "Invalid admin token.",
 	TOKEN_NOT_INITIALIZED:

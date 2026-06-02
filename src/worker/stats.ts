@@ -129,6 +129,7 @@ export async function recordStatsVisit(
 	request: Request,
 	env: Env,
 	heartbeatOnly: boolean,
+	ctx: ExecutionContext,
 ): Promise<Response> {
 	const originError = rejectCrossSiteWrite(request);
 	if (originError) return originError;
@@ -144,7 +145,7 @@ export async function recordStatsVisit(
 	if (readyError) return readyError;
 
 	// Periodic data retention cleanup (~once per day, non-blocking)
-	cleanupRetiredStats(env).catch(() => {});
+	ctx.waitUntil(cleanupRetiredStats(env).catch(() => {}));
 
 	const body = await readJson(request);
 	const path = normalizeStatsPath(readString(body.path, 400) || "/");

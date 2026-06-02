@@ -9,6 +9,7 @@
  */
 
 import sanitizeHtml from "sanitize-html";
+import { MAX_IMAGE_UPLOAD_BYTES } from "./constants";
 import {
 	clampInteger,
 	getClientIp,
@@ -37,6 +38,8 @@ type TwikooWorkerEnv = {
 	DB: D1Database;
 	R2?: Pick<R2Bucket, "put" | "delete">;
 	R2_PUBLIC_URL?: string;
+	/** Pre-parsed JSON body from the caller, to avoid re-parsing. */
+	preParsedBody?: Record<string, unknown>;
 	onCommentSubmit?: (event: CommentSubmittedEvent) => void | Promise<void>;
 	/** Called when SET_PASSWORD is invoked but no ADMIN_PASS exists yet.
 	 *  Must return null if the caller is authorized, or a Response (error) if not. */
@@ -104,10 +107,14 @@ const twikooWorker = {
 		await ensureTwikooSchema(env.DB);
 
 		let event: JsonRecord = {};
-		try {
-			event = (await request.json()) as JsonRecord;
-		} catch {
-			event = {};
+		if (env.preParsedBody) {
+			event = env.preParsedBody as JsonRecord;
+		} else {
+			try {
+				event = (await request.json()) as JsonRecord;
+			} catch {
+				event = {};
+			}
 		}
 
 		const headers: Record<string, string> = {
@@ -892,8 +899,6 @@ const ALLOWED_IMAGE_TYPES = new Set([
 	"image/gif",
 ]);
 
-const MAX_DECODED_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB
-
 async function uploadImageToR2(
 	env: TwikooWorkerEnv,
 	event: JsonRecord,
@@ -922,7 +927,7 @@ async function uploadImageToR2(
 
 	// Enforce a hard decoded-size cap to prevent large uploads
 	// from consuming excessive R2 storage.
-	if (blob.size > MAX_DECODED_IMAGE_BYTES) {
+	if (blob.size > MAX_IMAGE_UPLOAD_BYTES) {
 		return {
 			code: RES_CODE.UPLOAD_FAILED,
 			message: "图片大小不能超过 5 MB。",
@@ -1292,7 +1297,7 @@ function allowCors(request: Request, headers: Record<string, string>): void {
 	try {
 		const originUrl = new URL(origin);
 		const requestUrl = new URL(request.url);
-		if (originUrl.hostname !== requestUrl.hostname) return;
+		if (originUrl.origin !== requestUrl.origin) return;
 	} catch {
 		return;
 	}

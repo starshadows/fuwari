@@ -121,10 +121,10 @@ async function handleApi(
 		);
 	}
 	if (pathname === "/api/stats/visit" && request.method === "POST") {
-		return recordStatsVisit(request, env, false);
+		return recordStatsVisit(request, env, false, ctx);
 	}
 	if (pathname === "/api/stats/heartbeat" && request.method === "POST") {
-		return recordStatsVisit(request, env, true);
+		return recordStatsVisit(request, env, true, ctx);
 	}
 
 	// Admin API

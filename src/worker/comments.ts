@@ -4,6 +4,7 @@ import {
 	COMMENTS_ENABLED_SETTING_KEY,
 	COMMENTS_SESSION_COOKIE,
 	COMMENTS_SESSION_MAX_AGE_SECONDS,
+	MAX_TWIKOO_BODY_BYTES,
 	RATE_LIMITS,
 } from "./constants";
 import { readTelegramSettings, sendTelegramMessage } from "./friends";
@@ -23,6 +24,7 @@ import {
 	readHumanProof,
 	readJson,
 	rejectCrossSiteWrite,
+	rejectOversizedBody,
 	requireAdmin,
 	safeNormalizeMediaKey,
 	signSessionValue,
@@ -166,11 +168,18 @@ async function getActorHash(
 // Twikoo proxy
 // ================================================================
 
-/** 需要人机验证 session 的 Twikoo 事件
- *
- * 保护发帖与图片上传操作。其他事件（登录、管理、只读查询等）
- * 由 twikooWorker 自行鉴权或无需鉴权。
- */
+/** Events that write to D1 or R2 — always require CSRF protection. */
+const WRITE_EVENTS = new Set<string>([
+	"COMMENT_SUBMIT",
+	"UPLOAD_IMAGE",
+	"COMMENT_LIKE",
+	"COUNTER_GET",
+]);
+
+/** Subset of WRITE_EVENTS that require a validated comments session
+ * (ALTCHA human proof).  COMMENT_LIKE uses the anonymous accessToken
+ * and COUNTER_GET is a page-view counter — they get CSRF + rate-limit
+ * but do not need a full session. */
 const SESSION_REQUIRED_EVENTS = new Set<string>([
 	"COMMENT_SUBMIT",
 	"UPLOAD_IMAGE",
@@ -182,52 +191,77 @@ export async function handleTwikooRequest(
 	requestUrl: URL,
 	ctx: ExecutionContext,
 ): Promise<Response> {
+	// Reject oversized bodies before we clone + parse anything.
+	const bodyError = rejectOversizedBody(request, MAX_TWIKOO_BODY_BYTES);
+	if (bodyError) return bodyError;
+
 	// Determine the Twikoo event type early so we can scope
 	// both the disabled check and the session check to write events only.
 	// Admin login, moderation, and read-only queries pass through
 	// unconditionally — twikooWorker handles its own auth for those.
-	const event = await (async (): Promise<string> => {
-		if (request.method === "OPTIONS") return "";
+	// We clone once and keep the parsed body so the adapter doesn't
+	// need to re-parse the same JSON.
+	let event = "";
+	let preParsedBody: Record<string, unknown> | undefined;
+	if (request.method !== "OPTIONS") {
 		try {
-			const body = (await request.clone().json()) as { event?: string };
-			return body.event ?? "";
+			const cloned = request.clone();
+			preParsedBody = (await cloned.json()) as Record<string, unknown>;
+			event =
+				typeof preParsedBody.event === "string" ? preParsedBody.event : "";
 		} catch {
-			return "";
+			// Malformed JSON — let the adapter handle the error.
 		}
-	})();
+	}
 
+	const isWrite = WRITE_EVENTS.has(event);
 	const needsSession = SESSION_REQUIRED_EVENTS.has(event);
 
-	// Only gate write events when comments are globally disabled.
+	// All write events require CSRF protection.
+	if (isWrite) {
+		const csrfError = rejectCrossSiteWrite(request);
+		if (csrfError) return csrfError;
+	}
+
+	// Only gate session-required events when comments are globally disabled.
 	// Admin (login, moderation, get) and read-only queries still work.
 	if (needsSession && !(await areCommentsEnabled(env))) {
 		return json({ error: apiError("COMMENTS_DISABLED") }, 403);
-	}
-
-	// Reject cross-site writes to prevent CSRF on comment submission.
-	if (needsSession) {
-		const csrfError = rejectCrossSiteWrite(request);
-		if (csrfError) return csrfError;
 	}
 
 	if (needsSession && !(await hasValidCommentsSession(request, env))) {
 		return json({ error: apiError("TWIKOO_SESSION_REQUIRED") }, 401);
 	}
 
-	// Dedicated rate limit for image uploads — after session validation
-	// so we don't leak rate-limit state to unauthenticated callers, but
-	// tight enough to prevent a single session from flooding R2.
+	// Dedicated rate limits per write event type.
 	if (event === "UPLOAD_IMAGE") {
-		const uploadRl = await enforceRateLimit(request, env, {
+		const rl = await enforceRateLimit(request, env, {
 			scope: "twikoo-upload",
 			limit: 20,
 			windowSeconds: 10 * 60,
 		});
-		if (uploadRl) return uploadRl;
+		if (rl) return rl;
+	}
+	if (event === "COMMENT_LIKE") {
+		const rl = await enforceRateLimit(request, env, {
+			scope: "twikoo-like",
+			limit: 60,
+			windowSeconds: 10 * 60,
+		});
+		if (rl) return rl;
+	}
+	if (event === "COUNTER_GET") {
+		const rl = await enforceRateLimit(request, env, {
+			scope: "twikoo-counter",
+			limit: 200,
+			windowSeconds: 10 * 60,
+		});
+		if (rl) return rl;
 	}
 
 	return twikooWorker.fetch(request, {
 		DB: env.DB,
+		preParsedBody,
 		R2: createTwikooR2Binding(env.MEDIA_BUCKET),
 		R2_PUBLIC_URL: `${requestUrl.origin}/media/twikoo`,
 		requireFirstTimeSetup: () => requireAdmin(request, env),

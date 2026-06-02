@@ -342,6 +342,22 @@ export async function readJson(request: Request): Promise<JsonRecord> {
 	}
 }
 
+/**
+ * Reject POST/PUT/PATCH/DELETE requests whose Content-Length exceeds maxBytes.
+ * Call per-endpoint before reading the body so we bound memory pressure.
+ * Returns null when the size is acceptable; a 413 Response otherwise.
+ */
+export function rejectOversizedBody(
+	request: Request,
+	maxBytes: number,
+): Response | null {
+	const length = Number(request.headers.get("content-length") ?? "0");
+	if (!Number.isFinite(length) || length < 0 || length > maxBytes) {
+		return json({ error: apiError("BODY_TOO_LARGE") }, 413);
+	}
+	return null;
+}
+
 export function readString(value: unknown, maxLength: number): string {
 	if (typeof value !== "string") return "";
 	return value.trim().slice(0, maxLength);
