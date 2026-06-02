@@ -589,3 +589,124 @@ describe("Twikoo security", () => {
 		expect(body).toHaveProperty("version");
 	});
 });
+
+// ================================================================
+// Twikoo adapter — upload validation and SET_PASSWORD
+// ================================================================
+describe("Twikoo adapter upload validation", () => {
+	let twikooWorker: Awaited<typeof import("../twikoo-adapter")>;
+
+	beforeAll(async () => {
+		twikooWorker = await import("../twikoo-adapter");
+	});
+
+	/**
+	 * Build a minimal TwikooWorkerEnv for testing upload / password flows.
+	 * These tests bypass the comments.ts session gate and exercise the
+	 * adapter's internal validation directly.
+	 */
+	function twikooEnv(overrides: Record<string, unknown> = {}) {
+		const { db } = mockD1Result("{}");
+		return {
+			DB: db,
+			R2: undefined as R2Bucket | undefined,
+			R2_PUBLIC_URL: undefined as string | undefined,
+			...overrides,
+		};
+	}
+
+	function twikooBody(
+		event: string,
+		extra: Record<string, unknown> = {},
+	): Request {
+		return new Request("https://blog.example.com/api/twikoo", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ event, ...extra }),
+		});
+	}
+
+	it("rejects SVG upload as unsupported format", async () => {
+		const env = twikooEnv({
+			R2: mockR2Bucket(),
+			R2_PUBLIC_URL: "https://blog.example.com/media/twikoo",
+		});
+		const res = await twikooWorker.default.fetch(
+			twikooBody("UPLOAD_IMAGE", {
+				photo:
+					"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjwvc3ZnPg==",
+			}),
+			env,
+		);
+		const body = (await res.json()) as { code: number; message: string };
+		expect(body.code).toBe(1040);
+		expect(body.message).toContain("不支持的图片格式");
+	});
+
+	it("rejects upload exceeding 5 MB size cap", async () => {
+		const env = twikooEnv({
+			R2: mockR2Bucket(),
+			R2_PUBLIC_URL: "https://blog.example.com/media/twikoo",
+		});
+		// Build a base64 payload that decodes to >5 MB.
+		// 1 base64 char = 6 bits, so ~1.37 MB per 1M base64 chars.
+		// 8M base64 chars → ~6 MB decoded.
+		const largePayload = "A".repeat(8 * 1024 * 1024);
+		const res = await twikooWorker.default.fetch(
+			twikooBody("UPLOAD_IMAGE", {
+				photo: `data:image/png;base64,${largePayload}`,
+			}),
+			env,
+		);
+		const body = (await res.json()) as { code: number; message: string };
+		expect(body.code).toBe(1040);
+		expect(body.message).toContain("5 MB");
+	});
+
+	it("rejects upload without R2 configured", async () => {
+		const env = twikooEnv();
+		const res = await twikooWorker.default.fetch(
+			twikooBody("UPLOAD_IMAGE", {
+				photo: "data:image/png;base64,iVBORw0KGgo=",
+			}),
+			env,
+		);
+		const body = (await res.json()) as { code: number; message: string };
+		expect(body.code).toBe(1040);
+		expect(body.message).toContain("R2");
+	});
+
+	it("accepts valid PNG upload", async () => {
+		const env = twikooEnv({
+			R2: mockR2Bucket(),
+			R2_PUBLIC_URL: "https://blog.example.com/media/twikoo",
+		});
+		// Minimal valid base64-encoded PNG (1×1 pixel).
+		const res = await twikooWorker.default.fetch(
+			twikooBody("UPLOAD_IMAGE", {
+				photo:
+					"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+			}),
+			env,
+		);
+		const body = (await res.json()) as {
+			code: number;
+			data?: { url: string };
+		};
+		expect(body.code).toBe(0);
+		expect(body.data).toBeDefined();
+		expect(body.data?.url).toContain("/media/twikoo/");
+	});
+
+	it("SET_PASSWORD with requireFirstTimeSetup succeeds", async () => {
+		const env = twikooEnv({
+			requireFirstTimeSetup: async () => null,
+		});
+		const res = await twikooWorker.default.fetch(
+			twikooBody("SET_PASSWORD", { password: "new-secure-password" }),
+			env,
+		);
+		const body = (await res.json()) as { code: number };
+		expect(body.code).toBe(0);
+	});
+});

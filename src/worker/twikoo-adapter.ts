@@ -14,8 +14,10 @@ import {
 	getClientIp,
 	getRequestRegion,
 	hashToken,
+	hashTokenWithPbkdf2,
 	readInteger,
 	readString,
+	timingSafeEqual,
 } from "./utils";
 
 type CommentSubmittedEvent = {
@@ -446,7 +448,7 @@ async function commentSubmit(
 	// Fire the notification callback so the blog owner receives
 	// Telegram notifications for new comments and replies.
 	if (env.onCommentSubmit) {
-		await env.onCommentSubmit({
+		env.onCommentSubmit({
 			id: data._id,
 			nick: data.nick,
 			mail: data.mail,
@@ -632,7 +634,10 @@ async function setPassword(
 	if (!password) throw new Error('参数"password"不合法');
 	// Clear any active session when the password changes.
 	const { ADMIN_SESSION: _, ...rest } = config;
-	await writeConfig(env.DB, { ...rest, ADMIN_PASS: await hashToken(password) });
+	await writeConfig(env.DB, {
+		...rest,
+		ADMIN_PASS: await hashTokenWithPbkdf2(password),
+	});
 	return { code: RES_CODE.SUCCESS };
 }
 
@@ -650,8 +655,17 @@ async function login(
 		if (error) return JSON.parse(await error.text()) as JsonRecord;
 	}
 	const password = readString(event.password, 256);
-	if (config.ADMIN_PASS !== (await hashToken(password))) {
+	const pwResult = await verifyTwikooPassword(
+		password,
+		String(config.ADMIN_PASS),
+	);
+	if (!pwResult.valid) {
 		return { code: RES_CODE.PASS_NOT_MATCH, message: "密码错误" };
+	}
+	// Auto-upgrade legacy SHA-256 hash to PBKDF2 on successful login.
+	if (pwResult.upgradedHash) {
+		const { ADMIN_SESSION: _, ...cfg } = config;
+		await writeConfig(env.DB, { ...cfg, ADMIN_PASS: pwResult.upgradedHash });
 	}
 	// Issue a random session token instead of returning the password hash.
 	// The session token expires after 24 hours.
@@ -933,6 +947,56 @@ async function uploadImageToR2(
 			url: `${publicBase}/${key}`,
 		},
 	};
+}
+
+/**
+ * Verify a Twikoo admin password against a stored hash.
+ * Supports modern PBKDF2 format ("pbkdf2:<salt_hex>:<hash_hex>") and
+ * legacy raw SHA-256 (64 hex chars).  On legacy match, returns the
+ * upgraded PBKDF2 hash so the caller can persist it.
+ */
+async function verifyTwikooPassword(
+	password: string,
+	storedHash: string,
+): Promise<{ valid: boolean; upgradedHash?: string }> {
+	// Modern PBKDF2 format
+	if (storedHash.startsWith("pbkdf2:")) {
+		const parts = storedHash.slice("pbkdf2:".length).split(":");
+		if (parts.length !== 2) return { valid: false };
+		const saltBytes = new Uint8Array(
+			(parts[0].match(/.{2}/g) ?? []).map((b) => Number.parseInt(b, 16)),
+		);
+		if (saltBytes.length !== 16) return { valid: false };
+		const keyMaterial = await crypto.subtle.importKey(
+			"raw",
+			new TextEncoder().encode(password),
+			{ name: "PBKDF2" },
+			false,
+			["deriveBits"],
+		);
+		const derived = await crypto.subtle.deriveBits(
+			{
+				name: "PBKDF2",
+				salt: saltBytes,
+				iterations: 100_000,
+				hash: "SHA-256",
+			},
+			keyMaterial,
+			256,
+		);
+		const hashHex = Array.from(new Uint8Array(derived))
+			.map((b) => b.toString(16).padStart(2, "0"))
+			.join("");
+		return { valid: timingSafeEqual(hashHex, parts[1]) };
+	}
+
+	// Legacy raw SHA-256 — auto-upgrade on match
+	const legacyHash = await hashToken(password);
+	if (timingSafeEqual(legacyHash, storedHash)) {
+		const upgraded = await hashTokenWithPbkdf2(password);
+		return { valid: true, upgradedHash: upgraded };
+	}
+	return { valid: false };
 }
 
 async function readConfig(db: D1Database): Promise<TwikooConfig> {

@@ -180,6 +180,7 @@ export async function handleTwikooRequest(
 	request: Request,
 	env: Env,
 	requestUrl: URL,
+	ctx: ExecutionContext,
 ): Promise<Response> {
 	// Determine the Twikoo event type early so we can scope
 	// both the disabled check and the session check to write events only.
@@ -236,37 +237,45 @@ export async function handleTwikooRequest(
 				limit: 10,
 				windowSeconds: 10 * 60,
 			}),
-		onCommentSubmit: async (event) => {
-			const settings = await readTelegramSettings(env);
-			if (!settings.enabled || !settings.botToken || !settings.chatId) return;
+		onCommentSubmit: (event) => {
+			ctx.waitUntil(
+				(async () => {
+					const settings = await readTelegramSettings(env);
+					if (!settings.enabled || !settings.botToken || !settings.chatId)
+						return;
 
-			const pageUrl = event.href || `${requestUrl.origin}${event.url}`;
-			const isReply = Boolean(event.pid);
-			const title = isReply ? "新的评论回复" : "新的评论";
+					const pageUrl = event.href || `${requestUrl.origin}${event.url}`;
+					const isReply = Boolean(event.pid);
+					const title = isReply ? "新的评论回复" : "新的评论";
 
-			const commentExcerpt = event.comment
-				.replace(/<\/?[^>]+(>|$)/g, "")
-				.replace(/\s+/g, " ")
-				.trim()
-				.slice(0, 300);
+					const commentExcerpt = event.comment
+						.replace(/<\/?[^>]+(>|$)/g, "")
+						.replace(/\s+/g, " ")
+						.trim()
+						.slice(0, 300);
 
-			const text = [
-				title,
-				"",
-				`昵称：${event.nick}`,
-				`邮箱：${event.mail}`,
-				`页面：${pageUrl}`,
-				isReply ? `回复：${event.pid.slice(0, 8)}` : "",
-				"",
-				commentExcerpt || "(无内容)",
-			]
-				.filter(Boolean)
-				.join("\n");
+					const text = [
+						title,
+						"",
+						`昵称：${event.nick}`,
+						`邮箱：${event.mail}`,
+						`页面：${pageUrl}`,
+						isReply ? `回复：${event.pid.slice(0, 8)}` : "",
+						"",
+						commentExcerpt || "(无内容)",
+					]
+						.filter(Boolean)
+						.join("\n");
 
-			const result = await sendTelegramMessage(settings, text);
-			if (!result.ok) {
-				console.warn("Telegram comment notification rejected", result.error);
-			}
+					const result = await sendTelegramMessage(settings, text);
+					if (!result.ok) {
+						console.warn(
+							"Telegram comment notification rejected",
+							result.error,
+						);
+					}
+				})(),
+			);
 		},
 	});
 }

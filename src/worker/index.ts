@@ -92,7 +92,7 @@ async function handleApi(
 		return createCommentsSession(request, env);
 	}
 	if (pathname === "/api/twikoo") {
-		return handleTwikooRequest(request, env, requestUrl);
+		return handleTwikooRequest(request, env, requestUrl, ctx);
 	}
 
 	// Friends
