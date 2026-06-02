@@ -617,7 +617,10 @@ function getPasswordStatus(
 	return {
 		code: RES_CODE.SUCCESS,
 		status: Boolean(adminPasswordHash),
-		credentials: false,
+		// credentials must be true when the server can verify the password.
+		// Twikoo frontend uses this flag to decide whether to show the
+		// password input dialog. false = client-side only, no prompt shown.
+		credentials: Boolean(adminPasswordHash),
 		version: VERSION,
 	};
 }
