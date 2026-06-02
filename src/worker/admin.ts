@@ -68,7 +68,8 @@ export async function handleAdminApi(
 		const id = segments[3] ? Number.parseInt(segments[3], 10) : null;
 		if (request.method === "GET" && !id)
 			return listAdminFriends(env, requestUrl);
-		if (request.method === "PATCH" && id) return updateFriend(request, env, id, ctx);
+		if (request.method === "PATCH" && id)
+			return updateFriend(request, env, id, ctx);
 		if (request.method === "DELETE" && id)
 			return deleteFriend(request, env, id, ctx);
 	}
@@ -82,7 +83,8 @@ export async function handleAdminApi(
 
 		const id = segments[3] ? Number.parseInt(segments[3], 10) : null;
 		if (request.method === "GET" && !id) return listAdminMusic(env);
-		if (request.method === "POST" && !id) return createMusicTrack(request, env, ctx);
+		if (request.method === "POST" && !id)
+			return createMusicTrack(request, env, ctx);
 		if (request.method === "PATCH" && id)
 			return updateMusicTrack(request, env, id, ctx);
 		if (request.method === "DELETE" && id)
@@ -113,14 +115,16 @@ async function updateAdminCommentsSettings(
 		enabled ? "true" : "false",
 	);
 	await incrementCacheVersion(env, "commentsConfig");
-	ctx.waitUntil(auditAdminAction(
-		env,
-		request,
-		"toggle",
-		"comment",
-		"",
-		JSON.stringify({ enabled }),
-	));
+	ctx.waitUntil(
+		auditAdminAction(
+			env,
+			request,
+			"toggle",
+			"comment",
+			"",
+			JSON.stringify({ enabled }),
+		),
+	);
 	return json({ ok: true, enabled });
 }
 
@@ -156,14 +160,16 @@ async function updateAdminTelegramSettings(
 	};
 
 	await writeTelegramSettings(env, settings);
-	ctx.waitUntil(auditAdminAction(
-		env,
-		request,
-		"update",
-		"telegram",
-		"",
-		JSON.stringify({ enabled: settings.enabled }),
-	));
+	ctx.waitUntil(
+		auditAdminAction(
+			env,
+			request,
+			"update",
+			"telegram",
+			"",
+			JSON.stringify({ enabled: settings.enabled }),
+		),
+	);
 	return json({
 		ok: true,
 		enabled: settings.enabled,
@@ -299,14 +305,16 @@ async function updateFriend(
 		)
 			.bind(...values, id)
 			.run();
-		ctx.waitUntil(auditAdminAction(
-			env,
-			request,
-			"update",
-			"friend",
-			id,
-			JSON.stringify(body),
-		));
+		ctx.waitUntil(
+			auditAdminAction(
+				env,
+				request,
+				"update",
+				"friend",
+				id,
+				JSON.stringify(body),
+			),
+		);
 	}
 
 	const friend = await getFriend(env, id);

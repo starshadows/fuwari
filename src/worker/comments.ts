@@ -171,7 +171,10 @@ async function getActorHash(
  * 保护发帖与图片上传操作。其他事件（登录、管理、只读查询等）
  * 由 twikooWorker 自行鉴权或无需鉴权。
  */
-const SESSION_REQUIRED_EVENTS = new Set<string>(["COMMENT_SUBMIT", "UPLOAD_IMAGE"]);
+const SESSION_REQUIRED_EVENTS = new Set<string>([
+	"COMMENT_SUBMIT",
+	"UPLOAD_IMAGE",
+]);
 
 export async function handleTwikooRequest(
 	request: Request,

@@ -166,14 +166,16 @@ export async function importR2MusicObjects(
 
 	invalidateScanCache();
 	await incrementCacheVersion(env, "music");
-	ctx.waitUntil(auditAdminAction(
-		env,
-		request,
-		"import",
-		"music",
-		"",
-		JSON.stringify({ count: imported.length }),
-	));
+	ctx.waitUntil(
+		auditAdminAction(
+			env,
+			request,
+			"import",
+			"music",
+			"",
+			JSON.stringify({ count: imported.length }),
+		),
+	);
 	return json({ ok: true, imported }, 201);
 }
 
@@ -216,14 +218,16 @@ export async function createMusicTrack(
 
 	invalidateScanCache();
 	await incrementCacheVersion(env, "music");
-	ctx.waitUntil(auditAdminAction(
-		env,
-		request,
-		"create",
-		"music",
-		String(result.meta.last_row_id ?? 0),
-		JSON.stringify({ title, artist, album, objectKey }),
-	));
+	ctx.waitUntil(
+		auditAdminAction(
+			env,
+			request,
+			"create",
+			"music",
+			String(result.meta.last_row_id ?? 0),
+			JSON.stringify({ title, artist, album, objectKey }),
+		),
+	);
 	return json({ ok: true, id: result.meta.last_row_id }, 201);
 }
 
@@ -297,14 +301,9 @@ export async function updateMusicTrack(
 	if (!track) return json({ error: apiError("MUSIC_NOT_FOUND") }, 404);
 	invalidateScanCache();
 	await incrementCacheVersion(env, "music");
-	ctx.waitUntil(auditAdminAction(
-		env,
-		request,
-		"update",
-		"music",
-		id,
-		JSON.stringify(body),
-	));
+	ctx.waitUntil(
+		auditAdminAction(env, request, "update", "music", id, JSON.stringify(body)),
+	);
 	return json({ track });
 }
 
