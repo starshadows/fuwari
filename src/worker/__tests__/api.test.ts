@@ -519,11 +519,10 @@ describe("Twikoo security", () => {
 		expect(body.error).toContain("跨站");
 	});
 
-	it("requires admin token for first-time SET_PASSWORD", async () => {
+	it("allows first-time SET_PASSWORD without admin token", async () => {
 		// Config table returns '{}' — no ADMIN_PASS set yet.
-		// With an admin token configured, requireFirstTimeSetup →
-		// requireAdmin will verify it, so we test the case where
-		// the admin token is NOT present on the request.
+		// First-time password setup is allowed via the browser UI;
+		// CSRF + aggressive rate limiting (5/10min) protect it.
 		const { db } = mockD1Result("{}");
 		const env = mockEnv({ DB: db, ADMIN_TOKEN: "test-admin-token" });
 
@@ -539,12 +538,9 @@ describe("Twikoo security", () => {
 			env,
 			mockCtx(),
 		);
-		// twikooWorker always returns 200; the auth error is in the body.
 		expect(res.status).toBe(200);
-		const body = (await res.json()) as { error?: string; code?: number };
-		// Either the twikoo error code or the embedded requireAdmin error
-		// should indicate the request was rejected.
-		expect(body.error || body.code).toBeTruthy();
+		const body = (await res.json()) as { code?: number };
+		expect(body.code).toBe(0);
 	});
 
 	it("LOGIN without configured password returns PASS_NOT_EXIST", async () => {
@@ -698,10 +694,8 @@ describe("Twikoo adapter upload validation", () => {
 		expect(body.data?.url).toContain("/media/twikoo/");
 	});
 
-	it("SET_PASSWORD with requireFirstTimeSetup succeeds", async () => {
-		const env = twikooEnv({
-			requireFirstTimeSetup: async () => null,
-		});
+	it("SET_PASSWORD succeeds when no password exists", async () => {
+		const env = twikooEnv();
 		const res = await twikooWorker.default.fetch(
 			twikooBody("SET_PASSWORD", { password: "new-secure-password" }),
 			env,

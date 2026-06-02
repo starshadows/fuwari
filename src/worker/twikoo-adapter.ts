@@ -41,9 +41,6 @@ type TwikooWorkerEnv = {
 	/** Pre-parsed JSON body from the caller, to avoid re-parsing. */
 	preParsedBody?: Record<string, unknown>;
 	onCommentSubmit?: (event: CommentSubmittedEvent) => void | Promise<void>;
-	/** Called when SET_PASSWORD is invoked but no ADMIN_PASS exists yet.
-	 *  Must return null if the caller is authorized, or a Response (error) if not. */
-	requireFirstTimeSetup?: () => Promise<Response | null>;
 	/** Called before each LOGIN attempt to enforce rate limiting.
 	 *  Must return null if the attempt is allowed, or a Response (429) if rate-limited. */
 	onLoginAttempt?: () => Promise<Response | null>;
@@ -630,12 +627,6 @@ async function setPassword(
 	// If a password already exists, require valid admin credentials to change it.
 	if (config.ADMIN_PASS && !admin) {
 		return { code: RES_CODE.PASS_EXIST, message: "请先登录再修改密码" };
-	}
-	// If no password has been set yet, require the blog admin token to
-	// prevent the "first caller sets the password" class of vulnerability.
-	if (!config.ADMIN_PASS && env.requireFirstTimeSetup) {
-		const error = await env.requireFirstTimeSetup();
-		if (error) return JSON.parse(await error.text()) as JsonRecord;
 	}
 	const password = readString(event.password, 256);
 	if (!password) throw new Error('参数"password"不合法');

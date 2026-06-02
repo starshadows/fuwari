@@ -25,7 +25,6 @@ import {
 	readJson,
 	rejectCrossSiteWrite,
 	rejectOversizedBody,
-	requireAdmin,
 	safeNormalizeMediaKey,
 	signSessionValue,
 	timingSafeEqual,
@@ -174,6 +173,7 @@ const WRITE_EVENTS = new Set<string>([
 	"UPLOAD_IMAGE",
 	"COMMENT_LIKE",
 	"COUNTER_GET",
+	"SET_PASSWORD",
 ]);
 
 /** Subset of WRITE_EVENTS that require a validated comments session
@@ -264,7 +264,6 @@ export async function handleTwikooRequest(
 		preParsedBody,
 		R2: createTwikooR2Binding(env.MEDIA_BUCKET),
 		R2_PUBLIC_URL: `${requestUrl.origin}/media/twikoo`,
-		requireFirstTimeSetup: () => requireAdmin(request, env),
 		onLoginAttempt: () =>
 			enforceRateLimit(request, env, {
 				scope: "twikoo-login",
