@@ -174,6 +174,7 @@ const WRITE_EVENTS = new Set<string>([
 	"COMMENT_LIKE",
 	"COUNTER_GET",
 	"SET_PASSWORD",
+	"LOGIN",
 ]);
 
 /** Subset of WRITE_EVENTS that require a validated comments session

@@ -644,13 +644,21 @@ async function login(
 	event: JsonRecord,
 	config: TwikooConfig,
 ): Promise<JsonRecord> {
-	if (!config.ADMIN_PASS) {
-		return { code: RES_CODE.PASS_NOT_EXIST, message: "未配置管理密码" };
-	}
 	// Rate-limit login attempts to prevent brute-force.
 	if (env.onLoginAttempt) {
 		const error = await env.onLoginAttempt();
 		if (error) return JSON.parse(await error.text()) as JsonRecord;
+	}
+	// If no password has been set yet, this first LOGIN attempt becomes
+	// the initial password (SET_PASSWORD + LOGIN in one step).
+	// Protected by CSRF (LOGIN is in WRITE_EVENTS) and rate limiting
+	// (onLoginAttempt callback, 10 attempts per 10 minutes).
+	if (!config.ADMIN_PASS) {
+		const password = readString(event.password, 256);
+		if (!password) throw new Error('参数"password"不合法');
+		const hashed = await hashTokenWithPbkdf2(password);
+		await writeConfig(env.DB, { ...config, ADMIN_PASS: hashed });
+		config.ADMIN_PASS = hashed;
 	}
 	const password = readString(event.password, 256);
 	const pwResult = await verifyTwikooPassword(

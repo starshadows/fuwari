@@ -543,28 +543,26 @@ describe("Twikoo security", () => {
 		expect(body.code).toBe(0);
 	});
 
-	it("LOGIN without configured password returns PASS_NOT_EXIST", async () => {
-		// Config table has no ADMIN_PASS — login should return
-		// PASS_NOT_EXIST early, confirming the flow reaches login().
-		// The onLoginAttempt callback is wired in comments.ts and
-		// would fire if ADMIN_PASS were set; this test validates the
-		// LOGIN event dispatches correctly through the full pipeline.
-		const { db } = mockD1Result({});
+	it("LOGIN auto-sets password on first call (SET + LOGIN)", async () => {
+		// Config table has no ADMIN_PASS — login should auto-set
+		// the password (PBKDF2) and then issue a session token,
+		// so the blog owner can set up admin access via the browser UI.
+		const { db } = mockD1Result("{}");
 		const env = mockEnv({ DB: db });
 
 		const res = await worker.default.fetch(
 			new Request("https://blog.example.com/api/twikoo", {
 				method: "POST",
 				headers: { "content-type": "application/json" },
-				body: JSON.stringify({ event: "LOGIN", password: "guess" }),
+				body: JSON.stringify({ event: "LOGIN", password: "my-secret" }),
 			}),
 			env,
 			mockCtx(),
 		);
 		expect(res.status).toBe(200);
-		const body = (await res.json()) as { code: number };
-		// PASS_NOT_EXIST = 1022
-		expect(body.code).toBe(1022);
+		const body = (await res.json()) as { code: number; accessToken?: string };
+		expect(body.code).toBe(0);
+		expect(body.accessToken).toBeTruthy();
 	});
 
 	it("allows read-only Twikoo events without a session", async () => {
