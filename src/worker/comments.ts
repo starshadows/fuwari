@@ -262,8 +262,11 @@ export async function handleTwikooRequest(
 
 	// Pre-compute the SHA-256 hash of TWIKOO_ADMIN_PASSWORD so the
 	// Twikoo adapter can verify LOGIN attempts without touching D1 config.
+	// Trim so a trailing newline / space in the Cloudflare Dashboard
+	// secret doesn't cause a permanent lockout.  readString() trims
+	// the user input, so the env var must be trimmed too.
 	const adminPasswordHash = env.TWIKOO_ADMIN_PASSWORD
-		? await hashToken(env.TWIKOO_ADMIN_PASSWORD)
+		? await hashToken(env.TWIKOO_ADMIN_PASSWORD.trim())
 		: undefined;
 
 	return twikooWorker.fetch(request, {
