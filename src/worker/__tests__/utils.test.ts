@@ -8,6 +8,7 @@ import {
 	isLikelyBot,
 	isSameOrigin,
 	maskSecret,
+	md5,
 	readBoolean,
 	readInteger,
 	readString,
@@ -17,6 +18,24 @@ import {
 	stripMediaPrefix,
 	timingSafeEqual,
 } from "../utils";
+
+// ================================================================
+// md5
+// ================================================================
+describe("md5", () => {
+	it("matches RFC 1321 / Node crypto compatible vectors", () => {
+		expect(md5("")).toBe("d41d8cd98f00b204e9800998ecf8427e");
+		expect(md5("a")).toBe("0cc175b9c0f1b6a831c399e269772661");
+		expect(md5("abc")).toBe("900150983cd24fb0d6963f7d28e17f72");
+		expect(md5("message digest")).toBe("f96b697d7cb7938d525a2f31aaf161d0");
+	});
+
+	it("hashes UTF-8 input like blueimp-md5", () => {
+		expect(md5("my-secret")).toBe("935571b8f79add9eacb3b622f95ad3a6");
+		expect(md5("中文密码")).toBe("3d4acf94adca8562b4990599b15488de");
+		expect(md5("😀")).toBe("2a02eac39d716a70ecf37579185927b6");
+	});
+});
 
 // ================================================================
 // readString

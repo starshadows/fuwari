@@ -680,28 +680,32 @@ describe("Twikoo adapter upload validation", () => {
 	});
 
 	it("LOGIN succeeds with correct TWIKOO_ADMIN_PASSWORD", async () => {
-		const password = "my-secret";
-		const adminPasswordHash = await (await import("../utils")).hashToken(
-			password,
-		);
+		// The Twikoo frontend (TkAdmin.vue) pre-hashes the password with
+		// MD5 before sending LOGIN.  The password field in the request is a
+		// 32-char MD5 hex string, NOT the plaintext password.
+		const plaintext = "my-secret";
+		const { md5 } = await import("../utils");
+		const adminPasswordHash = md5(plaintext);
 		const env = twikooEnv({ adminPasswordHash });
 		const res = await twikooWorker.default.fetch(
-			twikooBody("LOGIN", { password }),
+			twikooBody("LOGIN", { password: md5(plaintext) }),
 			env,
 		);
 		const body = (await res.json()) as { code: number; accessToken?: string };
 		expect(body.code).toBe(0);
-		expect(body.accessToken).toBeTruthy();
+		expect(body.accessToken).toBe(md5(plaintext));
 	});
 
 	it("LOGIN with wrong password returns PASS_NOT_MATCH", async () => {
-		const password = "correct-password";
-		const adminPasswordHash = await (await import("../utils")).hashToken(
-			password,
-		);
+		const plaintext = "correct-password";
+		const { md5 } = await import("../utils");
+		const adminPasswordHash = md5(plaintext);
 		const env = twikooEnv({ adminPasswordHash });
+		// Frontend sends md5(wrong-input) vs backend md5(correct-password).
 		const res = await twikooWorker.default.fetch(
-			twikooBody("LOGIN", { password: "wrong-password" }),
+			twikooBody("LOGIN", {
+				password: md5("wrong-password"),
+			}),
 			env,
 		);
 		const body = (await res.json()) as { code: number };

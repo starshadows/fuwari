@@ -20,6 +20,7 @@ import {
 	getClientIp,
 	hashToken,
 	json,
+	md5,
 	readCookie,
 	readHumanProof,
 	readJson,
@@ -260,13 +261,14 @@ export async function handleTwikooRequest(
 		if (rl) return rl;
 	}
 
-	// Pre-compute the SHA-256 hash of TWIKOO_ADMIN_PASSWORD so the
+	// Pre-compute the MD5 hash of TWIKOO_ADMIN_PASSWORD so the
 	// Twikoo adapter can verify LOGIN attempts without touching D1 config.
+	// The Twikoo frontend sends md5(plaintext) as the password field,
+	// so we compute md5(env_var) here and compare directly in login().
 	// Trim so a trailing newline / space in the Cloudflare Dashboard
-	// secret doesn't cause a permanent lockout.  readString() trims
-	// the user input, so the env var must be trimmed too.
+	// secret doesn't cause a permanent lockout.
 	const adminPasswordHash = env.TWIKOO_ADMIN_PASSWORD
-		? await hashToken(env.TWIKOO_ADMIN_PASSWORD.trim())
+		? md5(env.TWIKOO_ADMIN_PASSWORD.trim())
 		: undefined;
 
 	return twikooWorker.fetch(request, {

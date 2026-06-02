@@ -180,6 +180,138 @@ export async function hashToken(token: string): Promise<string> {
 		.join("");
 }
 
+/**
+ * Pure-JS MD5 hash (RFC 1321) for Twikoo compatibility.
+ * The Twikoo frontend (TkAdmin.vue) imports md5 from blueimp-md5 and
+ * sends md5(plaintext) as the password field in LOGIN / SET_PASSWORD.
+ * Web Crypto API does not support MD5, so we compute it manually.
+ * Returns a 32-char lowercase hex string, matching blueimp-md5 output.
+ */
+export function md5(text: string): string {
+	const bytes = utf8Encode(text);
+	const bitLength = bytes.length * 8;
+
+	// Append padding: 0x80, then zeros, then 64-bit length (little-endian)
+	const paddedLength = (((bytes.length + 8) >>> 6) + 1) << 6;
+	const padded = new Uint8Array(paddedLength);
+	padded.set(bytes);
+	padded[bytes.length] = 0x80;
+
+	const dataView = new DataView(padded.buffer);
+	dataView.setUint32(paddedLength - 8, bitLength, true); // low 32 bits
+	dataView.setUint32(
+		paddedLength - 4,
+		Math.floor(bitLength / 0x100000000),
+		true,
+	); // high 32 bits
+
+	// MD5 initial state
+	let a0 = 0x67452301;
+	let b0 = 0xefcdab89;
+	let c0 = 0x98badcfe;
+	let d0 = 0x10325476;
+
+	const S = [
+		7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5,
+		9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11,
+		16, 23, 4, 11, 16, 23, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10,
+		15, 21,
+	];
+
+	const K = new Uint32Array(64);
+	for (let i = 0; i < 64; i++) {
+		K[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 0x100000000);
+	}
+
+	for (let offset = 0; offset < paddedLength; offset += 64) {
+		const M = new Uint32Array(16);
+		for (let i = 0; i < 16; i++) {
+			M[i] = dataView.getUint32(offset + i * 4, true);
+		}
+
+		let A = a0;
+		let B = b0;
+		let C = c0;
+		let D = d0;
+
+		for (let i = 0; i < 64; i++) {
+			let F: number;
+			let g: number;
+			if (i < 16) {
+				F = (B & C) | (~B & D);
+				g = i;
+			} else if (i < 32) {
+				F = (D & B) | (~D & C);
+				g = (5 * i + 1) % 16;
+			} else if (i < 48) {
+				F = B ^ C ^ D;
+				g = (3 * i + 5) % 16;
+			} else {
+				F = C ^ (B | ~D);
+				g = (7 * i) % 16;
+			}
+
+			const tempD = D;
+			D = C;
+			C = B;
+			B = (B + leftRotate(A + F + K[i] + M[g], S[i])) >>> 0;
+			A = tempD;
+		}
+
+		a0 = (a0 + A) >>> 0;
+		b0 = (b0 + B) >>> 0;
+		c0 = (c0 + C) >>> 0;
+		d0 = (d0 + D) >>> 0;
+	}
+
+	return toHex32(a0) + toHex32(b0) + toHex32(c0) + toHex32(d0);
+}
+
+function utf8Encode(text: string): Uint8Array {
+	const result: number[] = [];
+	for (let i = 0; i < text.length; i++) {
+		const code = text.charCodeAt(i);
+		if (code < 0x80) {
+			result.push(code);
+		} else if (code < 0x800) {
+			result.push(0xc0 | (code >> 6), 0x80 | (code & 0x3f));
+		} else if (code < 0xd800 || code >= 0xe000) {
+			result.push(
+				0xe0 | (code >> 12),
+				0x80 | ((code >> 6) & 0x3f),
+				0x80 | (code & 0x3f),
+			);
+		} else {
+			// Surrogate pair
+			const high = code;
+			const low = text.charCodeAt(i + 1);
+			if (low < 0xdc00 || low > 0xdfff) {
+				result.push(0xef, 0xbf, 0xbd);
+				continue;
+			}
+			i++;
+			const combined = 0x10000 + (((high & 0x3ff) << 10) | (low & 0x3ff));
+			result.push(
+				0xf0 | (combined >> 18),
+				0x80 | ((combined >> 12) & 0x3f),
+				0x80 | ((combined >> 6) & 0x3f),
+				0x80 | (combined & 0x3f),
+			);
+		}
+	}
+	return new Uint8Array(result);
+}
+
+function leftRotate(value: number, amount: number): number {
+	return ((value << amount) | (value >>> (32 - amount))) >>> 0;
+}
+
+function toHex32(value: number): string {
+	return [0, 8, 16, 24]
+		.map((shift) => ((value >>> shift) & 0xff).toString(16).padStart(2, "0"))
+		.join("");
+}
+
 /** PBKDF2 iteration count — tuned for Workers CPU (keeps latency ~100-200ms). */
 const PBKDF2_ITERATIONS = 100_000;
 

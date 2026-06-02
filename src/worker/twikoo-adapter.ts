@@ -654,15 +654,23 @@ async function login(
 	}
 	const password = readString(event.password, 256);
 	if (!password) throw new Error('参数"password"不合法');
-	// Hash the user input with SHA-256 and compare against the pre-computed
-	// hash of the env var. Same approach as the admin API Bearer token check.
-	const inputHash = await hashToken(password);
-	if (!timingSafeEqual(inputHash, env.adminPasswordHash)) {
+	// CRITICAL: The Twikoo frontend (TkAdmin.vue) pre-hashes the password with MD5 (blueimp-md5)
+	// before sending it (see twikoo.all.min.js onLogin / onRegist).
+	// The `password` field in the request body is already a 32-char
+	// MD5 hex string, NOT the plaintext password.
+	//
+	// We compare it DIRECTLY against adminPasswordHash which is
+	// md5(TWIKOO_ADMIN_PASSWORD.trim()).  Do NOT hash it again —
+	// that would produce md5(md5(plaintext)) and never match md5(env_val).
+	if (!timingSafeEqual(password, env.adminPasswordHash)) {
 		return { code: RES_CODE.PASS_NOT_MATCH, message: "密码错误" };
 	}
-	// Issue a random session token instead of returning the password hash.
-	// The session token expires after 24 hours.
-	const sessionToken = crypto.randomUUID().replace(/-/g, "");
+	// The Twikoo frontend stores md5(password) as the access token
+	// (localStorage key "twikoo-access-token") and includes it as
+	// `accessToken` in every subsequent admin API call.  We must store
+	// this same value as the session token so that isAdmin() can
+	// validate it.  The session expires after 24 hours.
+	const sessionToken = password;
 	const expiresAt = Math.floor(Date.now() / 1000) + 24 * 60 * 60;
 	const { ADMIN_SESSION: _, ...cfg } = config;
 	await writeConfig(env.DB, {
