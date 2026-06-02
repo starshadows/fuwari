@@ -213,6 +213,18 @@ export async function handleTwikooRequest(
 		return json({ error: apiError("TWIKOO_SESSION_REQUIRED") }, 401);
 	}
 
+	// Dedicated rate limit for image uploads — after session validation
+	// so we don't leak rate-limit state to unauthenticated callers, but
+	// tight enough to prevent a single session from flooding R2.
+	if (event === "UPLOAD_IMAGE") {
+		const uploadRl = await enforceRateLimit(request, env, {
+			scope: "twikoo-upload",
+			limit: 20,
+			windowSeconds: 10 * 60,
+		});
+		if (uploadRl) return uploadRl;
+	}
+
 	return twikooWorker.fetch(request, {
 		DB: env.DB,
 		R2: createTwikooR2Binding(env.MEDIA_BUCKET),

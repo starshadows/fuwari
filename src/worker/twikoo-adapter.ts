@@ -443,6 +443,23 @@ async function commentSubmit(
 		)
 		.run();
 
+	// Fire the notification callback so the blog owner receives
+	// Telegram notifications for new comments and replies.
+	if (env.onCommentSubmit) {
+		await env.onCommentSubmit({
+			id: data._id,
+			nick: data.nick,
+			mail: data.mail,
+			comment: data.comment,
+			url: data.url,
+			href: data.href,
+			pid: data.pid,
+			rid: data.rid,
+			created: data.created,
+			isBlogger: Boolean(data.master),
+		});
+	}
+
 	return {
 		id: data._id,
 		code: RES_CODE.SUCCESS,
@@ -854,6 +871,15 @@ async function commentExportForAdmin(
 	return { code: RES_CODE.SUCCESS, data: data.results ?? [] };
 }
 
+const ALLOWED_IMAGE_TYPES = new Set([
+	"image/png",
+	"image/jpeg",
+	"image/webp",
+	"image/gif",
+]);
+
+const MAX_DECODED_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB
+
 async function uploadImageToR2(
 	env: TwikooWorkerEnv,
 	event: JsonRecord,
@@ -869,6 +895,24 @@ async function uploadImageToR2(
 	const blob = dataUriToBlob(photo);
 	if (!blob) {
 		return { code: RES_CODE.UPLOAD_FAILED, message: "图片数据不合法。" };
+	}
+
+	// Reject SVG and other non-image MIME types.
+	// SVG can contain scripts and should never be served as-is.
+	if (!ALLOWED_IMAGE_TYPES.has(blob.type)) {
+		return {
+			code: RES_CODE.UPLOAD_FAILED,
+			message: `不支持的图片格式：${blob.type || "未知"}`,
+		};
+	}
+
+	// Enforce a hard decoded-size cap to prevent large uploads
+	// from consuming excessive R2 storage.
+	if (blob.size > MAX_DECODED_IMAGE_BYTES) {
+		return {
+			code: RES_CODE.UPLOAD_FAILED,
+			message: "图片大小不能超过 5 MB。",
+		};
 	}
 
 	const now = new Date();

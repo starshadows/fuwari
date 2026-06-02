@@ -390,3 +390,202 @@ describe("Admin comments settings", () => {
 		expect(await areCommentsEnabled(env)).toBe(true);
 	});
 });
+
+// ================================================================
+// Twikoo security — session, upload, and auth guards
+// ================================================================
+describe("Twikoo security", () => {
+	let worker: Awaited<typeof import("../index")>;
+
+	beforeAll(async () => {
+		vi.stubGlobal("caches", {
+			default: {
+				match: vi.fn().mockResolvedValue(undefined),
+				put: vi.fn().mockResolvedValue(undefined),
+			},
+		});
+		worker = await import("../index");
+	});
+
+	afterAll(() => {
+		vi.unstubAllGlobals();
+	});
+
+	/**
+	 * Helper: make a Twikoo JSON-RPC style POST to /api/twikoo.
+	 */
+	function twikooRequest(
+		event: string,
+		extra: Record<string, unknown> = {},
+		headers: Record<string, string> = {},
+	): Request {
+		return new Request("https://blog.example.com/api/twikoo", {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				origin: "https://blog.example.com",
+				...headers,
+			},
+			body: JSON.stringify({ event, ...extra }),
+		});
+	}
+
+	it("rejects COMMENT_SUBMIT without a valid comments session", async () => {
+		const { db } = mockD1Result("true");
+		const env = mockEnv({ DB: db });
+		const res = await worker.default.fetch(
+			twikooRequest("COMMENT_SUBMIT", {
+				url: "/post/test",
+				ua: "test-agent",
+				comment: "hello",
+			}),
+			env,
+			mockCtx(),
+		);
+		expect(res.status).toBe(401);
+		const body = (await res.json()) as { error: string };
+		expect(body.error).toContain("人机验证");
+	});
+
+	it("rejects UPLOAD_IMAGE without a valid comments session", async () => {
+		const { db } = mockD1Result("true");
+		const env = mockEnv({ DB: db });
+		const res = await worker.default.fetch(
+			twikooRequest("UPLOAD_IMAGE", {
+				photo: "data:image/png;base64,iVBORw0KGgo=",
+			}),
+			env,
+			mockCtx(),
+		);
+		expect(res.status).toBe(401);
+		const body = (await res.json()) as { error: string };
+		expect(body.error).toContain("人机验证");
+	});
+
+	it("blocks COMMENT_SUBMIT when comments are globally disabled", async () => {
+		const { db } = mockD1Result({ value: "false" });
+		const env = mockEnv({ DB: db });
+		const res = await worker.default.fetch(
+			twikooRequest("COMMENT_SUBMIT", {
+				url: "/post/test",
+				ua: "test-agent",
+				comment: "hello",
+			}),
+			env,
+			mockCtx(),
+		);
+		expect(res.status).toBe(403);
+		const body = (await res.json()) as { error: string };
+		expect(body.error).toContain("评论区已关闭");
+	});
+
+	it("blocks UPLOAD_IMAGE when comments are globally disabled", async () => {
+		const { db } = mockD1Result({ value: "false" });
+		const env = mockEnv({ DB: db });
+		const res = await worker.default.fetch(
+			twikooRequest("UPLOAD_IMAGE", {
+				photo: "data:image/png;base64,iVBORw0KGgo=",
+			}),
+			env,
+			mockCtx(),
+		);
+		expect(res.status).toBe(403);
+		const body = (await res.json()) as { error: string };
+		expect(body.error).toContain("评论区已关闭");
+	});
+
+	it("rejects cross-site Twikoo write from foreign origin", async () => {
+		const { db } = mockD1Result("true");
+		const env = mockEnv({ DB: db });
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/twikoo", {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					origin: "https://evil.example.com",
+				},
+				body: JSON.stringify({
+					event: "COMMENT_SUBMIT",
+					url: "/post/test",
+					ua: "test",
+					comment: "x",
+				}),
+			}),
+			env,
+			mockCtx(),
+		);
+		expect(res.status).toBe(403);
+		const body = (await res.json()) as { error: string };
+		expect(body.error).toContain("跨站");
+	});
+
+	it("requires admin token for first-time SET_PASSWORD", async () => {
+		// Config table returns '{}' — no ADMIN_PASS set yet.
+		// With an admin token configured, requireFirstTimeSetup →
+		// requireAdmin will verify it, so we test the case where
+		// the admin token is NOT present on the request.
+		const { db } = mockD1Result("{}");
+		const env = mockEnv({ DB: db, ADMIN_TOKEN: "test-admin-token" });
+
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/twikoo", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({
+					event: "SET_PASSWORD",
+					password: "hunter2",
+				}),
+			}),
+			env,
+			mockCtx(),
+		);
+		// twikooWorker always returns 200; the auth error is in the body.
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { error?: string; code?: number };
+		// Either the twikoo error code or the embedded requireAdmin error
+		// should indicate the request was rejected.
+		expect(body.error || body.code).toBeTruthy();
+	});
+
+	it("LOGIN without configured password returns PASS_NOT_EXIST", async () => {
+		// Config table has no ADMIN_PASS — login should return
+		// PASS_NOT_EXIST early, confirming the flow reaches login().
+		// The onLoginAttempt callback is wired in comments.ts and
+		// would fire if ADMIN_PASS were set; this test validates the
+		// LOGIN event dispatches correctly through the full pipeline.
+		const { db } = mockD1Result({});
+		const env = mockEnv({ DB: db });
+
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/twikoo", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ event: "LOGIN", password: "guess" }),
+			}),
+			env,
+			mockCtx(),
+		);
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { code: number };
+		// PASS_NOT_EXIST = 1022
+		expect(body.code).toBe(1022);
+	});
+
+	it("allows read-only Twikoo events without a session", async () => {
+		const { db } = mockD1Result("{}");
+		const env = mockEnv({ DB: db });
+		// GET_FUNC_VERSION is a read-only event that does not need a session.
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/twikoo", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ event: "GET_FUNC_VERSION" }),
+			}),
+			env,
+			mockCtx(),
+		);
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { version: string };
+		expect(body).toHaveProperty("version");
+	});
+});
