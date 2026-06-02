@@ -47,7 +47,111 @@ A static blog template built with [Astro](https://astro.build).
     - Install [pnpm](https://pnpm.io) `npm install -g pnpm` if you haven't.
 3. Edit the config file `src/config.ts` to customize your blog.
 4. Run `pnpm new-post <filename>` to create a new post and edit it in `src/content/posts/`.
-5. Deploy your blog to Vercel, Netlify, GitHub Pages, etc. following [the guides](https://docs.astro.build/en/guides/deploy/). You need to edit the site configuration in `astro.config.mjs` before deployment.
+5. Deploy this fork as a Cloudflare Worker (static assets + API). See [Cloudflare Worker deployment](#-cloudflare-worker-deployment) for D1/R2 bindings, secrets, and migration steps.
+
+## ☁️ Cloudflare Worker Deployment
+
+This fork is not a pure static Astro deployment. The built `dist/` assets are served by a Cloudflare Worker, and the same Worker also handles `/api/*` and `/media/*` routes.
+
+Required Cloudflare resources:
+
+- **Worker** using `src/worker/index.ts` as the entrypoint.
+- **Worker Assets** binding named `ASSETS`, serving `./dist`.
+- **D1 database** binding named `DB`.
+- **R2 bucket** binding named `MEDIA_BUCKET`.
+- **Secrets / environment variables**:
+  - `ADMIN_TOKEN` — Bearer token for `/api/admin/*` and `/api/setup/init-db`.
+  - `TWIKOO_ADMIN_PASSWORD` — Twikoo admin password. The Worker hashes this value for Twikoo-compatible login.
+
+### 1. Install and build
+
+```sh
+corepack enable
+corepack pnpm install --frozen-lockfile
+corepack pnpm build
+```
+
+The build writes static assets to `dist/` and generates the Pagefind search index.
+
+### 2. Create Cloudflare resources
+
+Create one D1 database and one R2 bucket in Cloudflare. Bind them to the Worker with these exact binding names:
+
+```text
+DB
+MEDIA_BUCKET
+```
+
+`wrangler.jsonc` currently declares the binding names and migration directory, while the concrete Cloudflare resource names/IDs may be managed from the Cloudflare Dashboard:
+
+```jsonc
+"d1_databases": [
+  {
+    "binding": "DB",
+    "migrations_dir": "./migrations"
+  }
+],
+"r2_buckets": [
+  {
+    "binding": "MEDIA_BUCKET"
+  }
+]
+```
+
+If you prefer fully reproducible Wrangler deployments, add the real `database_name`, `database_id`, and `bucket_name` from your Cloudflare account. Do not commit placeholder IDs.
+
+### 3. Configure secrets
+
+Set secrets with Wrangler or the Cloudflare Dashboard:
+
+```sh
+wrangler secret put ADMIN_TOKEN
+wrangler secret put TWIKOO_ADMIN_PASSWORD
+```
+
+Keep these values out of Git, `wrangler.jsonc`, and GitHub Actions plaintext environment variables.
+
+### 4. Initialize / migrate D1
+
+After the Worker has the `DB` binding and `ADMIN_TOKEN` secret, apply migrations with one of these approaches:
+
+```sh
+pnpm d1:migrate:remote
+```
+
+or call the setup endpoint after deployment:
+
+```sh
+curl -H "Authorization: Bearer <ADMIN_TOKEN>" \
+  https://<your-domain>/api/setup/init-db
+```
+
+The setup endpoint is rate-limited and no longer accepts tokens in the URL query/path. Use the `Authorization: Bearer ...` header, or a POST JSON body if needed.
+
+For local development, run local migrations with:
+
+```sh
+pnpm d1:migrate:local
+```
+
+### 5. Deploy
+
+```sh
+pnpm worker:deploy
+```
+
+This runs `pnpm build` first, then deploys the Worker with assets.
+
+### 6. Post-deploy checks
+
+After deployment, verify:
+
+- `/api/comments/config` returns the comments config.
+- `/api/anti-abuse/challenge?context=comments` returns an ALTCHA challenge.
+- Comment submission works after completing ALTCHA.
+- Twikoo admin login works with `TWIKOO_ADMIN_PASSWORD`.
+- `/media/*` can serve expected R2 objects.
+- Admin APIs require `Authorization: Bearer <ADMIN_TOKEN>`.
 
 ## 📝 Frontmatter of Posts
 
