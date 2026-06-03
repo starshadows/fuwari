@@ -563,6 +563,235 @@ describe("Friend link hostname deduplication", () => {
 });
 
 // ================================================================
+// Admin music management
+// ================================================================
+describe("Admin music management", () => {
+	let worker: Awaited<typeof import("../index")>;
+
+	beforeAll(async () => {
+		worker = await import("../index");
+	});
+
+	function adminHeaders(): HeadersInit {
+		return { authorization: "Bearer test-admin-token" };
+	}
+
+	it("normalizes music sort order in one admin API call", async () => {
+		const listStmt = {
+			all: vi.fn().mockResolvedValue({ results: [{ id: 9 }, { id: 3 }] }),
+		};
+		const updateStmt = {
+			bind: vi.fn().mockReturnThis(),
+		};
+		const genericStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		const db = {
+			prepare: vi.fn((sql: string) => {
+				if (sql.includes("SELECT id") && sql.includes("FROM music_tracks")) {
+					return listStmt;
+				}
+				if (sql.includes("UPDATE music_tracks SET sort_order")) {
+					return updateStmt;
+				}
+				return genericStmt;
+			}),
+			batch: vi.fn().mockResolvedValue([{ success: true }, { success: true }]),
+			exec: vi.fn().mockResolvedValue({ count: 0, duration: 0 }),
+			dump: vi.fn().mockResolvedValue([]),
+		} as unknown as D1Database;
+		const env = mockEnv({ DB: db });
+
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/admin/music/normalize-sort", {
+				method: "POST",
+				headers: adminHeaders(),
+			}),
+			env,
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { ok: boolean; updated: number };
+		expect(body).toEqual({ ok: true, updated: 2 });
+		expect(updateStmt.bind).toHaveBeenCalledWith(1, 9);
+		expect(updateStmt.bind).toHaveBeenCalledWith(2, 3);
+		expect(db.batch).toHaveBeenCalledTimes(1);
+	});
+
+	it("rejects music upload without admin token", async () => {
+		const env = mockEnv();
+		const formData = new FormData();
+		formData.append(
+			"files",
+			new File(["audio"], "song.mp3", { type: "audio/mpeg" }),
+		);
+
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/admin/music/upload", {
+				method: "POST",
+				body: formData,
+			}),
+			env,
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(401);
+	});
+
+	it("returns duplicate result for uploaded music with an existing content hash", async () => {
+		const bytes = new TextEncoder().encode("same audio");
+		const digest = await crypto.subtle.digest("SHA-256", bytes);
+		const hash = Array.from(new Uint8Array(digest))
+			.map((byte) => byte.toString(16).padStart(2, "0"))
+			.join("");
+		const maxSortStmt = {
+			first: vi.fn().mockResolvedValue({ maxSort: 5 }),
+		};
+		const hashStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi
+				.fn()
+				.mockResolvedValue({ id: 7, objectKey: "music/existing.mp3" }),
+		};
+		const genericStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi
+				.fn()
+				.mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
+		};
+		const db = {
+			prepare: vi.fn((sql: string) => {
+				if (sql.includes("MAX(sort_order)")) return maxSortStmt;
+				if (sql.includes("content_hash = ?")) return hashStmt;
+				return genericStmt;
+			}),
+			batch: vi.fn().mockResolvedValue([]),
+			exec: vi.fn().mockResolvedValue({ count: 0, duration: 0 }),
+			dump: vi.fn().mockResolvedValue([]),
+		} as unknown as D1Database;
+		const bucket = mockR2Bucket();
+		const env = mockEnv({ DB: db, MEDIA_BUCKET: bucket });
+		const formData = new FormData();
+		formData.append(
+			"files",
+			new File([bytes], "song.mp3", { type: "audio/mpeg" }),
+		);
+
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/admin/music/upload", {
+				method: "POST",
+				headers: adminHeaders(),
+				body: formData,
+			}),
+			env,
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(201);
+		const body = (await res.json()) as {
+			duplicates: Array<{ hash: string; trackId: number; objectKey: string }>;
+			uploaded: unknown[];
+		};
+		expect(body.uploaded).toHaveLength(0);
+		expect(body.duplicates).toHaveLength(1);
+		expect(body.duplicates[0]).toMatchObject({
+			hash,
+			trackId: 7,
+			objectKey: "music/existing.mp3",
+		});
+		expect(bucket.put).not.toHaveBeenCalled();
+	});
+
+	it("uploads new music to R2 and inserts a track", async () => {
+		const maxSortStmt = {
+			first: vi.fn().mockResolvedValue({ maxSort: 2 }),
+		};
+		const hashStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+		};
+		const objectKeyStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+		};
+		const insertStmt = {
+			bind: vi.fn().mockReturnThis(),
+			run: vi
+				.fn()
+				.mockResolvedValue({ success: true, meta: { last_row_id: 11 } }),
+		};
+		const genericStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi
+				.fn()
+				.mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
+		};
+		const db = {
+			prepare: vi.fn((sql: string) => {
+				if (sql.includes("MAX(sort_order)")) return maxSortStmt;
+				if (sql.includes("content_hash = ?")) return hashStmt;
+				if (sql.includes("WHERE object_key = ?")) return objectKeyStmt;
+				if (sql.includes("INSERT INTO music_tracks")) return insertStmt;
+				return genericStmt;
+			}),
+			batch: vi.fn().mockResolvedValue([]),
+			exec: vi.fn().mockResolvedValue({ count: 0, duration: 0 }),
+			dump: vi.fn().mockResolvedValue([]),
+		} as unknown as D1Database;
+		const bucket = mockR2Bucket();
+		const env = mockEnv({ DB: db, MEDIA_BUCKET: bucket });
+		const formData = new FormData();
+		formData.append(
+			"files",
+			new File(["new audio"], "Artist - Title.mp3", { type: "audio/mpeg" }),
+		);
+
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/admin/music/upload", {
+				method: "POST",
+				headers: adminHeaders(),
+				body: formData,
+			}),
+			env,
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(201);
+		const body = (await res.json()) as {
+			uploaded: Array<{ objectKey: string; trackId: number }>;
+			duplicates: unknown[];
+			failed: unknown[];
+		};
+		expect(body.uploaded).toHaveLength(1);
+		expect(body.duplicates).toHaveLength(0);
+		expect(body.failed).toHaveLength(0);
+		expect(body.uploaded[0].objectKey).toMatch(
+			/^music\/Artist---Title-[a-f0-9]{12}\.mp3$/,
+		);
+		expect(body.uploaded[0].trackId).toBe(11);
+		expect(bucket.put).toHaveBeenCalledTimes(1);
+		expect(insertStmt.bind).toHaveBeenCalledWith(
+			"Artist",
+			"Title",
+			"",
+			expect.stringMatching(/^music\/Artist---Title-[a-f0-9]{12}\.mp3$/),
+			"",
+			1,
+			3,
+			expect.stringMatching(/^[a-f0-9]{64}$/),
+		);
+	});
+});
+
+// ================================================================
 // Admin comments settings
 // ================================================================
 describe("Admin comments settings", () => {

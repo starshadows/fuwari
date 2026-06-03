@@ -22,6 +22,7 @@ export type MusicTrackDto = {
 	album: string;
 	objectKey: string;
 	coverUrl: string;
+	contentHash?: string;
 	isActive: number;
 	sortOrder: number;
 	createdAt: string;

@@ -13,7 +13,9 @@ import {
 	importR2MusicObjects,
 	listAdminMusic,
 	listR2MusicObjects,
+	normalizeMusicTrackSort,
 	updateMusicTrack,
+	uploadMusicFiles,
 } from "./music";
 import type { Env } from "./types";
 import type { FriendDto, TelegramSettings } from "./types/aliases";
@@ -83,6 +85,10 @@ export async function handleAdminApi(
 			return listR2MusicObjects(env);
 		if (segments[3] === "import" && request.method === "POST")
 			return importR2MusicObjects(request, env, ctx);
+		if (segments[3] === "normalize-sort" && request.method === "POST")
+			return normalizeMusicTrackSort(request, env, ctx);
+		if (segments[3] === "upload" && request.method === "POST")
+			return uploadMusicFiles(request, env, ctx);
 
 		const id = segments[3] ? Number.parseInt(segments[3], 10) : null;
 		if (request.method === "GET" && !id) return listAdminMusic(env);
@@ -93,7 +99,6 @@ export async function handleAdminApi(
 		if (request.method === "DELETE" && id)
 			return deleteMusicTrack(request, env, id, ctx);
 	}
-
 	return json({ error: apiError("NOT_FOUND") }, 404);
 }
 

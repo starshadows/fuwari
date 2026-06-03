@@ -325,7 +325,7 @@ onDestroy(() => {
 		</div>
 
 		{#if isPlaylistOpen}
-			<div class="playlist">
+			<div class="playlist" data-music-playlist-scroll>
 				{#each tracks as track, index}
 					<button
 						type="button"

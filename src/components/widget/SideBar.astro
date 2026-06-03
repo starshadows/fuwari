@@ -268,8 +268,9 @@ function setupSidebarScrollIsolation() {
         });
     };
 
-    bindWheel(sidebar, "#toc-sidebar-scroll");
-    bindTouch(sidebar, "#toc-sidebar-scroll");
+    const nestedScrollSelector = "#toc-sidebar-scroll, [data-music-playlist-scroll]";
+    bindWheel(sidebar, nestedScrollSelector);
+    bindTouch(sidebar, nestedScrollSelector);
 
     if (tocScroller) {
         bindWheel(tocScroller);

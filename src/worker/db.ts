@@ -153,7 +153,7 @@ const RATE_LIMIT_STATEMENTS = [
  * Versioned migrations, aligned with ./migrations/*.sql for Wrangler CLI parity.
  *
  * When adding a new migration:
- *   1. Create ./migrations/0006_<description>.sql for `pnpm d1:migrate:*`
+ *   1. Create ./migrations/0007_<description>.sql for `pnpm d1:migrate:*`
  *   2. Append a new entry here with the matching version and statements
  *   3. The /api/setup/init-db endpoint applies pending migrations automatically
  */
@@ -225,6 +225,15 @@ const MIGRATIONS: Migration[] = [
 			 WHERE normalized_host = ''`,
 			`CREATE INDEX IF NOT EXISTS idx_friend_links_normalized_host_status
 			 ON friend_links (normalized_host, status)`,
+		],
+	},
+	{
+		version: "0007",
+		description: "Add content hash to music tracks",
+		statements: [
+			"ALTER TABLE music_tracks ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''",
+			`CREATE INDEX IF NOT EXISTS idx_music_tracks_content_hash
+			 ON music_tracks (content_hash)`,
 		],
 	},
 ];

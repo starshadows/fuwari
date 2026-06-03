@@ -2,6 +2,8 @@ import {
 	AUDIO_EXTENSIONS,
 	apiError,
 	MAX_JSON_BODY_BYTES,
+	MAX_MUSIC_UPLOAD_BYTES,
+	MAX_MUSIC_UPLOAD_FILES,
 	MUSIC_OBJECT_SCAN_LIMIT,
 	MUSIC_PREFIX,
 } from "./constants";
@@ -16,6 +18,7 @@ import {
 	embeddedCoverUrlForMusicKey,
 	getMusicFileNameFromKey,
 	incrementCacheVersion,
+	inferMusicMetadataFromKey,
 	isAvatarUrl,
 	json,
 	readBoolean,
@@ -68,8 +71,8 @@ export async function getPublicMusicTracks(env: Env): Promise<Response> {
 export async function listAdminMusic(env: Env): Promise<Response> {
 	const result = await env.DB.prepare(
 		`SELECT id, title, artist, album, object_key AS objectKey, cover_url AS coverUrl,
-            is_active AS isActive, sort_order AS sortOrder, created_at AS createdAt,
-            updated_at AS updatedAt
+            is_active AS isActive, sort_order AS sortOrder, content_hash AS contentHash,
+            created_at AS createdAt, updated_at AS updatedAt
      FROM music_tracks
      ORDER BY sort_order ASC, created_at DESC`,
 	).all();
@@ -182,6 +185,209 @@ export async function importR2MusicObjects(
 		),
 	);
 	return json({ ok: true, imported }, 201);
+}
+
+// ================================================================
+// Admin: upload and sort music
+// ================================================================
+
+export async function normalizeMusicTrackSort(
+	request: Request,
+	env: Env,
+	ctx: ExecutionContext,
+): Promise<Response> {
+	const result = await env.DB.prepare(
+		`SELECT id
+	     FROM music_tracks
+	     ORDER BY sort_order ASC, created_at DESC, id ASC`,
+	).all<{ id: number }>();
+	const rows = result.results ?? [];
+
+	if (rows.length === 0) {
+		return json({ ok: true, updated: 0 });
+	}
+
+	const statements = rows.map((row, index) =>
+		env.DB.prepare("UPDATE music_tracks SET sort_order = ? WHERE id = ?").bind(
+			index + 1,
+			row.id,
+		),
+	);
+	const results = await env.DB.batch(statements);
+	if (results.some((item) => !item.success)) {
+		return json({ error: apiError("SERVER_ERROR") }, 500);
+	}
+
+	invalidateScanCache();
+	await incrementCacheVersion(env, "music");
+	ctx.waitUntil(
+		auditAdminAction(
+			env,
+			request,
+			"update",
+			"music",
+			"",
+			JSON.stringify({ action: "normalize-sort", count: rows.length }),
+		),
+	);
+	return json({ ok: true, updated: rows.length });
+}
+
+export async function uploadMusicFiles(
+	request: Request,
+	env: Env,
+	ctx: ExecutionContext,
+): Promise<Response> {
+	if (!env.MEDIA_BUCKET) {
+		return json({ error: apiError("MISSING_R2") }, 503);
+	}
+
+	const contentType = request.headers.get("content-type") ?? "";
+	if (!contentType.toLowerCase().includes("multipart/form-data")) {
+		return json({ error: apiError("MUSIC_UPLOAD_TYPE_INVALID") }, 400);
+	}
+
+	const formData = await request.formData();
+	const files = formData
+		.getAll("files")
+		.filter((value): value is File => value instanceof File);
+	const isActive = readBoolean(formData.get("isActive"), true) ? 1 : 0;
+
+	if (files.length === 0) {
+		return json({ error: apiError("MUSIC_UPLOAD_EMPTY") }, 400);
+	}
+	if (files.length > MAX_MUSIC_UPLOAD_FILES) {
+		return json({ error: apiError("MUSIC_UPLOAD_TOO_MANY") }, 400);
+	}
+
+	const maxSortRow = await env.DB.prepare(
+		"SELECT COALESCE(MAX(sort_order), 0) AS maxSort FROM music_tracks",
+	).first<{ maxSort: number }>();
+	let sortOrder = Number(maxSortRow?.maxSort ?? 0) + 1;
+	const uploaded: MusicUploadResult[] = [];
+	const duplicates: MusicUploadResult[] = [];
+	const failed: MusicUploadFailure[] = [];
+
+	for (const file of files) {
+		const fileName = file.name || "music-file";
+		const ext = getAudioExtension(fileName);
+		if (!ext) {
+			failed.push({ fileName, status: "failed", reason: "unsupported-type" });
+			continue;
+		}
+		if (file.size <= 0) {
+			failed.push({ fileName, status: "failed", reason: "empty-file" });
+			continue;
+		}
+		if (file.size > MAX_MUSIC_UPLOAD_BYTES) {
+			failed.push({ fileName, status: "failed", reason: "too-large" });
+			continue;
+		}
+
+		try {
+			const bytes = await file.arrayBuffer();
+			const hash = await sha256Hex(bytes);
+			const existing = await findMusicTrackByHash(env, hash);
+			if (existing) {
+				duplicates.push({
+					fileName,
+					objectKey: existing.objectKey,
+					hash,
+					size: file.size,
+					trackId: existing.id,
+					status: "duplicate",
+				});
+				continue;
+			}
+
+			const objectKey = buildUploadedMusicKey(fileName, hash, ext);
+			const objectExists = await env.MEDIA_BUCKET.head(objectKey);
+			const existingByKey = objectExists
+				? await findMusicTrackByObjectKey(env, objectKey)
+				: null;
+			if (existingByKey) {
+				duplicates.push({
+					fileName,
+					objectKey,
+					hash,
+					size: file.size,
+					trackId: existingByKey.id,
+					status: "duplicate",
+				});
+				continue;
+			}
+
+			if (!objectExists) {
+				await env.MEDIA_BUCKET.put(objectKey, bytes, {
+					httpMetadata: { contentType: audioContentType(ext) },
+				});
+			}
+
+			const r2Metadata = await readMusicMetadataFromR2(env, objectKey);
+			const uploadFallback = inferMusicMetadataFromKey(`music/${fileName}`);
+			const metadata =
+				r2Metadata.artist || r2Metadata.album
+					? r2Metadata
+					: { ...r2Metadata, ...uploadFallback, cover: r2Metadata.cover };
+			const coverUrl = metadata.cover
+				? await saveEmbeddedCover(env, objectKey, metadata.cover)
+				: "";
+			const insert = await env.DB.prepare(
+				`INSERT INTO music_tracks
+		       (title, artist, album, object_key, cover_url, is_active, sort_order, content_hash)
+		       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			)
+				.bind(
+					metadata.title,
+					metadata.artist,
+					metadata.album,
+					objectKey,
+					coverUrl,
+					isActive,
+					sortOrder,
+					hash,
+				)
+				.run();
+
+			uploaded.push({
+				fileName,
+				objectKey,
+				hash,
+				size: file.size,
+				trackId: Number(insert.meta.last_row_id ?? 0),
+				status: "uploaded",
+			});
+			sortOrder += 1;
+		} catch (error) {
+			failed.push({
+				fileName,
+				status: "failed",
+				reason: error instanceof Error ? error.message : "upload-failed",
+			});
+		}
+	}
+
+	if (uploaded.length > 0) {
+		invalidateScanCache();
+		await incrementCacheVersion(env, "music");
+		ctx.waitUntil(
+			auditAdminAction(
+				env,
+				request,
+				"import",
+				"music",
+				"",
+				JSON.stringify({
+					action: "upload",
+					uploaded: uploaded.length,
+					duplicates: duplicates.length,
+					failed: failed.length,
+				}),
+			),
+		);
+	}
+
+	return json({ ok: true, uploaded, duplicates, failed }, 201);
 }
 
 // ================================================================
@@ -302,8 +508,8 @@ export async function updateMusicTrack(
 
 	const track = await env.DB.prepare(
 		`SELECT id, title, artist, album, object_key AS objectKey, cover_url AS coverUrl,
-            is_active AS isActive, sort_order AS sortOrder, created_at AS createdAt,
-            updated_at AS updatedAt
+            is_active AS isActive, sort_order AS sortOrder, content_hash AS contentHash,
+            created_at AS createdAt, updated_at AS updatedAt
      FROM music_tracks WHERE id = ?`,
 	)
 		.bind(id)
@@ -331,6 +537,89 @@ export async function deleteMusicTrack(
 	await incrementCacheVersion(env, "music");
 	ctx.waitUntil(auditAdminAction(env, request, "delete", "music", id));
 	return json({ ok: true });
+}
+
+type MusicUploadResult = {
+	fileName: string;
+	objectKey: string;
+	hash: string;
+	size: number;
+	trackId: number;
+	status: "uploaded" | "duplicate";
+};
+
+type MusicUploadFailure = {
+	fileName: string;
+	status: "failed";
+	reason: string;
+};
+
+type ExistingMusicTrackRef = {
+	id: number;
+	objectKey: string;
+};
+
+async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
+	const digest = await crypto.subtle.digest("SHA-256", bytes);
+	return Array.from(new Uint8Array(digest))
+		.map((byte) => byte.toString(16).padStart(2, "0"))
+		.join("");
+}
+
+function getAudioExtension(fileName: string): string | null {
+	const ext = fileName.split(".").pop()?.toLowerCase() ?? "";
+	return AUDIO_EXTENSIONS.has(ext) ? ext : null;
+}
+
+function buildUploadedMusicKey(
+	fileName: string,
+	hash: string,
+	ext: string,
+): string {
+	const baseName = sanitizeFileName(fileName.replace(/\.[^.]+$/, ""));
+	return `music/${baseName}-${hash.slice(0, 12)}.${ext}`;
+}
+
+function audioContentType(ext: string): string {
+	if (ext === "mp3") return "audio/mpeg";
+	if (ext === "m4a") return "audio/mp4";
+	if (ext === "aac") return "audio/aac";
+	if (ext === "flac") return "audio/flac";
+	if (ext === "wav") return "audio/wav";
+	if (ext === "ogg") return "audio/ogg";
+	if (ext === "opus") return "audio/opus";
+	if (ext === "webm") return "audio/webm";
+	return "application/octet-stream";
+}
+
+async function findMusicTrackByHash(
+	env: Env,
+	hash: string,
+): Promise<ExistingMusicTrackRef | null> {
+	const track = await env.DB.prepare(
+		`SELECT id, object_key AS objectKey
+	     FROM music_tracks
+	     WHERE content_hash = ? AND content_hash != ''
+	     LIMIT 1`,
+	)
+		.bind(hash)
+		.first<ExistingMusicTrackRef>();
+	return track ?? null;
+}
+
+async function findMusicTrackByObjectKey(
+	env: Env,
+	objectKey: string,
+): Promise<ExistingMusicTrackRef | null> {
+	const track = await env.DB.prepare(
+		`SELECT id, object_key AS objectKey
+	     FROM music_tracks
+	     WHERE object_key = ?
+	     LIMIT 1`,
+	)
+		.bind(objectKey)
+		.first<ExistingMusicTrackRef>();
+	return track ?? null;
 }
 
 // ================================================================

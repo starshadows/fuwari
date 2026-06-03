@@ -39,6 +39,21 @@ type MusicObject = {
 	audioUrl: string;
 };
 
+type MusicUploadResult = {
+	fileName: string;
+	objectKey: string;
+	hash: string;
+	size: number;
+	trackId: number;
+	status: "uploaded" | "duplicate";
+};
+
+type MusicUploadFailure = {
+	fileName: string;
+	status: "failed";
+	reason: string;
+};
+
 type CommentSettings = {
 	enabled: boolean;
 };
@@ -75,6 +90,23 @@ let message = "";
 let error = "";
 let isScanningMusic = false;
 let isImportingMusic = false;
+let isUploadingMusic = false;
+let isNormalizingMusicSort = false;
+let selectedMusicFiles: File[] = [];
+let uploadResults: {
+	uploaded: MusicUploadResult[];
+	duplicates: MusicUploadResult[];
+	failed: MusicUploadFailure[];
+} = {
+	uploaded: [],
+	duplicates: [],
+	failed: [],
+};
+let musicSectionsOpen = {
+	upload: true,
+	scan: true,
+	tracks: true,
+};
 let isSavingComments = false;
 let isSavingTelegram = false;
 let isTestingTelegram = false;
@@ -91,16 +123,6 @@ let telegramSettings: TelegramSettings = {
 };
 
 let telegramTokenInput = "";
-
-let musicForm = {
-	title: "",
-	artist: "",
-	album: "",
-	objectKey: "",
-	coverUrl: "",
-	sortOrder: 0,
-	isActive: true,
-};
 
 const statusLabels: Record<FriendStatus, string> = {
 	pending: "待审核",
@@ -300,15 +322,52 @@ const importMusicObjects = async (objectKeys?: string[]) => {
 	}
 };
 
-const fillMusicFormFromObject = (object: MusicObject) => {
-	musicForm = {
-		...musicForm,
-		title: object.title,
-		artist: object.artist,
-		album: object.album,
-		objectKey: object.key,
+const selectMusicFiles = (event: Event) => {
+	const input = event.currentTarget as HTMLInputElement;
+	selectedMusicFiles = Array.from(input.files ?? []);
+};
+
+const uploadMusicFiles = async () => {
+	if (selectedMusicFiles.length === 0) {
+		setError("请选择要上传的音乐文件。");
+		return;
+	}
+
+	const formData = new FormData();
+	for (const file of selectedMusicFiles) {
+		formData.append("files", file);
+	}
+	formData.append("isActive", "true");
+
+	isUploadingMusic = true;
+	try {
+		const data = await adminFetch("/api/admin/music/upload", {
+			method: "POST",
+			body: formData,
+		});
+		uploadResults = {
+			uploaded: data.uploaded ?? [],
+			duplicates: data.duplicates ?? [],
+			failed: data.failed ?? [],
+		};
+		selectedMusicFiles = [];
+		await loadMusic();
+		await loadMusicObjects();
+		setMessage(
+			`上传完成：新增 ${uploadResults.uploaded.length}，重复 ${uploadResults.duplicates.length}，失败 ${uploadResults.failed.length}。`,
+		);
+	} catch (err) {
+		setError(err instanceof Error ? err.message : "音乐上传失败。");
+	} finally {
+		isUploadingMusic = false;
+	}
+};
+
+const toggleMusicSection = (section: keyof typeof musicSectionsOpen) => {
+	musicSectionsOpen = {
+		...musicSectionsOpen,
+		[section]: !musicSectionsOpen[section],
 	};
-	setMessage("已填入识别结果，可以再微调后手动添加。");
 };
 
 const openMusicTab = async () => {
@@ -361,28 +420,6 @@ const deleteFriend = async (friend: Friend) => {
 	}
 };
 
-const createTrack = async () => {
-	try {
-		await adminFetch("/api/admin/music", {
-			method: "POST",
-			body: JSON.stringify(musicForm),
-		});
-		musicForm = {
-			title: "",
-			artist: "",
-			album: "",
-			objectKey: "",
-			coverUrl: "",
-			sortOrder: 0,
-			isActive: true,
-		};
-		await loadMusic();
-		setMessage("歌曲已添加。");
-	} catch (err) {
-		setError(err instanceof Error ? err.message : "歌曲添加失败。");
-	}
-};
-
 const patchTrack = async (track: Track, patch: Record<string, unknown>) => {
 	try {
 		await adminFetch(`/api/admin/music/${track.id}`, {
@@ -414,23 +451,17 @@ const normalizeTrackSort = async () => {
 		return;
 	}
 
-	const orderedTracks = [...tracks].sort((left, right) => {
-		if (left.sortOrder !== right.sortOrder)
-			return left.sortOrder - right.sortOrder;
-		return left.id - right.id;
-	});
-
+	isNormalizingMusicSort = true;
 	try {
-		for (const [index, track] of orderedTracks.entries()) {
-			await adminFetch(`/api/admin/music/${track.id}`, {
-				method: "PATCH",
-				body: JSON.stringify({ sortOrder: index + 1 }),
-			});
-		}
+		const data = await adminFetch("/api/admin/music/normalize-sort", {
+			method: "POST",
+		});
 		await loadMusic();
-		setMessage("排序已整理为 1、2、3...");
+		setMessage(`排序已整理为 1、2、3...，共更新 ${data.updated ?? 0} 首。`);
 	} catch (err) {
 		setError(err instanceof Error ? err.message : "整理排序失败。");
+	} finally {
+		isNormalizingMusicSort = false;
 	}
 };
 
@@ -590,119 +621,179 @@ onMount(async () => {
                 {/each}
             </div>
         {:else if activeTab === "music"}
-            <section class="mb-4 rounded-xl bg-[var(--btn-plain-bg-hover)] p-4">
-                <div class="mb-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                    <div>
-                        <div class="font-bold text-75">智能扫描 R2 音乐</div>
-                        <div class="mt-1 text-sm text-50">{musicObjects.length} 个对象，{unimportedMusicObjects.length} 个未入库</div>
-                    </div>
-                    <div class="flex flex-wrap gap-2">
-                        <button type="button" class="btn-regular h-10 rounded-xl px-4 font-bold" disabled={isScanningMusic} on:click={loadMusicObjects}>
-                            {isScanningMusic ? "扫描中" : "扫描 R2"}
-                        </button>
-                        <button
-                            type="button"
-                            class="btn-regular h-10 rounded-xl px-4 font-bold"
-                            disabled={isImportingMusic || unimportedMusicObjects.length === 0}
-                            on:click={() => importMusicObjects()}
-                        >
-                            {isImportingMusic ? "导入中" : `导入未入库 ${unimportedMusicObjects.length} 首`}
-                        </button>
-                    </div>
-                </div>
+			<section class="mb-4 rounded-xl bg-[var(--btn-plain-bg-hover)] p-4">
+				<button
+					type="button"
+					class="flex w-full items-center justify-between gap-3 text-left"
+					aria-expanded={musicSectionsOpen.upload}
+					on:click={() => toggleMusicSection("upload")}
+				>
+					<div>
+						<div class="font-bold text-75">批量上传音乐</div>
+						<div class="mt-1 text-sm text-50">
+							已选择 {selectedMusicFiles.length} 个文件；上次新增 {uploadResults.uploaded.length}，重复 {uploadResults.duplicates.length}，失败 {uploadResults.failed.length}
+						</div>
+					</div>
+					<span class="text-sm font-bold text-[var(--primary)]">{musicSectionsOpen.upload ? "收起" : "展开"}</span>
+				</button>
 
-                {#if musicObjects.length > 0}
-                    <div class="flex flex-col gap-2">
-                        {#each musicObjects as object}
-                            <div class="rounded-lg bg-[var(--card-bg)] px-3 py-3">
-                                <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                                    <div class="min-w-0">
-                                        <div class="truncate font-bold text-90">{object.title}</div>
-                                        <div class="truncate text-sm text-50">{object.artist || "未知艺术家"}{object.album ? ` · ${object.album}` : ""}</div>
-                                        <div class="mt-1 truncate text-xs text-30">{object.key} · {formatFileSize(object.size)}</div>
-                                    </div>
-                                    <div class="flex shrink-0 flex-wrap gap-2">
-                                        <span class={`rounded-lg px-3 py-2 text-sm font-bold ${object.imported ? "bg-[var(--btn-regular-bg)] text-50" : "bg-[var(--primary)] text-white"}`}>
-                                            {object.imported ? "已入库" : "未入库"}
-                                        </span>
-                                        {#if !object.imported}
-                                            <button type="button" class="btn-regular h-9 rounded-lg px-3 text-sm font-bold" on:click={() => importMusicObjects([object.key])}>
-                                                导入
-                                            </button>
-                                            <button type="button" class="btn-plain h-9 rounded-lg px-3 text-sm font-bold" on:click={() => fillMusicFormFromObject(object)}>
-                                                填入表单
-                                            </button>
-                                        {/if}
-                                    </div>
-                                </div>
-                            </div>
-                        {/each}
-                    </div>
-                {:else}
-                    <div class="rounded-lg bg-[var(--card-bg)] px-4 py-5 text-sm text-50">
-                        暂无扫描结果。
-                    </div>
-                {/if}
-            </section>
+				{#if musicSectionsOpen.upload}
+					<div class="mt-4 flex flex-col gap-3">
+						<input
+							type="file"
+							accept="audio/*,.mp3,.m4a,.aac,.flac,.wav,.ogg,.opus,.webm"
+							multiple
+							class="admin-input h-auto py-3"
+							on:change={selectMusicFiles}
+						/>
+						<div class="flex flex-wrap items-center gap-2">
+							<button
+								type="button"
+								class="btn-regular h-10 rounded-xl px-4 font-bold"
+								disabled={isUploadingMusic || selectedMusicFiles.length === 0}
+								on:click={uploadMusicFiles}
+							>
+								{isUploadingMusic ? "上传中" : `上传并入库 ${selectedMusicFiles.length} 个文件`}
+							</button>
+							<div class="text-sm text-50">单文件上限 25 MB，一次最多 10 个文件。</div>
+						</div>
 
-            <form class="mb-4 rounded-xl bg-[var(--btn-plain-bg-hover)] p-4" on:submit|preventDefault={createTrack}>
-                <div class="mb-3 font-bold text-75">添加音乐</div>
-                <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-                    <input bind:value={musicForm.title} required placeholder="标题" class="admin-input" />
-                    <input bind:value={musicForm.artist} placeholder="艺术家" class="admin-input" />
-                    <input bind:value={musicForm.album} placeholder="专辑" class="admin-input" />
-                    <input bind:value={musicForm.objectKey} required placeholder="music/song.mp3" class="admin-input" />
-                    <input bind:value={musicForm.coverUrl} placeholder="封面 URL，可留空" class="admin-input md:col-span-2" />
-                    <label class="flex items-center gap-2 text-sm text-75">
-                        <input type="checkbox" bind:checked={musicForm.isActive} />
-                        启用
-                    </label>
-                    <input bind:value={musicForm.sortOrder} type="number" placeholder="排序" class="admin-input" />
-                </div>
-                <button type="submit" class="btn-regular mt-3 h-10 rounded-xl px-4 font-bold">
-                    添加
-                </button>
-            </form>
+						{#if uploadResults.uploaded.length || uploadResults.duplicates.length || uploadResults.failed.length}
+							<div class="grid grid-cols-1 gap-2 md:grid-cols-3">
+								<div class="rounded-lg bg-[var(--card-bg)] p-3 text-sm text-75">
+									<div class="mb-2 font-bold text-90">新增 {uploadResults.uploaded.length}</div>
+									{#each uploadResults.uploaded.slice(0, 5) as item}
+										<div class="truncate">{item.fileName}</div>
+									{/each}
+								</div>
+								<div class="rounded-lg bg-[var(--card-bg)] p-3 text-sm text-75">
+									<div class="mb-2 font-bold text-90">重复 {uploadResults.duplicates.length}</div>
+									{#each uploadResults.duplicates.slice(0, 5) as item}
+										<div class="truncate">{item.fileName}</div>
+									{/each}
+								</div>
+								<div class="rounded-lg bg-[var(--card-bg)] p-3 text-sm text-75">
+									<div class="mb-2 font-bold text-90">失败 {uploadResults.failed.length}</div>
+									{#each uploadResults.failed.slice(0, 5) as item}
+										<div class="truncate">{item.fileName}：{item.reason}</div>
+									{/each}
+								</div>
+							</div>
+						{/if}
+					</div>
+				{/if}
+			</section>
 
-            <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
-                <div class="font-bold text-75">已入库音乐</div>
-                <button type="button" class="btn-plain h-10 rounded-xl px-4 font-bold" on:click={normalizeTrackSort}>
-                    整理排序
-                </button>
-            </div>
+			<section class="mb-4 rounded-xl bg-[var(--btn-plain-bg-hover)] p-4">
+				<div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+					<button
+						type="button"
+						class="min-w-0 flex-1 text-left"
+						aria-expanded={musicSectionsOpen.scan}
+						on:click={() => toggleMusicSection("scan")}
+					>
+						<div class="font-bold text-75">智能扫描 R2 音乐</div>
+						<div class="mt-1 text-sm text-50">{musicObjects.length} 个对象，{unimportedMusicObjects.length} 个未入库 · {musicSectionsOpen.scan ? "收起" : "展开"}</div>
+					</button>
+					<div class="flex flex-wrap gap-2">
+						<button type="button" class="btn-regular h-10 rounded-xl px-4 font-bold" disabled={isScanningMusic} on:click={loadMusicObjects}>
+							{isScanningMusic ? "扫描中" : "扫描 R2"}
+						</button>
+						<button
+							type="button"
+							class="btn-regular h-10 rounded-xl px-4 font-bold"
+							disabled={isImportingMusic || unimportedMusicObjects.length === 0}
+							on:click={() => importMusicObjects()}
+						>
+							{isImportingMusic ? "导入中" : `导入未入库 ${unimportedMusicObjects.length} 首`}
+						</button>
+					</div>
+				</div>
 
-            <div class="flex flex-col gap-3">
-                {#each tracks as track}
-                    <div class="rounded-xl bg-[var(--btn-plain-bg-hover)] p-4">
-                        <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-                            <input value={track.title} class="admin-input" on:change={(event) => patchTrack(track, { title: (event.currentTarget as HTMLInputElement).value })} />
-                            <input value={track.artist} class="admin-input" on:change={(event) => patchTrack(track, { artist: (event.currentTarget as HTMLInputElement).value })} />
-                            <input value={track.objectKey} class="admin-input" on:change={(event) => patchTrack(track, { objectKey: (event.currentTarget as HTMLInputElement).value })} />
-                            <input value={track.coverUrl} class="admin-input" placeholder="封面 URL" on:change={(event) => patchTrack(track, { coverUrl: (event.currentTarget as HTMLInputElement).value })} />
-                            <label class="flex items-center gap-2 text-sm text-75">
-                                <input
-                                    type="checkbox"
-                                    checked={Boolean(track.isActive)}
-                                    on:change={(event) => patchTrack(track, { isActive: (event.currentTarget as HTMLInputElement).checked })}
-                                />
-                                启用
-                            </label>
-                            <div class="flex gap-2">
-                                <input
-                                    type="number"
-                                    value={track.sortOrder}
-                                    class="admin-input w-28"
-                                    on:change={(event) => patchTrack(track, { sortOrder: Number((event.currentTarget as HTMLInputElement).value) })}
-                                />
-                                <button type="button" class="btn-plain h-10 rounded-xl px-4 font-bold" on:click={() => deleteTrack(track)}>
-                                    删除
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                {/each}
-            </div>
-        {:else if activeTab === "comments"}
+				{#if musicSectionsOpen.scan}
+					{#if musicObjects.length > 0}
+						<div class="mt-3 flex max-h-[32rem] flex-col gap-2 overflow-y-auto pr-1">
+							{#each musicObjects as object}
+								<div class="rounded-lg bg-[var(--card-bg)] px-3 py-3">
+									<div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+										<div class="min-w-0">
+											<div class="truncate font-bold text-90">{object.title}</div>
+											<div class="truncate text-sm text-50">{object.artist || "未知艺术家"}{object.album ? ` · ${object.album}` : ""}</div>
+											<div class="mt-1 truncate text-xs text-30">{object.key} · {formatFileSize(object.size)}</div>
+										</div>
+										<div class="flex shrink-0 flex-wrap gap-2">
+											<span class={`rounded-lg px-3 py-2 text-sm font-bold ${object.imported ? "bg-[var(--btn-regular-bg)] text-50" : "bg-[var(--primary)] text-white"}`}>
+												{object.imported ? "已入库" : "未入库"}
+											</span>
+											{#if !object.imported}
+												<button type="button" class="btn-regular h-9 rounded-lg px-3 text-sm font-bold" on:click={() => importMusicObjects([object.key])}>
+													导入
+												</button>
+											{/if}
+										</div>
+									</div>
+								</div>
+							{/each}
+						</div>
+					{:else}
+						<div class="mt-3 rounded-lg bg-[var(--card-bg)] px-4 py-5 text-sm text-50">
+							暂无扫描结果。
+						</div>
+					{/if}
+				{/if}
+			</section>
+
+			<section class="rounded-xl bg-[var(--btn-plain-bg-hover)] p-4">
+				<div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+					<button
+						type="button"
+						class="text-left"
+						aria-expanded={musicSectionsOpen.tracks}
+						on:click={() => toggleMusicSection("tracks")}
+					>
+						<div class="font-bold text-75">已入库音乐</div>
+						<div class="mt-1 text-sm text-50">共 {tracks.length} 首 · {musicSectionsOpen.tracks ? "收起" : "展开"}</div>
+					</button>
+					<button type="button" class="btn-plain h-10 rounded-xl px-4 font-bold" disabled={isNormalizingMusicSort} on:click={normalizeTrackSort}>
+						{isNormalizingMusicSort ? "整理中" : "整理排序"}
+					</button>
+				</div>
+
+				{#if musicSectionsOpen.tracks}
+					<div class="flex max-h-[52rem] flex-col gap-3 overflow-y-auto pr-1">
+						{#each tracks as track}
+							<div class="rounded-xl bg-[var(--card-bg)] p-4">
+								<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+									<input value={track.title} class="admin-input" on:change={(event) => patchTrack(track, { title: (event.currentTarget as HTMLInputElement).value })} />
+									<input value={track.artist} class="admin-input" on:change={(event) => patchTrack(track, { artist: (event.currentTarget as HTMLInputElement).value })} />
+									<input value={track.objectKey} class="admin-input" on:change={(event) => patchTrack(track, { objectKey: (event.currentTarget as HTMLInputElement).value })} />
+									<input value={track.coverUrl} class="admin-input" placeholder="封面 URL" on:change={(event) => patchTrack(track, { coverUrl: (event.currentTarget as HTMLInputElement).value })} />
+									<label class="flex items-center gap-2 text-sm text-75">
+										<input
+											type="checkbox"
+											checked={Boolean(track.isActive)}
+											on:change={(event) => patchTrack(track, { isActive: (event.currentTarget as HTMLInputElement).checked })}
+										/>
+										启用
+									</label>
+									<div class="flex gap-2">
+										<input
+											type="number"
+											value={track.sortOrder}
+											class="admin-input w-28"
+											on:change={(event) => patchTrack(track, { sortOrder: Number((event.currentTarget as HTMLInputElement).value) })}
+										/>
+										<button type="button" class="btn-plain h-10 rounded-xl px-4 font-bold" on:click={() => deleteTrack(track)}>
+											删除
+										</button>
+									</div>
+								</div>
+							</div>
+						{/each}
+					</div>
+				{/if}
+			</section>
+		{:else if activeTab === "comments"}
             <section class="rounded-xl bg-[var(--btn-plain-bg-hover)] p-4">
                 <div class="mb-3 font-bold text-75">评论区开关</div>
                 <label class="flex items-center gap-2 text-sm text-75">

@@ -19,6 +19,8 @@ export const RATE_LIMIT_MAX_AGE_SECONDS: number = 24 * 60 * 60;
 export const MAX_JSON_BODY_BYTES: number = 64 * 1024; // 64 KB — general JSON endpoints
 export const MAX_TWIKOO_BODY_BYTES: number = 10 * 1024 * 1024; // 10 MB — Twikoo (includes uploads)
 export const MAX_IMAGE_UPLOAD_BYTES: number = 5 * 1024 * 1024; // 5 MB — decoded image payload
+export const MAX_MUSIC_UPLOAD_BYTES: number = 25 * 1024 * 1024; // 25 MB — per uploaded audio file
+export const MAX_MUSIC_UPLOAD_FILES: number = 10;
 
 // ----------------------------------------------------------------
 // Music constants
@@ -144,6 +146,9 @@ export const API_ERROR = {
 	MUSIC_COVER_R2: "封面地址需要是公网图片或站内头像地址。",
 	MUSIC_OBJECT_KEY_INVALID: "R2 音频 Key 不正确。",
 	MUSIC_IMPORT_EMPTY: "没有可导入的新音乐。",
+	MUSIC_UPLOAD_EMPTY: "请选择要上传的音乐文件。",
+	MUSIC_UPLOAD_TYPE_INVALID: "请使用 multipart/form-data 上传音乐文件。",
+	MUSIC_UPLOAD_TOO_MANY: "一次上传的音乐文件过多。",
 	TELEGRAM_INCOMPLETE: "Telegram 通知尚未完整配置。",
 	TELEGRAM_FAILED: "Telegram API 返回错误。",
 	TWIKOO_SESSION_REQUIRED: "请先完成评论区人机验证。",
