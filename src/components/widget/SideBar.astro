@@ -234,9 +234,18 @@ function setupSidebarScrollIsolation() {
     const scrollWithWheel = (event, scroller) => {
         if (!desktopQuery.matches || Math.abs(event.deltaY) < 0.5) return;
 
+        const delta = normalizeWheelDeltaY(event, scroller);
+        const canScrollDown = scroller.scrollTop + scroller.clientHeight < scroller.scrollHeight - 0.5;
+        const canScrollUp = scroller.scrollTop > 0.5;
+
+        // Let the event propagate to the page when the scroller is at its boundary
+        if ((delta > 0 && !canScrollDown) || (delta < 0 && !canScrollUp)) {
+            return;
+        }
+
         event.preventDefault();
         event.stopPropagation();
-        scroller.scrollTop += normalizeWheelDeltaY(event, scroller);
+        scroller.scrollTop += delta;
     };
 
     const bindWheel = (scroller, skipSelector) => {
@@ -267,6 +276,15 @@ function setupSidebarScrollIsolation() {
             lastY = nextY;
 
             if (Math.abs(deltaY) < 0.5) return;
+
+            const canScrollDown = scroller.scrollTop + scroller.clientHeight < scroller.scrollHeight - 0.5;
+            const canScrollUp = scroller.scrollTop > 0.5;
+
+            // Let the event propagate to the page when the scroller is at its boundary
+            if ((deltaY > 0 && !canScrollDown) || (deltaY < 0 && !canScrollUp)) {
+                return;
+            }
+
             event.preventDefault();
             event.stopPropagation();
             scroller.scrollTop += deltaY;
