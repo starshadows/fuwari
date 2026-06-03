@@ -6,7 +6,13 @@ import {
 	MAX_JSON_BODY_BYTES,
 	TELEGRAM_SETTINGS_KEY,
 } from "./constants";
-import { sendTelegramMessage, writeTelegramSettings } from "./friends";
+import {
+	readTelegramCommentSettings,
+	resolveTelegramCommentSettings,
+	sendTelegramMessage,
+	writeTelegramCommentSettings,
+	writeTelegramSettings,
+} from "./friends";
 import {
 	createMusicTrack,
 	deleteMusicTrack,
@@ -18,7 +24,11 @@ import {
 	uploadMusicFiles,
 } from "./music";
 import type { Env } from "./types";
-import type { FriendDto, TelegramSettings } from "./types/aliases";
+import type {
+	FriendDto,
+	TelegramCommentSettings,
+	TelegramSettings,
+} from "./types/aliases";
 import {
 	auditAdminAction,
 	getAppSetting,
@@ -59,6 +69,14 @@ export async function handleAdminApi(
 				return updateAdminCommentsSettings(request, env, ctx);
 		}
 		if (segments[3] === "telegram") {
+			if (segments[4] === "comments") {
+				if (!segments[5] && request.method === "GET")
+					return getAdminTelegramCommentSettings(env);
+				if (!segments[5] && request.method === "POST")
+					return updateAdminTelegramCommentSettings(request, env, ctx);
+				if (segments[5] === "test" && request.method === "POST")
+					return sendAdminTelegramCommentTest(env);
+			}
 			if (!segments[4] && request.method === "GET")
 				return getAdminTelegramSettings(env);
 			if (!segments[4] && request.method === "POST")
@@ -202,6 +220,80 @@ async function sendAdminTelegramTest(env: Env): Promise<Response> {
 	const result = await sendTelegramMessage(
 		settings,
 		"这是一条来自星影博客后台的 Telegram 测试通知。",
+	);
+	if (!result.ok) return json({ error: result.error }, 502);
+	return json({ ok: true });
+}
+
+async function getAdminTelegramCommentSettings(env: Env): Promise<Response> {
+	const settings = await readTelegramCommentSettings(env);
+	return json({
+		enabled: settings.enabled,
+		useFriendSettings: settings.useFriendSettings,
+		botTokenConfigured: Boolean(settings.botToken),
+		chatId: settings.chatId,
+		threadId: settings.threadId,
+	});
+}
+
+async function updateAdminTelegramCommentSettings(
+	request: Request,
+	env: Env,
+	ctx: ExecutionContext,
+): Promise<Response> {
+	const current = await readTelegramCommentSettings(env);
+	const bodyError = rejectOversizedBody(request, MAX_JSON_BODY_BYTES);
+	if (bodyError) return bodyError;
+
+	const body = await readJson(request);
+	const botToken = readString(body.botToken, 256);
+	const settings: TelegramCommentSettings = {
+		enabled: readBoolean(body.enabled, current.enabled),
+		useFriendSettings: readBoolean(
+			body.useFriendSettings,
+			current.useFriendSettings,
+		),
+		botToken:
+			botToken ||
+			(readBoolean(body.clearBotToken, false) ? "" : current.botToken),
+		chatId: readString(body.chatId, 120),
+		threadId: readString(body.threadId, 40),
+	};
+
+	await writeTelegramCommentSettings(env, settings);
+	ctx.waitUntil(
+		auditAdminAction(
+			env,
+			request,
+			"update",
+			"telegram",
+			"",
+			JSON.stringify({
+				target: "comments",
+				enabled: settings.enabled,
+				useFriendSettings: settings.useFriendSettings,
+			}),
+		),
+	);
+	return json({
+		ok: true,
+		enabled: settings.enabled,
+		useFriendSettings: settings.useFriendSettings,
+		botTokenConfigured: Boolean(settings.botToken),
+		chatId: settings.chatId,
+		threadId: settings.threadId,
+	});
+}
+
+async function sendAdminTelegramCommentTest(env: Env): Promise<Response> {
+	const settings = await resolveTelegramCommentSettings(env);
+	if (!settings.enabled || !settings.botToken || !settings.chatId) {
+		return json({ error: apiError("TELEGRAM_INCOMPLETE") }, 400);
+	}
+
+	const result = await sendTelegramMessage(
+		settings,
+		"这是一条来自星影博客后台的 Telegram 评论测试通知。",
 	);
 	if (!result.ok) return json({ error: result.error }, 502);
 	return json({ ok: true });

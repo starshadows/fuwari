@@ -65,6 +65,10 @@ type TelegramSettings = {
 	threadId: string;
 };
 
+type TelegramCommentSettings = TelegramSettings & {
+	useFriendSettings: boolean;
+};
+
 const tokenKey = "fuwari-admin-token";
 const tokenLoginTimeKey = "fuwari-admin-login-time";
 const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
@@ -80,7 +84,7 @@ const statusOptions: FriendStatus[] = [
 let tokenInput = "";
 let token = "";
 let isAuthed = false;
-let activeTab: AdminTab = "friends";
+let activeTab: AdminTab = "music";
 let friendStatus: FriendStatus = "pending";
 let friends: Friend[] = [];
 let tracks: Track[] = [];
@@ -104,12 +108,15 @@ let uploadResults: {
 };
 let musicSectionsOpen = {
 	upload: true,
-	scan: true,
-	tracks: true,
+	scan: false,
+	tracks: false,
 };
+let musicFileInput: HTMLInputElement | null = null;
 let isSavingComments = false;
-let isSavingTelegram = false;
-let isTestingTelegram = false;
+let isSavingFriendTelegram = false;
+let isTestingFriendTelegram = false;
+let isSavingCommentTelegram = false;
+let isTestingCommentTelegram = false;
 
 let commentSettings: CommentSettings = {
 	enabled: true,
@@ -124,6 +131,16 @@ let telegramSettings: TelegramSettings = {
 
 let telegramTokenInput = "";
 
+let commentTelegramSettings: TelegramCommentSettings = {
+	enabled: false,
+	useFriendSettings: true,
+	botTokenConfigured: false,
+	chatId: "",
+	threadId: "",
+};
+
+let commentTelegramTokenInput = "";
+
 const statusLabels: Record<FriendStatus, string> = {
 	pending: "待审核",
 	approved: "已通过",
@@ -132,6 +149,10 @@ const statusLabels: Record<FriendStatus, string> = {
 };
 
 $: unimportedMusicObjects = musicObjects.filter((object) => !object.imported);
+$: selectedMusicFileSummary =
+	selectedMusicFiles.length === 0
+		? "未选择任何文件"
+		: `${selectedMusicFiles.length} 个文件`;
 
 const setMessage = (value: string) => {
 	message = value;
@@ -172,12 +193,13 @@ const login = async () => {
 	}
 
 	try {
-		await loadFriends();
+		activeTab = "music";
+		await loadMusic();
 		sessionStorage.setItem(tokenKey, token);
 		sessionStorage.setItem(tokenLoginTimeKey, String(Date.now()));
 		isAuthed = true;
 		setMessage("已登录。");
-		await loadMusic();
+		await loadMusicObjects();
 		startInactivityTimer();
 	} catch (err) {
 		token = "";
@@ -242,8 +264,20 @@ const loadTelegramSettings = async () => {
 	telegramTokenInput = "";
 };
 
+const loadTelegramCommentSettings = async () => {
+	const data = await adminFetch("/api/admin/settings/telegram/comments");
+	commentTelegramSettings = {
+		enabled: Boolean(data.enabled),
+		useFriendSettings: Boolean(data.useFriendSettings),
+		botTokenConfigured: Boolean(data.botTokenConfigured),
+		chatId: data.chatId ?? "",
+		threadId: data.threadId ?? "",
+	};
+	commentTelegramTokenInput = "";
+};
+
 const saveTelegramSettings = async () => {
-	isSavingTelegram = true;
+	isSavingFriendTelegram = true;
 	try {
 		const data = await adminFetch("/api/admin/settings/telegram", {
 			method: "POST",
@@ -261,23 +295,66 @@ const saveTelegramSettings = async () => {
 			threadId: data.threadId ?? "",
 		};
 		telegramTokenInput = "";
-		setMessage("Telegram 通知设置已保存。");
+		setMessage("友链申请通知设置已保存。");
 	} catch (err) {
-		setError(err instanceof Error ? err.message : "Telegram 设置保存失败。");
+		setError(err instanceof Error ? err.message : "友链通知设置保存失败。");
 	} finally {
-		isSavingTelegram = false;
+		isSavingFriendTelegram = false;
 	}
 };
 
 const sendTelegramTest = async () => {
-	isTestingTelegram = true;
+	isTestingFriendTelegram = true;
 	try {
 		await adminFetch("/api/admin/settings/telegram/test", { method: "POST" });
-		setMessage("测试通知已发送。");
+		setMessage("友链申请测试通知已发送。");
 	} catch (err) {
-		setError(err instanceof Error ? err.message : "测试通知发送失败。");
+		setError(err instanceof Error ? err.message : "友链测试通知发送失败。");
 	} finally {
-		isTestingTelegram = false;
+		isTestingFriendTelegram = false;
+	}
+};
+
+const saveTelegramCommentSettings = async () => {
+	isSavingCommentTelegram = true;
+	try {
+		const data = await adminFetch("/api/admin/settings/telegram/comments", {
+			method: "POST",
+			body: JSON.stringify({
+				enabled: commentTelegramSettings.enabled,
+				useFriendSettings: commentTelegramSettings.useFriendSettings,
+				botToken: commentTelegramTokenInput,
+				chatId: commentTelegramSettings.chatId,
+				threadId: commentTelegramSettings.threadId,
+			}),
+		});
+		commentTelegramSettings = {
+			enabled: Boolean(data.enabled),
+			useFriendSettings: Boolean(data.useFriendSettings),
+			botTokenConfigured: Boolean(data.botTokenConfigured),
+			chatId: data.chatId ?? "",
+			threadId: data.threadId ?? "",
+		};
+		commentTelegramTokenInput = "";
+		setMessage("评论通知设置已保存。");
+	} catch (err) {
+		setError(err instanceof Error ? err.message : "评论通知设置保存失败。");
+	} finally {
+		isSavingCommentTelegram = false;
+	}
+};
+
+const sendTelegramCommentTest = async () => {
+	isTestingCommentTelegram = true;
+	try {
+		await adminFetch("/api/admin/settings/telegram/comments/test", {
+			method: "POST",
+		});
+		setMessage("评论测试通知已发送。");
+	} catch (err) {
+		setError(err instanceof Error ? err.message : "评论测试通知发送失败。");
+	} finally {
+		isTestingCommentTelegram = false;
 	}
 };
 
@@ -327,6 +404,10 @@ const selectMusicFiles = (event: Event) => {
 	selectedMusicFiles = Array.from(input.files ?? []);
 };
 
+const openMusicFilePicker = () => {
+	musicFileInput?.click();
+};
+
 const uploadMusicFiles = async () => {
 	if (selectedMusicFiles.length === 0) {
 		setError("请选择要上传的音乐文件。");
@@ -351,6 +432,7 @@ const uploadMusicFiles = async () => {
 			failed: data.failed ?? [],
 		};
 		selectedMusicFiles = [];
+		if (musicFileInput) musicFileInput.value = "";
 		await loadMusic();
 		await loadMusicObjects();
 		setMessage(
@@ -370,6 +452,11 @@ const toggleMusicSection = (section: keyof typeof musicSectionsOpen) => {
 	};
 };
 
+const openFriendsTab = async () => {
+	activeTab = "friends";
+	await loadFriends();
+};
+
 const openMusicTab = async () => {
 	activeTab = "music";
 	if (musicObjects.length === 0) await loadMusicObjects();
@@ -383,6 +470,7 @@ const openCommentsTab = async () => {
 const openNotificationsTab = async () => {
 	activeTab = "notifications";
 	await loadTelegramSettings();
+	await loadTelegramCommentSettings();
 };
 
 const formatFileSize = (size: number) => {
@@ -525,7 +613,7 @@ onMount(async () => {
             <div class="flex flex-wrap gap-2">
                 <button
                     class={`btn-regular h-10 rounded-xl px-4 font-bold ${activeTab === "friends" ? "!bg-[var(--btn-regular-bg-active)]" : ""}`}
-                    on:click={() => (activeTab = "friends")}
+                    on:click={openFriendsTab}
                 >
                     友链
                 </button>
@@ -622,30 +710,46 @@ onMount(async () => {
             </div>
         {:else if activeTab === "music"}
 			<section class="mb-4 rounded-xl bg-[var(--btn-plain-bg-hover)] p-4">
-				<button
-					type="button"
-					class="flex w-full items-center justify-between gap-3 text-left"
-					aria-expanded={musicSectionsOpen.upload}
-					on:click={() => toggleMusicSection("upload")}
-				>
-					<div>
+				<div class="flex items-center justify-between gap-3">
+					<button
+						type="button"
+						class="min-w-0 flex-1 text-left"
+						aria-expanded={musicSectionsOpen.upload}
+						on:click={() => toggleMusicSection("upload")}
+					>
 						<div class="font-bold text-75">批量上传音乐</div>
 						<div class="mt-1 text-sm text-50">
 							已选择 {selectedMusicFiles.length} 个文件；上次新增 {uploadResults.uploaded.length}，重复 {uploadResults.duplicates.length}，失败 {uploadResults.failed.length}
 						</div>
-					</div>
-					<span class="text-sm font-bold text-[var(--primary)]">{musicSectionsOpen.upload ? "收起" : "展开"}</span>
-				</button>
+					</button>
+					<button
+						type="button"
+						class="admin-collapse-button"
+						aria-expanded={musicSectionsOpen.upload}
+						on:click={() => toggleMusicSection("upload")}
+					>
+						{musicSectionsOpen.upload ? "收起" : "展开"}
+					</button>
+				</div>
 
 				{#if musicSectionsOpen.upload}
 					<div class="mt-4 flex flex-col gap-3">
 						<input
+							bind:this={musicFileInput}
 							type="file"
 							accept="audio/*,.mp3,.m4a,.aac,.flac,.wav,.ogg,.opus,.webm"
 							multiple
-							class="admin-input h-auto py-3"
+							class="sr-only"
 							on:change={selectMusicFiles}
 						/>
+						<button
+							type="button"
+							class="admin-file-picker"
+							on:click={openMusicFilePicker}
+						>
+							<span class="font-bold text-90">选择文件</span>
+							<span class="text-50">{selectedMusicFileSummary}</span>
+						</button>
 						<div class="flex flex-wrap items-center gap-2">
 							<button
 								type="button"
@@ -655,7 +759,7 @@ onMount(async () => {
 							>
 								{isUploadingMusic ? "上传中" : `上传并入库 ${selectedMusicFiles.length} 个文件`}
 							</button>
-							<div class="text-sm text-50">单文件上限 25 MB，一次最多 10 个文件。</div>
+							<div class="text-sm text-50">单文件上限 25 MB；后端按每批 10 个文件上传到 R2。</div>
 						</div>
 
 						{#if uploadResults.uploaded.length || uploadResults.duplicates.length || uploadResults.failed.length}
@@ -693,7 +797,7 @@ onMount(async () => {
 						on:click={() => toggleMusicSection("scan")}
 					>
 						<div class="font-bold text-75">智能扫描 R2 音乐</div>
-						<div class="mt-1 text-sm text-50">{musicObjects.length} 个对象，{unimportedMusicObjects.length} 个未入库 · {musicSectionsOpen.scan ? "收起" : "展开"}</div>
+						<div class="mt-1 text-sm text-50">{musicObjects.length} 个对象，{unimportedMusicObjects.length} 个未入库</div>
 					</button>
 					<div class="flex flex-wrap gap-2">
 						<button type="button" class="btn-regular h-10 rounded-xl px-4 font-bold" disabled={isScanningMusic} on:click={loadMusicObjects}>
@@ -706,6 +810,14 @@ onMount(async () => {
 							on:click={() => importMusicObjects()}
 						>
 							{isImportingMusic ? "导入中" : `导入未入库 ${unimportedMusicObjects.length} 首`}
+						</button>
+						<button
+							type="button"
+							class="admin-collapse-button"
+							aria-expanded={musicSectionsOpen.scan}
+							on:click={() => toggleMusicSection("scan")}
+						>
+							{musicSectionsOpen.scan ? "收起" : "展开"}
 						</button>
 					</div>
 				</div>
@@ -747,16 +859,26 @@ onMount(async () => {
 				<div class="mb-3 flex flex-wrap items-center justify-between gap-3">
 					<button
 						type="button"
-						class="text-left"
+						class="min-w-0 flex-1 text-left"
 						aria-expanded={musicSectionsOpen.tracks}
 						on:click={() => toggleMusicSection("tracks")}
 					>
 						<div class="font-bold text-75">已入库音乐</div>
-						<div class="mt-1 text-sm text-50">共 {tracks.length} 首 · {musicSectionsOpen.tracks ? "收起" : "展开"}</div>
+						<div class="mt-1 text-sm text-50">共 {tracks.length} 首</div>
 					</button>
-					<button type="button" class="btn-plain h-10 rounded-xl px-4 font-bold" disabled={isNormalizingMusicSort} on:click={normalizeTrackSort}>
-						{isNormalizingMusicSort ? "整理中" : "整理排序"}
-					</button>
+					<div class="flex flex-wrap gap-2">
+						<button type="button" class="btn-plain h-10 rounded-xl px-4 font-bold" disabled={isNormalizingMusicSort} on:click={normalizeTrackSort}>
+							{isNormalizingMusicSort ? "整理中" : "整理排序"}
+						</button>
+						<button
+							type="button"
+							class="admin-collapse-button"
+							aria-expanded={musicSectionsOpen.tracks}
+							on:click={() => toggleMusicSection("tracks")}
+						>
+							{musicSectionsOpen.tracks ? "收起" : "展开"}
+						</button>
+					</div>
 				</div>
 
 				{#if musicSectionsOpen.tracks}
@@ -810,8 +932,8 @@ onMount(async () => {
                 </button>
             </section>
         {:else if activeTab === "notifications"}
-            <section class="rounded-xl bg-[var(--btn-plain-bg-hover)] p-4">
-                <div class="mb-3 font-bold text-75">Telegram 友链通知</div>
+            <section class="mb-4 rounded-xl bg-[var(--btn-plain-bg-hover)] p-4">
+                <div class="mb-3 font-bold text-75">Telegram 友链申请通知</div>
                 <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
                     <label class="flex items-center gap-2 text-sm text-75 md:col-span-2">
                         <input type="checkbox" bind:checked={telegramSettings.enabled} />
@@ -830,18 +952,64 @@ onMount(async () => {
                     <button
                         type="button"
                         class="btn-regular h-10 rounded-xl px-4 font-bold"
-                        disabled={isSavingTelegram}
+                        disabled={isSavingFriendTelegram}
                         on:click={saveTelegramSettings}
                     >
-                        {isSavingTelegram ? "保存中" : "保存设置"}
+                        {isSavingFriendTelegram ? "保存中" : "保存友链通知"}
                     </button>
                     <button
                         type="button"
                         class="btn-plain h-10 rounded-xl px-4 font-bold"
-                        disabled={isTestingTelegram}
+                        disabled={isTestingFriendTelegram}
                         on:click={sendTelegramTest}
                     >
-                        {isTestingTelegram ? "发送中" : "发送测试通知"}
+                        {isTestingFriendTelegram ? "发送中" : "发送友链测试"}
+                    </button>
+                </div>
+            </section>
+
+            <section class="rounded-xl bg-[var(--btn-plain-bg-hover)] p-4">
+                <div class="mb-3 font-bold text-75">Telegram 评论通知</div>
+                <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <label class="flex items-center gap-2 text-sm text-75 md:col-span-2">
+                        <input type="checkbox" bind:checked={commentTelegramSettings.enabled} />
+                        启用评论通知
+                    </label>
+                    <label class="flex items-center gap-2 text-sm text-75 md:col-span-2">
+                        <input type="checkbox" bind:checked={commentTelegramSettings.useFriendSettings} />
+                        使用友链申请通知的机器人
+                    </label>
+                    {#if !commentTelegramSettings.useFriendSettings}
+                        <input
+                            bind:value={commentTelegramTokenInput}
+                            type="password"
+                            placeholder={commentTelegramSettings.botTokenConfigured ? "Bot Token 已配置" : "Bot Token"}
+                            class="admin-input md:col-span-2"
+                        />
+                        <input bind:value={commentTelegramSettings.chatId} placeholder="Chat ID" class="admin-input" />
+                        <input bind:value={commentTelegramSettings.threadId} placeholder="Topic / Thread ID（可选）" class="admin-input" />
+                    {:else}
+                        <div class="rounded-xl bg-[var(--card-bg)] px-4 py-3 text-sm text-50 md:col-span-2">
+                            将使用上方友链申请通知的 Bot Token、Chat ID 和 Topic。
+                        </div>
+                    {/if}
+                </div>
+                <div class="mt-4 flex flex-wrap gap-2">
+                    <button
+                        type="button"
+                        class="btn-regular h-10 rounded-xl px-4 font-bold"
+                        disabled={isSavingCommentTelegram}
+                        on:click={saveTelegramCommentSettings}
+                    >
+                        {isSavingCommentTelegram ? "保存中" : "保存评论通知"}
+                    </button>
+                    <button
+                        type="button"
+                        class="btn-plain h-10 rounded-xl px-4 font-bold"
+                        disabled={isTestingCommentTelegram}
+                        on:click={sendTelegramCommentTest}
+                    >
+                        {isTestingCommentTelegram ? "发送中" : "发送评论测试"}
                     </button>
                 </div>
             </section>
@@ -865,6 +1033,43 @@ onMount(async () => {
     }
 
     .admin-input:focus {
+        background: var(--btn-regular-bg);
+    }
+
+    .admin-collapse-button {
+        min-height: 2.5rem;
+        border-radius: 0.75rem;
+        background: var(--btn-regular-bg);
+        padding: 0 1rem;
+        color: var(--primary);
+        font-size: 0.875rem;
+        font-weight: 700;
+        transition: background-color 150ms ease, transform 150ms ease;
+    }
+
+    .admin-collapse-button:hover {
+        background: var(--btn-regular-bg-hover);
+    }
+
+    .admin-collapse-button:active {
+        transform: scale(0.97);
+    }
+
+    .admin-file-picker {
+        display: flex;
+        min-height: 3.5rem;
+        width: 100%;
+        align-items: center;
+        justify-content: flex-start;
+        gap: 0.75rem;
+        border-radius: 0.875rem;
+        background: var(--card-bg);
+        padding: 0 1rem;
+        text-align: left;
+        transition: background-color 150ms ease;
+    }
+
+    .admin-file-picker:hover {
         background: var(--btn-regular-bg);
     }
 </style>

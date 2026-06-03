@@ -3,10 +3,14 @@ import {
 	apiError,
 	MAX_JSON_BODY_BYTES,
 	RATE_LIMITS,
+	TELEGRAM_COMMENT_SETTINGS_KEY,
 	TELEGRAM_SETTINGS_KEY,
 } from "./constants";
 import type { Env } from "./types";
-import type { TelegramSettings } from "./types/aliases";
+import type {
+	TelegramCommentSettings,
+	TelegramSettings,
+} from "./types/aliases";
 import {
 	enforceRateLimit,
 	getAppSetting,
@@ -16,6 +20,7 @@ import {
 	isValidFriendUrl,
 	json,
 	normalizeFriendHostname,
+	readBoolean,
 	readHumanProof,
 	readJson,
 	readString,
@@ -185,6 +190,76 @@ export async function writeTelegramSettings(
 	settings: TelegramSettings,
 ): Promise<void> {
 	await setAppSetting(env, TELEGRAM_SETTINGS_KEY, JSON.stringify(settings));
+}
+
+export async function readTelegramCommentSettings(
+	env: Env,
+): Promise<TelegramCommentSettings> {
+	const stored = await getAppSetting(env, TELEGRAM_COMMENT_SETTINGS_KEY);
+	if (!stored) {
+		const friendSettings = await readTelegramSettings(env);
+		return {
+			enabled: friendSettings.enabled,
+			useFriendSettings: true,
+			botToken: "",
+			chatId: "",
+			threadId: "",
+		};
+	}
+	try {
+		const parsed = JSON.parse(stored) as Partial<TelegramCommentSettings>;
+		return {
+			enabled: Boolean(parsed.enabled),
+			useFriendSettings: readBoolean(parsed.useFriendSettings, true),
+			botToken: readString(parsed.botToken, 256),
+			chatId: readString(parsed.chatId, 120),
+			threadId: readString(parsed.threadId, 40),
+		};
+	} catch {
+		return {
+			enabled: false,
+			useFriendSettings: true,
+			botToken: "",
+			chatId: "",
+			threadId: "",
+		};
+	}
+}
+
+export async function writeTelegramCommentSettings(
+	env: Env,
+	settings: TelegramCommentSettings,
+): Promise<void> {
+	await setAppSetting(
+		env,
+		TELEGRAM_COMMENT_SETTINGS_KEY,
+		JSON.stringify(settings),
+	);
+}
+
+export async function resolveTelegramCommentSettings(
+	env: Env,
+): Promise<TelegramSettings> {
+	const commentSettings = await readTelegramCommentSettings(env);
+	if (!commentSettings.enabled) {
+		return { enabled: false, botToken: "", chatId: "", threadId: "" };
+	}
+	if (!commentSettings.useFriendSettings) {
+		return {
+			enabled: true,
+			botToken: commentSettings.botToken,
+			chatId: commentSettings.chatId,
+			threadId: commentSettings.threadId,
+		};
+	}
+
+	const friendSettings = await readTelegramSettings(env);
+	return {
+		enabled: true,
+		botToken: friendSettings.botToken,
+		chatId: friendSettings.chatId,
+		threadId: friendSettings.threadId,
+	};
 }
 
 export async function readTelegramSettingsPublic(

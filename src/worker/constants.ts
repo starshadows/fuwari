@@ -5,6 +5,7 @@ export const ADMIN_TOKEN_SETTING_KEY = "admin_token_sha256";
 export const STATS_SALT_SETTING_KEY = "stats_salt";
 export const COMMENTS_ENABLED_SETTING_KEY = "comments_enabled";
 export const TELEGRAM_SETTINGS_KEY = "telegram_friend_notification";
+export const TELEGRAM_COMMENT_SETTINGS_KEY = "telegram_comment_notification";
 export const COMMENTS_SESSION_COOKIE = "fuwari_comments_session";
 
 // ----------------------------------------------------------------
@@ -20,13 +21,14 @@ export const MAX_JSON_BODY_BYTES: number = 64 * 1024; // 64 KB — general JSON 
 export const MAX_TWIKOO_BODY_BYTES: number = 10 * 1024 * 1024; // 10 MB — Twikoo (includes uploads)
 export const MAX_IMAGE_UPLOAD_BYTES: number = 5 * 1024 * 1024; // 5 MB — decoded image payload
 export const MAX_MUSIC_UPLOAD_BYTES: number = 25 * 1024 * 1024; // 25 MB — per uploaded audio file
-export const MAX_MUSIC_UPLOAD_FILES: number = 10;
+export const MUSIC_UPLOAD_R2_BATCH_SIZE: number = 10;
 
 // ----------------------------------------------------------------
 // Music constants
 // ----------------------------------------------------------------
 export const MUSIC_PREFIX = "music/";
 export const MUSIC_OBJECT_SCAN_LIMIT = 200;
+export const DEFAULT_MUSIC_COVER_URL = "/favicon/favicon-light-192.png";
 export const MUSIC_METADATA_READ_BYTES: number = 256 * 1024; // 256 KB — ID3v2 tags live at the start of MP3 files
 export const AUDIO_EXTENSIONS: Set<string> = new Set([
 	"mp3",

@@ -57,6 +57,38 @@ function mockEnv(overrides: Partial<Env> = {}): Env {
 	} as Env;
 }
 
+function mockSettingsDb(
+	values: Record<string, string | undefined>,
+): D1Database {
+	const selectStmt = {
+		key: "",
+		bind: vi.fn((key: string) => {
+			selectStmt.key = key;
+			return selectStmt;
+		}),
+		first: vi.fn(async () => {
+			const value = values[selectStmt.key];
+			return value === undefined ? null : { value };
+		}),
+		all: vi.fn().mockResolvedValue({ results: [] }),
+		run: vi.fn().mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
+	};
+	const genericStmt = {
+		bind: vi.fn().mockReturnThis(),
+		first: vi.fn().mockResolvedValue(null),
+		all: vi.fn().mockResolvedValue({ results: [] }),
+		run: vi.fn().mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
+	};
+	return {
+		prepare: vi.fn((sql: string) =>
+			sql.includes("SELECT value FROM app_settings") ? selectStmt : genericStmt,
+		),
+		batch: vi.fn().mockResolvedValue([]),
+		exec: vi.fn().mockResolvedValue({ count: 0, duration: 0 }),
+		dump: vi.fn().mockResolvedValue([]),
+	} as unknown as D1Database;
+}
+
 function mockCtx(): ExecutionContext {
 	return {
 		waitUntil: vi.fn().mockResolvedValue(undefined),
@@ -569,12 +601,82 @@ describe("Admin music management", () => {
 	let worker: Awaited<typeof import("../index")>;
 
 	beforeAll(async () => {
+		vi.stubGlobal("caches", {
+			default: {
+				match: vi.fn().mockResolvedValue(undefined),
+				put: vi.fn().mockResolvedValue(undefined),
+			},
+		});
 		worker = await import("../index");
+	});
+
+	afterAll(() => {
+		vi.unstubAllGlobals();
 	});
 
 	function adminHeaders(): HeadersInit {
 		return { authorization: "Bearer test-admin-token" };
 	}
+
+	it("returns default cover URLs for music without covers", async () => {
+		const listStmt = {
+			all: vi.fn().mockResolvedValue({
+				results: [
+					{
+						id: 1,
+						title: "No Cover",
+						artist: "Artist",
+						album: "",
+						objectKey: "music/no-cover.mp3",
+						coverUrl: "",
+						isActive: 1,
+						sortOrder: 1,
+					},
+				],
+			}),
+		};
+		const genericStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi
+				.fn()
+				.mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
+		};
+		const db = {
+			prepare: vi.fn((sql: string) =>
+				sql.includes("FROM music_tracks") ? listStmt : genericStmt,
+			),
+			batch: vi.fn().mockResolvedValue([]),
+			exec: vi.fn().mockResolvedValue({ count: 0, duration: 0 }),
+			dump: vi.fn().mockResolvedValue([]),
+		} as unknown as D1Database;
+		const env = mockEnv({ DB: db });
+
+		const adminRes = await worker.default.fetch(
+			new Request("https://blog.example.com/api/admin/music", {
+				headers: adminHeaders(),
+			}),
+			env,
+			mockCtx(),
+		);
+		const adminBody = (await adminRes.json()) as {
+			tracks: Array<{ coverUrl: string }>;
+		};
+		expect(adminBody.tracks[0].coverUrl).toBe("/favicon/favicon-light-192.png");
+
+		const publicRes = await worker.default.fetch(
+			new Request("https://blog.example.com/api/music/tracks"),
+			env,
+			mockCtx(),
+		);
+		const publicBody = (await publicRes.json()) as {
+			tracks: Array<{ coverUrl: string }>;
+		};
+		expect(publicBody.tracks[0].coverUrl).toBe(
+			"/favicon/favicon-light-192.png",
+		);
+	});
 
 	it("normalizes music sort order in one admin API call", async () => {
 		const listStmt = {
@@ -708,6 +810,79 @@ describe("Admin music management", () => {
 		expect(bucket.put).not.toHaveBeenCalled();
 	});
 
+	it("accepts more than 10 files and processes them in backend batches", async () => {
+		const maxSortStmt = {
+			first: vi.fn().mockResolvedValue({ maxSort: 0 }),
+		};
+		const hashStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+		};
+		const objectKeyStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+		};
+		const insertStmt = {
+			bind: vi.fn().mockReturnThis(),
+			run: vi
+				.fn()
+				.mockResolvedValue({ success: true, meta: { last_row_id: 21 } }),
+		};
+		const genericStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi
+				.fn()
+				.mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
+		};
+		const db = {
+			prepare: vi.fn((sql: string) => {
+				if (sql.includes("MAX(sort_order)")) return maxSortStmt;
+				if (sql.includes("content_hash = ?")) return hashStmt;
+				if (sql.includes("WHERE object_key = ?")) return objectKeyStmt;
+				if (sql.includes("INSERT INTO music_tracks")) return insertStmt;
+				return genericStmt;
+			}),
+			batch: vi.fn().mockResolvedValue([]),
+			exec: vi.fn().mockResolvedValue({ count: 0, duration: 0 }),
+			dump: vi.fn().mockResolvedValue([]),
+		} as unknown as D1Database;
+		const bucket = mockR2Bucket();
+		const env = mockEnv({ DB: db, MEDIA_BUCKET: bucket });
+		const formData = new FormData();
+		for (let index = 0; index < 12; index += 1) {
+			formData.append(
+				"files",
+				new File([`audio ${index}`], `Batch ${index}.mp3`, {
+					type: "audio/mpeg",
+				}),
+			);
+		}
+
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/admin/music/upload", {
+				method: "POST",
+				headers: adminHeaders(),
+				body: formData,
+			}),
+			env,
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(201);
+		const body = (await res.json()) as {
+			uploaded: unknown[];
+			duplicates: unknown[];
+			failed: unknown[];
+		};
+		expect(body.uploaded).toHaveLength(12);
+		expect(body.duplicates).toHaveLength(0);
+		expect(body.failed).toHaveLength(0);
+		expect(bucket.put).toHaveBeenCalledTimes(12);
+		expect(insertStmt.run).toHaveBeenCalledTimes(12);
+	});
+
 	it("uploads new music to R2 and inserts a track", async () => {
 		const maxSortStmt = {
 			first: vi.fn().mockResolvedValue({ maxSort: 2 }),
@@ -783,7 +958,7 @@ describe("Admin music management", () => {
 			"Title",
 			"",
 			expect.stringMatching(/^music\/Artist---Title-[a-f0-9]{12}\.mp3$/),
-			"",
+			"/favicon/favicon-light-192.png",
 			1,
 			3,
 			expect.stringMatching(/^[a-f0-9]{64}$/),
@@ -863,6 +1038,121 @@ describe("Admin comments settings", () => {
 		const env = mockEnv({ DB: db });
 		const { areCommentsEnabled } = await import("../comments");
 		expect(await areCommentsEnabled(env)).toBe(true);
+	});
+});
+
+// ================================================================
+// Admin Telegram notification settings
+// ================================================================
+describe("Admin Telegram notification settings", () => {
+	let worker: Awaited<typeof import("../index")>;
+
+	beforeAll(async () => {
+		worker = await import("../index");
+	});
+
+	function adminHeaders(): HeadersInit {
+		return { authorization: "Bearer test-admin-token" };
+	}
+
+	it("sends comment test notifications through shared friend settings", async () => {
+		const db = mockSettingsDb({
+			telegram_friend_notification: JSON.stringify({
+				enabled: false,
+				botToken: "friend-token",
+				chatId: "friend-chat",
+				threadId: "12",
+			}),
+			telegram_comment_notification: JSON.stringify({
+				enabled: true,
+				useFriendSettings: true,
+				botToken: "",
+				chatId: "",
+				threadId: "",
+			}),
+		});
+		const telegramFetch = vi.fn().mockResolvedValue(
+			new Response(JSON.stringify({ ok: true }), {
+				headers: { "content-type": "application/json" },
+			}),
+		);
+		const originalFetch = globalThis.fetch;
+		vi.stubGlobal("fetch", telegramFetch);
+		try {
+			const res = await worker.default.fetch(
+				new Request(
+					"https://blog.example.com/api/admin/settings/telegram/comments/test",
+					{
+						method: "POST",
+						headers: adminHeaders(),
+					},
+				),
+				mockEnv({ DB: db }),
+				mockCtx(),
+			);
+
+			expect(res.status).toBe(200);
+			expect(telegramFetch).toHaveBeenCalledTimes(1);
+			expect(String(telegramFetch.mock.calls[0][0])).toContain(
+				"botfriend-token/sendMessage",
+			);
+			const payload = JSON.parse(
+				String(telegramFetch.mock.calls[0][1]?.body),
+			) as Record<string, unknown>;
+			expect(payload.chat_id).toBe("friend-chat");
+			expect(payload.message_thread_id).toBe(12);
+		} finally {
+			vi.stubGlobal("fetch", originalFetch);
+		}
+	});
+
+	it("saves independent comment notification settings", async () => {
+		const db = mockSettingsDb({
+			telegram_comment_notification: JSON.stringify({
+				enabled: true,
+				useFriendSettings: true,
+				botToken: "",
+				chatId: "",
+				threadId: "",
+			}),
+		});
+		const res = await worker.default.fetch(
+			new Request(
+				"https://blog.example.com/api/admin/settings/telegram/comments",
+				{
+					method: "POST",
+					headers: {
+						...adminHeaders(),
+						"content-type": "application/json",
+					},
+					body: JSON.stringify({
+						enabled: true,
+						useFriendSettings: false,
+						botToken: "comment-token",
+						chatId: "comment-chat",
+						threadId: "34",
+					}),
+				},
+			),
+			mockEnv({ DB: db }),
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as {
+			enabled: boolean;
+			useFriendSettings: boolean;
+			botTokenConfigured: boolean;
+			chatId: string;
+			threadId: string;
+		};
+		expect(body).toMatchObject({
+			enabled: true,
+			useFriendSettings: false,
+			botTokenConfigured: true,
+			chatId: "comment-chat",
+			threadId: "34",
+		});
 	});
 });
 

@@ -1,11 +1,12 @@
 import {
 	AUDIO_EXTENSIONS,
 	apiError,
+	DEFAULT_MUSIC_COVER_URL,
 	MAX_JSON_BODY_BYTES,
 	MAX_MUSIC_UPLOAD_BYTES,
-	MAX_MUSIC_UPLOAD_FILES,
 	MUSIC_OBJECT_SCAN_LIMIT,
 	MUSIC_PREFIX,
+	MUSIC_UPLOAD_R2_BATCH_SIZE,
 } from "./constants";
 import type { Env } from "./types";
 import type {
@@ -52,8 +53,7 @@ export async function getPublicMusicTracks(env: Env): Promise<Response> {
 			artist: row.artist,
 			album: row.album,
 			objectKey: row.objectKey,
-			coverUrl:
-				row.coverUrl || embeddedCoverUrlForMusicKey(String(row.objectKey)),
+			coverUrl: musicCoverUrl(String(row.coverUrl ?? "")),
 			audioUrl: `/media/music/${stripMediaPrefix(
 				String(row.objectKey),
 				"music",
@@ -76,7 +76,14 @@ export async function listAdminMusic(env: Env): Promise<Response> {
      FROM music_tracks
      ORDER BY sort_order ASC, created_at DESC`,
 	).all();
-	return json({ tracks: result.results ?? [] });
+	const tracks = (result.results ?? []).map((track) => {
+		const row = track as Record<string, unknown>;
+		return {
+			...row,
+			coverUrl: musicCoverUrl(String(row.coverUrl ?? "")),
+		};
+	});
+	return json({ tracks });
 }
 
 // ================================================================
@@ -142,7 +149,7 @@ export async function importR2MusicObjects(
 	for (const obj of candidates) {
 		const coverUrl = obj.cover
 			? await saveEmbeddedCover(env, obj.key, obj.cover)
-			: "";
+			: DEFAULT_MUSIC_COVER_URL;
 		const result = await env.DB.prepare(
 			`INSERT INTO music_tracks
        (title, artist, album, object_key, cover_url, is_active, sort_order)
@@ -256,9 +263,6 @@ export async function uploadMusicFiles(
 	if (files.length === 0) {
 		return json({ error: apiError("MUSIC_UPLOAD_EMPTY") }, 400);
 	}
-	if (files.length > MAX_MUSIC_UPLOAD_FILES) {
-		return json({ error: apiError("MUSIC_UPLOAD_TOO_MANY") }, 400);
-	}
 
 	const maxSortRow = await env.DB.prepare(
 		"SELECT COALESCE(MAX(sort_order), 0) AS maxSort FROM music_tracks",
@@ -268,102 +272,108 @@ export async function uploadMusicFiles(
 	const duplicates: MusicUploadResult[] = [];
 	const failed: MusicUploadFailure[] = [];
 
-	for (const file of files) {
-		const fileName = file.name || "music-file";
-		const ext = getAudioExtension(fileName);
-		if (!ext) {
-			failed.push({ fileName, status: "failed", reason: "unsupported-type" });
-			continue;
-		}
-		if (file.size <= 0) {
-			failed.push({ fileName, status: "failed", reason: "empty-file" });
-			continue;
-		}
-		if (file.size > MAX_MUSIC_UPLOAD_BYTES) {
-			failed.push({ fileName, status: "failed", reason: "too-large" });
-			continue;
-		}
-
-		try {
-			const bytes = await file.arrayBuffer();
-			const hash = await sha256Hex(bytes);
-			const existing = await findMusicTrackByHash(env, hash);
-			if (existing) {
-				duplicates.push({
+	for (const batch of chunkFiles(files, MUSIC_UPLOAD_R2_BATCH_SIZE)) {
+		for (const file of batch) {
+			const fileName = file.name || "music-file";
+			const ext = getAudioExtension(fileName);
+			if (!ext) {
+				failed.push({
 					fileName,
-					objectKey: existing.objectKey,
-					hash,
-					size: file.size,
-					trackId: existing.id,
-					status: "duplicate",
+					status: "failed",
+					reason: "unsupported-type",
 				});
 				continue;
 			}
-
-			const objectKey = buildUploadedMusicKey(fileName, hash, ext);
-			const objectExists = await env.MEDIA_BUCKET.head(objectKey);
-			const existingByKey = objectExists
-				? await findMusicTrackByObjectKey(env, objectKey)
-				: null;
-			if (existingByKey) {
-				duplicates.push({
-					fileName,
-					objectKey,
-					hash,
-					size: file.size,
-					trackId: existingByKey.id,
-					status: "duplicate",
-				});
+			if (file.size <= 0) {
+				failed.push({ fileName, status: "failed", reason: "empty-file" });
+				continue;
+			}
+			if (file.size > MAX_MUSIC_UPLOAD_BYTES) {
+				failed.push({ fileName, status: "failed", reason: "too-large" });
 				continue;
 			}
 
-			if (!objectExists) {
-				await env.MEDIA_BUCKET.put(objectKey, bytes, {
-					httpMetadata: { contentType: audioContentType(ext) },
-				});
-			}
+			try {
+				const bytes = await file.arrayBuffer();
+				const hash = await sha256Hex(bytes);
+				const existing = await findMusicTrackByHash(env, hash);
+				if (existing) {
+					duplicates.push({
+						fileName,
+						objectKey: existing.objectKey,
+						hash,
+						size: file.size,
+						trackId: existing.id,
+						status: "duplicate",
+					});
+					continue;
+				}
 
-			const r2Metadata = await readMusicMetadataFromR2(env, objectKey);
-			const uploadFallback = inferMusicMetadataFromKey(`music/${fileName}`);
-			const metadata =
-				r2Metadata.artist || r2Metadata.album
-					? r2Metadata
-					: { ...r2Metadata, ...uploadFallback, cover: r2Metadata.cover };
-			const coverUrl = metadata.cover
-				? await saveEmbeddedCover(env, objectKey, metadata.cover)
-				: "";
-			const insert = await env.DB.prepare(
-				`INSERT INTO music_tracks
-		       (title, artist, album, object_key, cover_url, is_active, sort_order, content_hash)
-		       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			)
-				.bind(
-					metadata.title,
-					metadata.artist,
-					metadata.album,
-					objectKey,
-					coverUrl,
-					isActive,
-					sortOrder,
-					hash,
+				const objectKey = buildUploadedMusicKey(fileName, hash, ext);
+				const objectExists = await env.MEDIA_BUCKET.head(objectKey);
+				const existingByKey = objectExists
+					? await findMusicTrackByObjectKey(env, objectKey)
+					: null;
+				if (existingByKey) {
+					duplicates.push({
+						fileName,
+						objectKey,
+						hash,
+						size: file.size,
+						trackId: existingByKey.id,
+						status: "duplicate",
+					});
+					continue;
+				}
+
+				if (!objectExists) {
+					await env.MEDIA_BUCKET.put(objectKey, bytes, {
+						httpMetadata: { contentType: audioContentType(ext) },
+					});
+				}
+
+				const r2Metadata = await readMusicMetadataFromR2(env, objectKey);
+				const uploadFallback = inferMusicMetadataFromKey(`music/${fileName}`);
+				const metadata =
+					r2Metadata.artist || r2Metadata.album
+						? r2Metadata
+						: { ...r2Metadata, ...uploadFallback, cover: r2Metadata.cover };
+				const coverUrl = metadata.cover
+					? await saveEmbeddedCover(env, objectKey, metadata.cover)
+					: DEFAULT_MUSIC_COVER_URL;
+				const insert = await env.DB.prepare(
+					`INSERT INTO music_tracks
+			       (title, artist, album, object_key, cover_url, is_active, sort_order, content_hash)
+			       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 				)
-				.run();
+					.bind(
+						metadata.title,
+						metadata.artist,
+						metadata.album,
+						objectKey,
+						coverUrl,
+						isActive,
+						sortOrder,
+						hash,
+					)
+					.run();
 
-			uploaded.push({
-				fileName,
-				objectKey,
-				hash,
-				size: file.size,
-				trackId: Number(insert.meta.last_row_id ?? 0),
-				status: "uploaded",
-			});
-			sortOrder += 1;
-		} catch (error) {
-			failed.push({
-				fileName,
-				status: "failed",
-				reason: error instanceof Error ? error.message : "upload-failed",
-			});
+				uploaded.push({
+					fileName,
+					objectKey,
+					hash,
+					size: file.size,
+					trackId: Number(insert.meta.last_row_id ?? 0),
+					status: "uploaded",
+				});
+				sortOrder += 1;
+			} catch (error) {
+				failed.push({
+					fileName,
+					status: "failed",
+					reason: error instanceof Error ? error.message : "upload-failed",
+				});
+			}
 		}
 	}
 
@@ -410,7 +420,7 @@ export async function createMusicTrack(
 		readString(body.objectKey, 500),
 		"music",
 	);
-	const coverUrl = readString(body.coverUrl, 600);
+	const coverUrl = musicCoverUrl(readString(body.coverUrl, 600));
 	const sortOrder = readInteger(body.sortOrder, 0);
 	const isActive = readBoolean(body.isActive, true) ? 1 : 0;
 
@@ -418,7 +428,7 @@ export async function createMusicTrack(
 		return json({ error: apiError("MUSIC_FIELDS_MISSING") }, 400);
 	}
 
-	if (coverUrl && !isAvatarUrl(coverUrl)) {
+	if (!isMusicCoverUrl(coverUrl)) {
 		return json({ error: apiError("MUSIC_COVER_R2") }, 400);
 	}
 
@@ -480,8 +490,8 @@ export async function updateMusicTrack(
 		values.push(v);
 	}
 	if (typeof body.coverUrl === "string") {
-		const v = readString(body.coverUrl, 600);
-		if (v && !isAvatarUrl(v))
+		const v = musicCoverUrl(readString(body.coverUrl, 600));
+		if (!isMusicCoverUrl(v))
 			return json({ error: apiError("MUSIC_COVER_INVALID") }, 400);
 		fields.push("cover_url = ?");
 		values.push(v);
@@ -558,6 +568,22 @@ type ExistingMusicTrackRef = {
 	id: number;
 	objectKey: string;
 };
+
+function musicCoverUrl(value: string): string {
+	return value || DEFAULT_MUSIC_COVER_URL;
+}
+
+function isMusicCoverUrl(value: string): boolean {
+	return value === DEFAULT_MUSIC_COVER_URL || isAvatarUrl(value);
+}
+
+function chunkFiles(files: File[], size: number): File[][] {
+	const chunks: File[][] = [];
+	for (let index = 0; index < files.length; index += size) {
+		chunks.push(files.slice(index, index + size));
+	}
+	return chunks;
+}
 
 async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
 	const digest = await crypto.subtle.digest("SHA-256", bytes);
@@ -662,7 +688,9 @@ async function scanR2MusicObjects(env: Env): Promise<MusicObjectInfo[]> {
 			if (!key) continue;
 
 			const metadata = await readMusicMetadataFromR2(env, key);
-			const coverUrl = embeddedCoverUrlForMusicKey(key);
+			const coverUrl = metadata.cover
+				? embeddedCoverUrlForMusicKey(key)
+				: DEFAULT_MUSIC_COVER_URL;
 			objects.push({
 				...metadata,
 				key,

@@ -89,6 +89,10 @@ export type TelegramSettings = {
 	threadId: string;
 };
 
+export type TelegramCommentSettings = TelegramSettings & {
+	useFriendSettings: boolean;
+};
+
 export type CommentsSessionCookie = {
 	context: "comments";
 	expiresAt: number;

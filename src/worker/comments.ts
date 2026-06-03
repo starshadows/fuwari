@@ -8,7 +8,7 @@ import {
 	MAX_TWIKOO_BODY_BYTES,
 	RATE_LIMITS,
 } from "./constants";
-import { readTelegramSettings, sendTelegramMessage } from "./friends";
+import { resolveTelegramCommentSettings, sendTelegramMessage } from "./friends";
 import twikooWorker from "./twikoo-adapter";
 import type { Env } from "./types";
 import type { CommentsSessionCookie } from "./types/aliases";
@@ -306,7 +306,7 @@ export async function handleTwikooRequest(
 		onCommentSubmit: (event) => {
 			ctx.waitUntil(
 				(async () => {
-					const settings = await readTelegramSettings(env);
+					const settings = await resolveTelegramCommentSettings(env);
 					if (!settings.enabled || !settings.botToken || !settings.chatId)
 						return;
 
