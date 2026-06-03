@@ -1,4 +1,4 @@
-import { apiError } from "./constants";
+import { apiError, DEFAULT_MUSIC_COVER_URL } from "./constants";
 import type { Env } from "./types";
 import type { RangeResult } from "./types/aliases";
 import {
@@ -102,7 +102,12 @@ async function getEmbeddedCoverResponse(
 	if (!key) return json({ error: apiError("INVALID_MEDIA_PATH") }, 400);
 
 	const metadata = await readMusicMetadataFromR2(env, key);
-	if (!metadata.cover) return new Response("Not found", { status: 404 });
+	if (!metadata.cover) {
+		return Response.redirect(
+			new URL(DEFAULT_MUSIC_COVER_URL, request.url).toString(),
+			302,
+		);
+	}
 
 	const headers = new Headers({
 		"content-type": metadata.cover.mimeType,

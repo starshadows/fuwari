@@ -429,6 +429,20 @@ describe("Media path validation", () => {
 		);
 		expect(res.status).toBe(405);
 	});
+
+	it("redirects missing embedded music covers to the default cover", async () => {
+		const env = mockEnv();
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/media/covers/from-music/song.mp3"),
+			env,
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(302);
+		expect(res.headers.get("location")).toBe(
+			"https://blog.example.com/favicon/favicon-light-192.png",
+		);
+	});
 });
 
 // ================================================================
@@ -618,7 +632,7 @@ describe("Admin music management", () => {
 		return { authorization: "Bearer test-admin-token" };
 	}
 
-	it("returns default cover URLs for music without covers", async () => {
+	it("preserves embedded cover URLs for tracks with blank stored covers", async () => {
 		const listStmt = {
 			all: vi.fn().mockResolvedValue({
 				results: [
@@ -663,7 +677,9 @@ describe("Admin music management", () => {
 		const adminBody = (await adminRes.json()) as {
 			tracks: Array<{ coverUrl: string }>;
 		};
-		expect(adminBody.tracks[0].coverUrl).toBe("/favicon/favicon-light-192.png");
+		expect(adminBody.tracks[0].coverUrl).toBe(
+			"/media/covers/from-music/no-cover.mp3",
+		);
 
 		const publicRes = await worker.default.fetch(
 			new Request("https://blog.example.com/api/music/tracks"),
@@ -674,7 +690,7 @@ describe("Admin music management", () => {
 			tracks: Array<{ coverUrl: string }>;
 		};
 		expect(publicBody.tracks[0].coverUrl).toBe(
-			"/favicon/favicon-light-192.png",
+			"/media/covers/from-music/no-cover.mp3",
 		);
 	});
 

@@ -53,7 +53,10 @@ export async function getPublicMusicTracks(env: Env): Promise<Response> {
 			artist: row.artist,
 			album: row.album,
 			objectKey: row.objectKey,
-			coverUrl: musicCoverUrl(String(row.coverUrl ?? "")),
+			coverUrl: musicCoverUrl(
+				String(row.coverUrl ?? ""),
+				String(row.objectKey),
+			),
 			audioUrl: `/media/music/${stripMediaPrefix(
 				String(row.objectKey),
 				"music",
@@ -80,7 +83,10 @@ export async function listAdminMusic(env: Env): Promise<Response> {
 		const row = track as Record<string, unknown>;
 		return {
 			...row,
-			coverUrl: musicCoverUrl(String(row.coverUrl ?? "")),
+			coverUrl: musicCoverUrl(
+				String(row.coverUrl ?? ""),
+				String(row.objectKey ?? ""),
+			),
 		};
 	});
 	return json({ tracks });
@@ -569,8 +575,9 @@ type ExistingMusicTrackRef = {
 	objectKey: string;
 };
 
-function musicCoverUrl(value: string): string {
-	return value || DEFAULT_MUSIC_COVER_URL;
+function musicCoverUrl(value: string, objectKey = ""): string {
+	if (value) return value;
+	return embeddedCoverUrlForMusicKey(objectKey) || DEFAULT_MUSIC_COVER_URL;
 }
 
 function isMusicCoverUrl(value: string): boolean {
