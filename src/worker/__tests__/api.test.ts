@@ -400,6 +400,169 @@ describe("Media path validation", () => {
 });
 
 // ================================================================
+// Friend link hostname deduplication
+// ================================================================
+describe("Friend link hostname deduplication", () => {
+	let worker: Awaited<typeof import("../index")>;
+
+	beforeAll(async () => {
+		worker = await import("../index");
+	});
+
+	function jsonRequest(path: string, body: unknown, headers: HeadersInit = {}) {
+		return new Request(`https://blog.example.com${path}`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				origin: "https://blog.example.com",
+				...headers,
+			},
+			body: JSON.stringify(body),
+		});
+	}
+
+	it("rejects public submissions for an existing normalized host", async () => {
+		const duplicateStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue({ id: 1 }),
+		};
+		const emptyStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		const db = {
+			prepare: vi.fn((sql: string) =>
+				sql.includes("normalized_host = ?") ? duplicateStmt : emptyStmt,
+			),
+			batch: vi.fn().mockResolvedValue([]),
+			exec: vi.fn().mockResolvedValue({ count: 0, duration: 0 }),
+			dump: vi.fn().mockResolvedValue([]),
+		} as unknown as D1Database;
+		const env = mockEnv({ DB: db });
+
+		const res = await worker.default.fetch(
+			jsonRequest("/api/friends", {
+				name: "Example",
+				description: "A friendly blog",
+				url: "https://www.Example.com/about",
+				avatarUrl: "https://example.com/avatar.png",
+				humanProof: { type: "altcha", payload: "invalid-but-not-used" },
+			}),
+			env,
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(409);
+		expect(duplicateStmt.bind).toHaveBeenCalledWith("example.com");
+	});
+
+	it("rejects admin URL updates for an existing normalized host", async () => {
+		const duplicateStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue({ id: 2 }),
+		};
+		const genericStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		const db = {
+			prepare: vi.fn((sql: string) =>
+				sql.includes("normalized_host = ?") && sql.includes("id <>")
+					? duplicateStmt
+					: genericStmt,
+			),
+			batch: vi.fn().mockResolvedValue([]),
+			exec: vi.fn().mockResolvedValue({ count: 0, duration: 0 }),
+			dump: vi.fn().mockResolvedValue([]),
+		} as unknown as D1Database;
+		const env = mockEnv({ DB: db });
+
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/admin/friends/1", {
+				method: "PATCH",
+				headers: {
+					authorization: "Bearer test-admin-token",
+					"content-type": "application/json",
+				},
+				body: JSON.stringify({ url: "https://www.Example.com/about" }),
+			}),
+			env,
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(409);
+		expect(duplicateStmt.bind).toHaveBeenCalledWith("example.com", 1);
+	});
+
+	it("updates normalized host when admin changes a friend URL", async () => {
+		const duplicateStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+		};
+		const updateStmt = {
+			bind: vi.fn().mockReturnThis(),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		const getStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue({
+				id: 1,
+				name: "Example",
+				description: "A friendly blog",
+				url: "https://www.Example.com/about",
+				avatarUrl: "https://example.com/avatar.png",
+				status: "pending",
+				isActive: 1,
+				sortOrder: 0,
+			}),
+		};
+		const genericStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		const db = {
+			prepare: vi.fn((sql: string) => {
+				if (sql.includes("normalized_host = ?") && sql.includes("id <>")) {
+					return duplicateStmt;
+				}
+				if (sql.includes("UPDATE friend_links SET")) return updateStmt;
+				if (sql.includes("FROM friend_links WHERE id = ?")) return getStmt;
+				return genericStmt;
+			}),
+			batch: vi.fn().mockResolvedValue([]),
+			exec: vi.fn().mockResolvedValue({ count: 0, duration: 0 }),
+			dump: vi.fn().mockResolvedValue([]),
+		} as unknown as D1Database;
+		const env = mockEnv({ DB: db });
+
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/admin/friends/1", {
+				method: "PATCH",
+				headers: {
+					authorization: "Bearer test-admin-token",
+					"content-type": "application/json",
+				},
+				body: JSON.stringify({ url: "https://www.Example.com/about" }),
+			}),
+			env,
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(200);
+		expect(updateStmt.bind).toHaveBeenCalledWith(
+			"https://www.Example.com/about",
+			"example.com",
+			1,
+		);
+	});
+});
+
+// ================================================================
 // Admin comments settings
 // ================================================================
 describe("Admin comments settings", () => {

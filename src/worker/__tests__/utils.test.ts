@@ -9,6 +9,7 @@ import {
 	isSameOrigin,
 	maskSecret,
 	md5,
+	normalizeFriendHostname,
 	readBoolean,
 	readInteger,
 	readString,
@@ -276,6 +277,33 @@ describe("isSameOrigin", () => {
 
 	it("returns false for invalid URLs", () => {
 		expect(isSameOrigin("not-a-url", "https://example.com")).toBe(false);
+	});
+});
+
+// ================================================================
+// normalizeFriendHostname
+// ================================================================
+describe("normalizeFriendHostname", () => {
+	it("lowercases and strips paths", () => {
+		expect(normalizeFriendHostname("https://Example.COM/path")).toBe(
+			"example.com",
+		);
+	});
+
+	it("folds a leading www subdomain", () => {
+		expect(normalizeFriendHostname("https://www.example.com/")).toBe(
+			"example.com",
+		);
+	});
+
+	it("keeps non-www subdomains distinct", () => {
+		expect(normalizeFriendHostname("https://blog.example.com/")).toBe(
+			"blog.example.com",
+		);
+	});
+
+	it("returns empty string for invalid URLs", () => {
+		expect(normalizeFriendHostname("not-a-url")).toBe("");
 	});
 });
 

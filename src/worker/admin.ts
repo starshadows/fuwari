@@ -24,6 +24,7 @@ import {
 	isValidAvatarUrl,
 	isValidFriendUrl,
 	json,
+	normalizeFriendHostname,
 	readBoolean,
 	readInteger,
 	readJson,
@@ -277,12 +278,30 @@ async function updateFriend(
 		fields.push("description = ?");
 		values.push(readString(body.description, 120));
 	}
+	let nextNormalizedHost = "";
 	if (typeof body.url === "string") {
 		const v = readString(body.url, 400);
 		if (!isValidFriendUrl(v))
 			return json({ error: apiError("FRIEND_URL_INVALID") }, 400);
+
+		nextNormalizedHost = normalizeFriendHostname(v);
+		if (!nextNormalizedHost) {
+			return json({ error: apiError("FRIEND_URL_INVALID") }, 400);
+		}
+
+		const duplicate = await findFriendHostDuplicate(
+			env,
+			nextNormalizedHost,
+			id,
+		);
+		if (duplicate) {
+			return json({ error: apiError("FRIEND_DOMAIN_DUPLICATE") }, 409);
+		}
+
 		fields.push("url = ?");
 		values.push(v);
+		fields.push("normalized_host = ?");
+		values.push(nextNormalizedHost);
 	}
 	if (typeof body.avatarUrl === "string") {
 		const v = readString(body.avatarUrl, 600);
@@ -295,6 +314,28 @@ async function updateFriend(
 		const status = body.status.trim();
 		if (!FRIEND_STATUSES.has(status))
 			return json({ error: apiError("FRIEND_STATUS_INVALID") }, 400);
+
+		if (!nextNormalizedHost && status === "approved") {
+			const current = await getFriendHost(env, id);
+			if (!current) return json({ error: apiError("FRIEND_NOT_FOUND") }, 404);
+			nextNormalizedHost =
+				current.normalizedHost || normalizeFriendHostname(current.url);
+			if (nextNormalizedHost) {
+				const duplicate = await findFriendHostDuplicate(
+					env,
+					nextNormalizedHost,
+					id,
+				);
+				if (duplicate) {
+					return json({ error: apiError("FRIEND_DOMAIN_DUPLICATE") }, 409);
+				}
+				if (!current.normalizedHost) {
+					fields.push("normalized_host = ?");
+					values.push(nextNormalizedHost);
+				}
+			}
+		}
+
 		fields.push("status = ?");
 		values.push(status);
 	}
@@ -331,6 +372,41 @@ async function updateFriend(
 	const friend = await getFriend(env, id);
 	if (!friend) return json({ error: apiError("FRIEND_NOT_FOUND") }, 404);
 	return json({ friend });
+}
+
+type FriendHostRow = {
+	url: string;
+	normalizedHost: string;
+};
+
+async function getFriendHost(
+	env: Env,
+	id: number,
+): Promise<FriendHostRow | null> {
+	const friend = await env.DB.prepare(
+		`SELECT url, normalized_host AS normalizedHost
+	     FROM friend_links WHERE id = ?`,
+	)
+		.bind(id)
+		.first<FriendHostRow>();
+	return friend ?? null;
+}
+
+async function findFriendHostDuplicate(
+	env: Env,
+	normalizedHost: string,
+	id: number,
+): Promise<{ id: number } | null> {
+	const duplicate = await env.DB.prepare(
+		`SELECT id FROM friend_links
+	     WHERE normalized_host = ?
+	       AND id <> ?
+	       AND status IN ('pending', 'approved')
+	     LIMIT 1`,
+	)
+		.bind(normalizedHost, id)
+		.first<{ id: number }>();
+	return duplicate ?? null;
 }
 
 async function deleteFriend(

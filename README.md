@@ -199,6 +199,8 @@ wrangler secret put TWIKOO_ADMIN_PASSWORD
 
 - `ADMIN_TOKEN` 用于 `/api/admin/*` 和 `/api/setup/init-db`。
 - `TWIKOO_ADMIN_PASSWORD` 用于 Twikoo 管理员登录。
+- 生产环境建议像当前部署一样，用 Cloudflare Access 额外保护 `/friends/admin/` 和 `/api/admin/*`。
+- Cloudflare Access 是边缘层保护，`Authorization: Bearer <ADMIN_TOKEN>` 是应用层保护；不要因为开启 Access 就移除 Worker 内置认证。
 - 不要把 secret 写入 Git、`wrangler.jsonc` 或 GitHub Actions 明文环境变量。
 
 ### 3. 初始化 / 迁移 D1
@@ -250,7 +252,8 @@ corepack enable && corepack pnpm install --frozen-lockfile && corepack pnpm buil
 - `/api/music/tracks` 是否能返回音乐列表。
 - `/api/stats/summary` 是否能返回访问统计。
 - `/media/*` 是否能访问预期 R2 对象。
-- `/api/admin/*` 是否必须携带 `Authorization: Bearer <ADMIN_TOKEN>`。
+- `/friends/admin/` 和 `/api/admin/*` 是否被 Cloudflare Access 保护。
+- `/api/admin/*` 是否仍必须携带 `Authorization: Bearer <ADMIN_TOKEN>`。
 
 ## 🔐 安全说明
 
@@ -267,6 +270,7 @@ corepack enable && corepack pnpm install --frozen-lockfile && corepack pnpm buil
 部署和维护时请注意：
 
 - 使用高强度 `ADMIN_TOKEN` 和 `TWIKOO_ADMIN_PASSWORD`。
+- 对后台路径保留 Cloudflare Access + Worker Bearer token 双层保护。
 - 定期查看 Cloudflare Worker 日志和 GitHub Actions 结果。
 - 不要在仓库中提交 `.env`、Cloudflare token、R2/D1 secret 或任何私钥。
 - 修改认证、评论、友链、媒体上传相关代码后务必运行测试和线上回归。

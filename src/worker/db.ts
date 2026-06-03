@@ -153,7 +153,7 @@ const RATE_LIMIT_STATEMENTS = [
  * Versioned migrations, aligned with ./migrations/*.sql for Wrangler CLI parity.
  *
  * When adding a new migration:
- *   1. Create ./migrations/0005_<description>.sql for `pnpm d1:migrate:*`
+ *   1. Create ./migrations/0006_<description>.sql for `pnpm d1:migrate:*`
  *   2. Append a new entry here with the matching version and statements
  *   3. The /api/setup/init-db endpoint applies pending migrations automatically
  */
@@ -203,6 +203,28 @@ const MIGRATIONS: Migration[] = [
 		   ON admin_audit_log (actor_hash, created_at)`,
 			`CREATE INDEX IF NOT EXISTS idx_audit_log_resource
 		   ON admin_audit_log (resource, created_at)`,
+		],
+	},
+	{
+		version: "0006",
+		description: "Add normalized host to friend links",
+		statements: [
+			"ALTER TABLE friend_links ADD COLUMN normalized_host TEXT NOT NULL DEFAULT ''",
+			`UPDATE friend_links
+			 SET normalized_host = lower(
+			   CASE
+			     WHEN instr(replace(replace(url, 'https://www.', ''), 'https://', ''), '/') > 0
+			     THEN substr(
+			       replace(replace(url, 'https://www.', ''), 'https://', ''),
+			       1,
+			       instr(replace(replace(url, 'https://www.', ''), 'https://', ''), '/') - 1
+			     )
+			     ELSE replace(replace(url, 'https://www.', ''), 'https://', '')
+			   END
+			 )
+			 WHERE normalized_host = ''`,
+			`CREATE INDEX IF NOT EXISTS idx_friend_links_normalized_host_status
+			 ON friend_links (normalized_host, status)`,
 		],
 	},
 ];

@@ -15,6 +15,7 @@ import {
 	isValidDisplayName,
 	isValidFriendUrl,
 	json,
+	normalizeFriendHostname,
 	readHumanProof,
 	readJson,
 	readString,
@@ -87,24 +88,21 @@ export async function submitFriendLink(
 		return json({ error: apiError("FRIEND_AVATAR_INVALID") }, 400);
 	}
 
-	// Domain-level dedup: prevent the same domain from submitting again.
-	let domain = "";
-	try {
-		domain = new URL(linkUrl).hostname.toLowerCase();
-	} catch {
-		/* validated above */
+	// Domain-level dedup: prevent the same site from submitting again.
+	const normalizedHost = normalizeFriendHostname(linkUrl);
+	if (!normalizedHost) {
+		return json({ error: apiError("FRIEND_URL_INVALID") }, 400);
 	}
-	if (domain) {
-		const domainDup = await env.DB.prepare(
-			`SELECT id FROM friend_links
-	     WHERE LOWER(url) LIKE ? AND status IN ('pending', 'approved')
+
+	const domainDup = await env.DB.prepare(
+		`SELECT id FROM friend_links
+	     WHERE normalized_host = ? AND status IN ('pending', 'approved')
 	     LIMIT 1`,
-		)
-			.bind(`%://${domain}%`)
-			.first<{ id: number }>();
-		if (domainDup) {
-			return json({ error: apiError("FRIEND_DOMAIN_DUPLICATE") }, 409);
-		}
+	)
+		.bind(normalizedHost)
+		.first<{ id: number }>();
+	if (domainDup) {
+		return json({ error: apiError("FRIEND_DOMAIN_DUPLICATE") }, 409);
 	}
 
 	// Pending flood protection: limit pending submissions per actor.

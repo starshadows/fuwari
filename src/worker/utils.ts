@@ -620,6 +620,15 @@ export function isValidFriendUrl(value: string): boolean {
 	}
 }
 
+export function normalizeFriendHostname(value: string): string {
+	try {
+		const hostname = new URL(value).hostname.toLowerCase();
+		return hostname.startsWith("www.") ? hostname.slice(4) : hostname;
+	} catch {
+		return "";
+	}
+}
+
 /**
  * Validate an avatar URL: only https:// URLs and internal /media/* paths.
  * Blocks data:, javascript:, file:, and other dangerous schemes.
