@@ -71,8 +71,8 @@ export async function getPublicMusicTracks(env: Env): Promise<Response> {
 export async function listAdminMusic(env: Env): Promise<Response> {
 	const result = await env.DB.prepare(
 		`SELECT id, title, artist, album, object_key AS objectKey, cover_url AS coverUrl,
-            is_active AS isActive, sort_order AS sortOrder, content_hash AS contentHash,
-            created_at AS createdAt, updated_at AS updatedAt
+            is_active AS isActive, sort_order AS sortOrder, created_at AS createdAt,
+            updated_at AS updatedAt
      FROM music_tracks
      ORDER BY sort_order ASC, created_at DESC`,
 	).all();
@@ -508,8 +508,8 @@ export async function updateMusicTrack(
 
 	const track = await env.DB.prepare(
 		`SELECT id, title, artist, album, object_key AS objectKey, cover_url AS coverUrl,
-            is_active AS isActive, sort_order AS sortOrder, content_hash AS contentHash,
-            created_at AS createdAt, updated_at AS updatedAt
+            is_active AS isActive, sort_order AS sortOrder, created_at AS createdAt,
+            updated_at AS updatedAt
      FROM music_tracks WHERE id = ?`,
 	)
 		.bind(id)
