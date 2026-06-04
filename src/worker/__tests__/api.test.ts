@@ -1307,7 +1307,7 @@ describe("Twikoo security", () => {
 		const env = mockEnv({ DB: db });
 
 		const res = await worker.default.fetch(
-			new Request("https://blog.example.com/api/twikoo", {
+			new Request("https://blog.example.com/api/twikoo/admin", {
 				method: "POST",
 				headers: { "content-type": "application/json" },
 				body: JSON.stringify({
@@ -1339,6 +1339,48 @@ describe("Twikoo security", () => {
 		expect(res.status).toBe(200);
 		const body = (await res.json()) as { version: string };
 		expect(body).toHaveProperty("version");
+	});
+
+	it("rejects Twikoo admin login on the public comments endpoint", async () => {
+		const plaintext = "my-secret";
+		const { md5 } = await import("../utils");
+		const { db } = mockD1Result("{}");
+		const env = mockEnv({ DB: db, TWIKOO_ADMIN_PASSWORD: plaintext });
+		const res = await worker.default.fetch(
+			twikooRequest("LOGIN", { password: md5(plaintext) }),
+			env,
+			mockCtx(),
+		);
+		expect(res.status).toBe(403);
+		const body = (await res.json()) as { code?: number; message?: string };
+		expect(body.code).toBe(1024);
+		expect(body.message).toContain("protected admin endpoint");
+	});
+
+	it("allows Twikoo admin login on the protected admin endpoint", async () => {
+		const plaintext = "my-secret";
+		const { md5 } = await import("../utils");
+		const { db } = mockD1Result("{}");
+		const env = mockEnv({ DB: db, TWIKOO_ADMIN_PASSWORD: plaintext });
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/twikoo/admin", {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					origin: "https://blog.example.com",
+				},
+				body: JSON.stringify({
+					event: "LOGIN",
+					password: md5(plaintext),
+				}),
+			}),
+			env,
+			mockCtx(),
+		);
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { code?: number; accessToken?: string };
+		expect(body.code).toBe(0);
+		expect(body.accessToken).toBe(md5(plaintext));
 	});
 });
 

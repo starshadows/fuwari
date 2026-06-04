@@ -28,6 +28,11 @@ let error = "";
 let proofResetSignal = 0;
 let showVerification = false;
 
+export let adminMode = false;
+
+const publicTwikooEndpoint = "/api/twikoo";
+const adminTwikooEndpoint = "/api/twikoo/admin";
+
 const loadConfig = async () => {
 	isLoadingConfig = true;
 	try {
@@ -53,11 +58,18 @@ const loadTwikoo = async () => {
 	await tick();
 
 	await twikoo.init({
-		envId: new URL("/api/twikoo", window.location.origin).href,
+		envId: new URL(
+			adminMode ? adminTwikooEndpoint : publicTwikooEndpoint,
+			window.location.origin,
+		).href,
 		el: "#twikoo-comments",
 		path: window.location.pathname,
 		lang: "zh-CN",
 	});
+
+	if (adminMode) {
+		revealTwikooAdmin();
+	}
 
 	message = "";
 };
@@ -81,6 +93,34 @@ const resolveTwikooClient = (module: TwikooModule): TwikooClient => {
 	return client;
 };
 
+type TwikooVueRoot = {
+	showAdmin?: boolean;
+	showAdminEntry?: boolean;
+	onShowAdminEntry?: (value: boolean) => void;
+	$nextTick?: (callback: () => void) => void;
+};
+
+const revealTwikooAdmin = (attempt = 0) => {
+	const root = document.querySelector("#twikoo-comments #twikoo") as
+		| (Element & { __vue__?: TwikooVueRoot })
+		| null;
+	const vueRoot = root?.__vue__;
+
+	if (vueRoot) {
+		vueRoot.onShowAdminEntry?.(true);
+		vueRoot.showAdminEntry = true;
+		vueRoot.showAdmin = true;
+		vueRoot.$nextTick?.(() => {
+			vueRoot.showAdmin = true;
+		});
+		return;
+	}
+
+	if (attempt < 20) {
+		window.setTimeout(() => revealTwikooAdmin(attempt + 1), 150);
+	}
+};
+
 // 先加载 Twikoo 展示已有评论区，再决定是否展示验证
 const initComments = async () => {
 	await loadConfig();
@@ -88,6 +128,8 @@ const initComments = async () => {
 
 	// 先加载 Twikoo 展示评论列表（不验证）
 	await loadTwikoo();
+
+	if (adminMode) return;
 
 	// 对比 envId 是否包含 /api/twikoo，如果是则 Twikoo 走的是 worker 代理，
 	// 那么发帖需要验证。展示评论区区域后，再把验证框放出来
@@ -126,7 +168,9 @@ onMount(() => {
 });
 </script>
 
-<section class="mt-8 border-t border-[var(--line-divider)] pt-6">
+<section
+	class={`mt-8 border-t border-[var(--line-divider)] pt-6 ${adminMode ? "twikoo-admin-mode" : "twikoo-public-mode"}`}
+>
 	<div class="relative mb-5 pl-4 text-2xl font-bold text-90 before:absolute before:left-0 before:top-2 before:h-5 before:w-1 before:rounded-md before:bg-[var(--primary)]">
 		评论
 	</div>
@@ -191,5 +235,10 @@ onMount(() => {
 		height: 100%;
 		display: block;
 		object-fit: cover;
+	}
+
+	:global(.twikoo-public-mode .tk-admin-container),
+	:global(.twikoo-public-mode .tk-icon.__comments + .tk-icon.__comments) {
+		display: none !important;
 	}
 </style>

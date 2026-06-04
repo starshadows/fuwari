@@ -94,6 +94,11 @@ async function handleApi(
 	if (pathname === "/api/twikoo") {
 		return handleTwikooRequest(request, env, requestUrl, ctx);
 	}
+	if (pathname === "/api/twikoo/admin") {
+		return handleTwikooRequest(request, env, requestUrl, ctx, {
+			adminEndpoint: true,
+		});
+	}
 
 	// Friends
 	if (pathname === "/api/friends") {

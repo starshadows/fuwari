@@ -191,11 +191,28 @@ const SESSION_REQUIRED_EVENTS = new Set<string>([
 	"UPLOAD_IMAGE",
 ]);
 
+const ADMIN_ONLY_EVENTS = new Set<string>([
+	"GET_PASSWORD_STATUS",
+	"SET_PASSWORD",
+	"LOGIN",
+	"GET_CONFIG_FOR_ADMIN",
+	"SET_CONFIG",
+	"COMMENT_GET_FOR_ADMIN",
+	"COMMENT_SET_FOR_ADMIN",
+	"COMMENT_DELETE_FOR_ADMIN",
+	"COMMENT_EXPORT_FOR_ADMIN",
+]);
+
+type TwikooRequestOptions = {
+	adminEndpoint?: boolean;
+};
+
 export async function handleTwikooRequest(
 	request: Request,
 	env: Env,
 	requestUrl: URL,
 	ctx: ExecutionContext,
+	options: TwikooRequestOptions = {},
 ): Promise<Response> {
 	// Reject oversized bodies before we clone + parse anything.
 	const bodyError = rejectOversizedBody(request, MAX_TWIKOO_BODY_BYTES);
@@ -222,6 +239,16 @@ export async function handleTwikooRequest(
 
 	const isWrite = WRITE_EVENTS.has(event);
 	const needsSession = SESSION_REQUIRED_EVENTS.has(event);
+
+	if (!options.adminEndpoint && ADMIN_ONLY_EVENTS.has(event)) {
+		return json(
+			{
+				code: 1024,
+				message: "Twikoo admin requests must use the protected admin endpoint.",
+			},
+			403,
+		);
+	}
 
 	// All write events require CSRF protection.
 	if (isWrite) {
