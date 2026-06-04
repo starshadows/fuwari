@@ -6,7 +6,6 @@ import Categories from "./Categories.astro";
 import MusicPlayer from "./MusicPlayer.svelte";
 import Profile from "./Profile.astro";
 import Tag from "./Tags.astro";
-import TOC from "./TOC.astro";
 import VisitorStats from "./VisitorStats.svelte";
 import WidgetLayout from "./WidgetLayout.astro";
 
@@ -42,9 +41,7 @@ const postPathPrefix = url("/posts/");
         <div id="toc-sidebar-widget" class:list={["min-h-0", {"hidden": !showToc}]}>
             <WidgetLayout name="目录" id="article-toc" class="!shrink min-h-0">
                 <div id="toc-sidebar-scroll" data-toc-scroll class="overflow-y-auto overflow-x-hidden hide-scrollbar">
-                    <div id="toc" class="relative w-full transition-swup-fade">
-                        {tocEnabled && <TOC headings={headings}></TOC>}
-                    </div>
+                    <div id="toc" class="relative w-full transition-swup-fade"></div>
                 </div>
             </WidgetLayout>
         </div>
@@ -73,8 +70,6 @@ const postPathPrefix = url("/posts/");
         max-height: calc(100dvh - 1rem);
         overflow-y: auto;
         overflow-x: hidden;
-        overscroll-behavior: contain;
-        overscroll-behavior-y: contain;
         scrollbar-width: none;
     }
 
@@ -85,8 +80,6 @@ const postPathPrefix = url("/posts/");
     #toc-sidebar-scroll {
         max-height: min(28rem, calc(100dvh - 24rem));
         min-height: 10rem;
-        overscroll-behavior: contain;
-        overscroll-behavior-y: contain;
     }
 
     @media (max-width: 1023px) {
@@ -114,104 +107,61 @@ const postPathPrefix = url("/posts/");
 </style>
 
 <script is:inline define:vars={{ tocEnabled, postPathPrefix }}>
-function clearSidebarTocSchedule() {
-    if (!window.__fuwariSidebarTocState) return;
-    if (window.__fuwariSidebarTocState.frame) {
-        cancelAnimationFrame(window.__fuwariSidebarTocState.frame);
-        window.__fuwariSidebarTocState.frame = 0;
+const sidebarController = window.__fuwariSidebarController ??= {
+    cleanupScroll: undefined,
+    cleanupSync: undefined,
+    refreshFrame: 0,
+    refreshTimers: [],
+    revealTimer: 0,
+    swupBound: false,
+};
+
+function cleanupSidebarScroll() {
+    sidebarController.cleanupScroll?.();
+    sidebarController.cleanupScroll = undefined;
+}
+
+function cleanupSidebarSync() {
+    sidebarController.cleanupSync?.();
+    sidebarController.cleanupSync = undefined;
+}
+
+function clearSidebarRefreshSchedule() {
+    if (sidebarController.refreshFrame) {
+        cancelAnimationFrame(sidebarController.refreshFrame);
+        sidebarController.refreshFrame = 0;
     }
-    for (const timer of window.__fuwariSidebarTocState.timers ?? []) {
+
+    for (const timer of sidebarController.refreshTimers) {
         window.clearTimeout(timer);
     }
-    window.__fuwariSidebarTocState.timers = [];
+    sidebarController.refreshTimers = [];
 }
 
-function syncSidebarTocEntries() {
-    const toc = document.getElementById("toc");
-    if (!toc) return;
-
-    if (!tocEnabled || !window.location.pathname.startsWith(postPathPrefix)) {
-        toc.replaceChildren();
-        return;
-    }
-
-    const postContainer = document.getElementById("post-container");
-    if (!postContainer) return;
-
-    const headings = Array.from(
-        postContainer.querySelectorAll("h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]"),
-    ).filter((heading) => heading.textContent?.trim());
-
-    if (headings.length === 0) return;
-
-    const nextHrefs = headings.map((heading) => `#${heading.id}`);
-    const currentHrefs = Array.from(toc.querySelectorAll("a[href^='#']")).map((link) =>
-        link.getAttribute("href"),
-    );
-
-    if (
-        currentHrefs.length === nextHrefs.length &&
-        currentHrefs.every((href, index) => href === nextHrefs[index])
-    ) {
-        return;
-    }
-
-    const fragment = document.createDocumentFragment();
-    for (const heading of headings) {
-        const link = document.createElement("a");
-        const level = Number(heading.tagName.slice(1));
-        link.href = `#${heading.id}`;
-        link.textContent = heading.textContent.trim();
-        link.className = "block w-full truncate text-sm transition hover:text-[var(--primary)]";
-        link.style.paddingLeft = `${Math.max(0, level - 2) * 0.75}rem`;
-        fragment.append(link);
-    }
-    toc.replaceChildren(fragment);
+function getSidebarElements() {
+    return {
+        sidebarRoot: document.getElementById("sidebar"),
+        sidebar: document.getElementById("sidebar-sticky"),
+        toc: document.getElementById("toc"),
+        tocScroller: document.getElementById("toc-sidebar-scroll"),
+        tocWidget: document.getElementById("toc-sidebar-widget"),
+    };
 }
 
-function toggleSidebarToc() {
-    const widget = document.getElementById("toc-sidebar-widget");
-    const toc = document.getElementById("toc");
-    if (!widget || !toc) return;
-
-    syncSidebarTocEntries();
-    const hasEntries = tocEnabled && !!toc.querySelector("a[href^='#']");
-    widget.classList.toggle("hidden", !hasEntries);
+function isArticlePath() {
+    return tocEnabled && window.location.pathname.startsWith(postPathPrefix);
 }
 
-function scheduleSidebarTocToggle() {
-    clearSidebarTocSchedule();
-    sidebarTocState.frame = requestAnimationFrame(() => {
-        sidebarTocState.frame = 0;
-        toggleSidebarToc();
-    });
-    sidebarTocState.timers = [];
+function getPageScrollY() {
+    return window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
 }
 
-const sidebarTocState = window.__fuwariSidebarTocState ??= {
-    swupBound: false,
-    frame: 0,
-    timers: [],
-};
-
-if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", scheduleSidebarTocToggle, { once: true });
-} else {
-    scheduleSidebarTocToggle();
+function getElementPageTop(element) {
+    return element.getBoundingClientRect().top + getPageScrollY();
 }
 
-const setupSidebarTocSwup = () => {
-    if (sidebarTocState.swupBound) return;
-    sidebarTocState.swupBound = true;
-
-    window.swup?.hooks?.on("page:view", scheduleSidebarTocToggle);
-    window.swup?.hooks?.on("content:replace", scheduleSidebarTocToggle);
-};
-
-if (window.swup?.hooks) {
-    setupSidebarTocSwup();
-} else {
-    document.addEventListener("swup:enable", setupSidebarTocSwup, { once: true });
+function clamp(value, min, max) {
+    return Math.min(max, Math.max(min, value));
 }
 
 function normalizeWheelDeltaY(event, scroller) {
@@ -220,51 +170,144 @@ function normalizeWheelDeltaY(event, scroller) {
     return event.deltaY;
 }
 
-function setupSidebarScrollIsolation() {
-    window.__fuwariSidebarScrollCleanup?.();
+function removeTailingHash(text) {
+    const trimmed = text.trim();
+    return trimmed.endsWith("#") ? trimmed.slice(0, -1) : trimmed;
+}
 
-    const sidebar = document.getElementById("sidebar-sticky");
-    const tocScroller = document.getElementById("toc-sidebar-scroll");
+function collectArticleHeadings() {
+    if (!isArticlePath()) return [];
+
+    const postContainer = document.getElementById("post-container");
+    if (!postContainer) return [];
+
+    return Array.from(
+        postContainer.querySelectorAll("h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]"),
+    ).filter((heading) => heading.textContent?.trim());
+}
+
+function buildSidebarToc(toc, headings) {
+    if (!toc) return false;
+
+    if (headings.length === 0) {
+        toc.replaceChildren();
+        toc.dataset.sidebarToc = "";
+        return false;
+    }
+
+    const nextHrefs = headings.map((heading) => `#${heading.id}`);
+    const currentHrefs = Array.from(toc.querySelectorAll("a[href^='#']")).map((link) =>
+        link.getAttribute("href"),
+    );
+
+    if (
+        toc.dataset.sidebarToc === "generated" &&
+        currentHrefs.length === nextHrefs.length &&
+        currentHrefs.every((href, index) => href === nextHrefs[index])
+    ) {
+        return true;
+    }
+
+    const fragment = document.createDocumentFragment();
+    const minDepth = Math.min(...headings.map((heading) => Number(heading.tagName.slice(1))));
+
+    for (const heading of headings) {
+        const link = document.createElement("a");
+        const level = Number(heading.tagName.slice(1));
+        link.href = `#${heading.id}`;
+        link.textContent = removeTailingHash(heading.textContent ?? "");
+        link.className = [
+            "block",
+            "w-full",
+            "truncate",
+            "rounded-xl",
+            "px-2",
+            "py-2",
+            "text-sm",
+            "transition",
+            "hover:bg-[var(--toc-btn-hover)]",
+            "hover:text-[var(--primary)]",
+        ].join(" ");
+        link.style.paddingLeft = `${0.5 + Math.max(0, level - minDepth) * 0.75}rem`;
+        fragment.append(link);
+    }
+
+    toc.replaceChildren(fragment);
+    toc.dataset.sidebarToc = "generated";
+    return true;
+}
+
+function setSidebarReadingMode(enabled) {
+    const { sidebar, tocWidget } = getSidebarElements();
+    if (!sidebar) return;
+
+    sidebar.dataset.containedScroll = enabled ? "true" : "false";
+    sidebar.classList.toggle("sticky", enabled);
+    sidebar.classList.toggle("top-4", enabled);
+    sidebar.classList.toggle("sidebar-contained-scroll", enabled);
+    tocWidget?.classList.toggle("hidden", !enabled);
+
+    if (!enabled) {
+        sidebar.scrollTop = 0;
+        const tocScroller = document.getElementById("toc-sidebar-scroll");
+        if (tocScroller) tocScroller.scrollTop = 0;
+    }
+}
+
+function resetSidebarScrollPosition() {
+    const { sidebar, tocScroller } = getSidebarElements();
+    if (sidebar) sidebar.scrollTop = 0;
+    if (tocScroller) tocScroller.scrollTop = 0;
+}
+
+function scrollElementBy(scroller, delta) {
+    const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+    if (maxScroll <= 0) return false;
+
+    const current = scroller.scrollTop;
+    const next = clamp(current + delta, 0, maxScroll);
+    if (Math.abs(next - current) < 0.5) return false;
+
+    scroller.scrollTop = next;
+    return true;
+}
+
+function setupSidebarScrollIsolation() {
+    cleanupSidebarScroll();
+
+    const { sidebar, tocScroller } = getSidebarElements();
     const desktopQuery = window.matchMedia("(min-width: 1024px)");
     const cleanup = [];
 
-    if (!sidebar) return;
-    if (sidebar.dataset.containedScroll !== "true") return;
+    if (!sidebar || sidebar.dataset.containedScroll !== "true") return;
 
-    const scrollWithWheel = (event, scroller) => {
-        if (!desktopQuery.matches || Math.abs(event.deltaY) < 0.5) return;
-
-        const delta = normalizeWheelDeltaY(event, scroller);
-        const canScrollDown = scroller.scrollTop + scroller.clientHeight < scroller.scrollHeight - 0.5;
-        const canScrollUp = scroller.scrollTop > 0.5;
-
-        // Let the event propagate to the page when the scroller is at its boundary
-        if ((delta > 0 && !canScrollDown) || (delta < 0 && !canScrollUp)) {
-            return;
-        }
-
-        event.preventDefault();
-        event.stopPropagation();
-        scroller.scrollTop += delta;
+    const scrollWithFallback = (delta, scroller, fallbackScroller) => {
+        if (scrollElementBy(scroller, delta)) return;
+        if (fallbackScroller && scrollElementBy(fallbackScroller, delta)) return;
+        window.scrollBy({ top: delta, left: 0, behavior: "auto" });
     };
 
-    const bindWheel = (scroller, skipSelector) => {
+    const bindWheel = (scroller, fallbackScroller, skipSelector) => {
         const onWheel = (event) => {
+            if (!desktopQuery.matches || Math.abs(event.deltaY) < 0.5) return;
             if (skipSelector && event.target?.closest?.(skipSelector)) return;
-            scrollWithWheel(event, scroller);
+
+            event.preventDefault();
+            event.stopPropagation();
+            scrollWithFallback(normalizeWheelDeltaY(event, scroller), scroller, fallbackScroller);
         };
 
         scroller.addEventListener("wheel", onWheel, { passive: false });
         cleanup.push(() => scroller.removeEventListener("wheel", onWheel));
     };
 
-    const bindTouch = (scroller, skipSelector) => {
-        let lastY = 0;
+    const bindTouch = (scroller, fallbackScroller, skipSelector) => {
+        let lastTouchY = 0;
 
         const onTouchStart = (event) => {
             if (!desktopQuery.matches || event.touches.length !== 1) return;
             if (skipSelector && event.target?.closest?.(skipSelector)) return;
-            lastY = event.touches[0].clientY;
+            lastTouchY = event.touches[0].clientY;
         };
 
         const onTouchMove = (event) => {
@@ -272,22 +315,14 @@ function setupSidebarScrollIsolation() {
             if (skipSelector && event.target?.closest?.(skipSelector)) return;
 
             const nextY = event.touches[0].clientY;
-            const deltaY = lastY - nextY;
-            lastY = nextY;
+            const deltaY = lastTouchY - nextY;
+            lastTouchY = nextY;
 
             if (Math.abs(deltaY) < 0.5) return;
 
-            const canScrollDown = scroller.scrollTop + scroller.clientHeight < scroller.scrollHeight - 0.5;
-            const canScrollUp = scroller.scrollTop > 0.5;
-
-            // Let the event propagate to the page when the scroller is at its boundary
-            if ((deltaY > 0 && !canScrollDown) || (deltaY < 0 && !canScrollUp)) {
-                return;
-            }
-
             event.preventDefault();
             event.stopPropagation();
-            scroller.scrollTop += deltaY;
+            scrollWithFallback(deltaY, scroller, fallbackScroller);
         };
 
         scroller.addEventListener("touchstart", onTouchStart, { passive: true });
@@ -299,226 +334,177 @@ function setupSidebarScrollIsolation() {
     };
 
     const nestedScrollSelector = "#toc-sidebar-scroll, [data-music-playlist-scroll]";
-    bindWheel(sidebar, nestedScrollSelector);
-    bindTouch(sidebar, nestedScrollSelector);
+    bindWheel(sidebar, null, nestedScrollSelector);
+    bindTouch(sidebar, null, nestedScrollSelector);
 
     if (tocScroller) {
-        bindWheel(tocScroller);
-        bindTouch(tocScroller);
+        bindWheel(tocScroller, sidebar);
+        bindTouch(tocScroller, sidebar);
     }
 
-    window.__fuwariSidebarScrollCleanup = () => {
+    sidebarController.cleanupScroll = () => {
         for (const cleanupItem of cleanup) cleanupItem();
-        delete window.__fuwariSidebarScrollCleanup;
     };
 }
 
-function clamp(value, min, max) {
-    return Math.min(max, Math.max(min, value));
-}
-
-const sidebarScrollState = window.__fuwariSidebarScrollState ??= {
-    timers: [],
-    revealTimer: 0,
-    swupBound: false,
-    navigating: false,
-    lastScrollIntentAt: 0,
-    lastWindowScrollY: window.scrollY,
-};
-
-function clearSidebarScrollSyncTimers() {
-    for (const timer of sidebarScrollState.timers) window.clearTimeout(timer);
-    sidebarScrollState.timers = [];
-}
-
-function hideSidebarDuringNavigation() {
-    if (sidebarScrollState.revealTimer) {
-        window.clearTimeout(sidebarScrollState.revealTimer);
-        sidebarScrollState.revealTimer = 0;
-    }
-
-    const sidebar = document.getElementById("sidebar");
-    if (!sidebar) return;
-
-    sidebar.classList.add("sidebar-navigation-lock");
-    sidebar.style.setProperty("opacity", "0", "important");
-    sidebar.style.setProperty("visibility", "hidden", "important");
-    sidebar.style.pointerEvents = "none";
-}
-
-function revealSidebarAfterNavigation(delay = 48) {
-    if (sidebarScrollState.revealTimer) {
-        window.clearTimeout(sidebarScrollState.revealTimer);
-    }
-
-    sidebarScrollState.revealTimer = window.setTimeout(() => {
-        const sidebar = document.getElementById("sidebar");
-        if (sidebar) {
-            sidebar.classList.remove("sidebar-navigation-lock");
-            sidebar.style.removeProperty("opacity");
-            sidebar.style.removeProperty("visibility");
-            sidebar.style.pointerEvents = "";
-        }
-        sidebarScrollState.revealTimer = 0;
-    }, delay);
-}
-
-function teardownSidebarScrollSync() {
-    clearSidebarScrollSyncTimers();
-    window.__fuwariSidebarScrollSyncCleanup?.();
+function getSidebarSyncAnchor() {
+    return (
+        document.getElementById("post-container") ||
+        document.getElementById("swup-container") ||
+        document.getElementById("main-grid")
+    );
 }
 
 function setupSidebarScrollSync() {
-    window.__fuwariSidebarScrollSyncCleanup?.();
+    cleanupSidebarSync();
 
-    const sidebar = document.getElementById("sidebar-sticky");
-    const tocWidget = document.getElementById("toc-sidebar-widget");
-    const postContainer = document.getElementById("post-container");
+    const { sidebar } = getSidebarElements();
     const desktopQuery = window.matchMedia("(min-width: 1024px)");
-
-    if (!sidebar || !tocWidget || !postContainer) return;
+    if (!sidebar || sidebar.dataset.containedScroll !== "true") return;
 
     let animationFrame = 0;
-    sidebarScrollState.lastWindowScrollY = window.scrollY;
 
-    const syncSidebarToArticle = () => {
+    const syncSidebarToPage = () => {
         animationFrame = 0;
-        const currentScrollY = window.scrollY;
-        const previousScrollY = sidebarScrollState.lastWindowScrollY;
-        const isScrollingUp = currentScrollY < previousScrollY - 1;
 
-        sidebarScrollState.lastWindowScrollY = currentScrollY;
-
-        if (!desktopQuery.matches || tocWidget.classList.contains("hidden")) return;
-        if (sidebarScrollState.navigating) return;
-
-        const postTop = postContainer.getBoundingClientRect().top + currentScrollY;
-        const syncStart = Math.max(0, postTop - 180);
-        if (currentScrollY <= syncStart + 2) {
+        if (!desktopQuery.matches) {
             sidebar.scrollTop = 0;
             return;
         }
 
-        if (!isScrollingUp && Date.now() - sidebarScrollState.lastScrollIntentAt > 1200) return;
+        const maxScroll = Math.max(0, sidebar.scrollHeight - sidebar.clientHeight);
+        if (maxScroll <= 0) {
+            sidebar.scrollTop = 0;
+            return;
+        }
 
-        const syncEnd = syncStart + Math.min(760, Math.max(360, postContainer.offsetHeight * 0.16));
-        const progress = clamp((currentScrollY - syncStart) / (syncEnd - syncStart), 0, 1);
-        const tocTarget = clamp(
-            tocWidget.offsetTop - 16,
-            0,
-            Math.max(0, sidebar.scrollHeight - sidebar.clientHeight),
-        );
-
-        sidebar.scrollTop = Math.round(tocTarget * progress);
+        const anchor = getSidebarSyncAnchor();
+        const anchorTop = anchor ? getElementPageTop(anchor) : 0;
+        const syncStart = Math.max(0, anchorTop - 180);
+        const target = clamp(getPageScrollY() - syncStart, 0, maxScroll);
+        sidebar.scrollTop = Math.round(target);
     };
 
     const scheduleSync = () => {
         if (animationFrame) return;
-        animationFrame = requestAnimationFrame(syncSidebarToArticle);
+        animationFrame = requestAnimationFrame(syncSidebarToPage);
     };
 
-    const markScrollIntent = (event) => {
-        if (event.target?.closest?.("#sidebar-sticky")) return;
-        sidebarScrollState.lastScrollIntentAt = Date.now();
-    };
-
-    const markKeyboardScrollIntent = (event) => {
-        if (
-            ![
-                "ArrowDown",
-                "ArrowUp",
-                "End",
-                "Home",
-                "PageDown",
-                "PageUp",
-                " ",
-            ].includes(event.key)
-        ) return;
-        markScrollIntent(event);
-    };
-
-    window.addEventListener("wheel", markScrollIntent, { passive: true });
-    window.addEventListener("touchstart", markScrollIntent, { passive: true });
-    window.addEventListener("keydown", markKeyboardScrollIntent);
     window.addEventListener("scroll", scheduleSync, { passive: true });
     window.addEventListener("resize", scheduleSync);
     window.addEventListener("load", scheduleSync);
+    desktopQuery.addEventListener?.("change", scheduleSync);
+    scheduleSync();
 
-    window.__fuwariSidebarScrollSyncCleanup = () => {
+    sidebarController.cleanupSync = () => {
         if (animationFrame) cancelAnimationFrame(animationFrame);
-        window.removeEventListener("wheel", markScrollIntent);
-        window.removeEventListener("touchstart", markScrollIntent);
-        window.removeEventListener("keydown", markKeyboardScrollIntent);
         window.removeEventListener("scroll", scheduleSync);
         window.removeEventListener("resize", scheduleSync);
         window.removeEventListener("load", scheduleSync);
-        delete window.__fuwariSidebarScrollSyncCleanup;
+        desktopQuery.removeEventListener?.("change", scheduleSync);
     };
 }
 
-function setupSidebarScrollSyncAfterNavigation() {
-    teardownSidebarScrollSync();
-    sidebarScrollState.lastScrollIntentAt = 0;
-    sidebarScrollState.lastWindowScrollY = window.scrollY;
-    sidebarScrollState.navigating = false;
-    sidebarScrollState.timers = [];
+function hideSidebarDuringNavigation() {
+    if (sidebarController.revealTimer) {
+        window.clearTimeout(sidebarController.revealTimer);
+        sidebarController.revealTimer = 0;
+    }
+
+    const { sidebarRoot } = getSidebarElements();
+    if (!sidebarRoot) return;
+
+    sidebarRoot.classList.add("sidebar-navigation-lock");
+    sidebarRoot.style.setProperty("opacity", "0", "important");
+    sidebarRoot.style.setProperty("visibility", "hidden", "important");
+    sidebarRoot.style.pointerEvents = "none";
+}
+
+function revealSidebarAfterNavigation(delay = 48) {
+    if (sidebarController.revealTimer) {
+        window.clearTimeout(sidebarController.revealTimer);
+    }
+
+    sidebarController.revealTimer = window.setTimeout(() => {
+        const { sidebarRoot } = getSidebarElements();
+        if (sidebarRoot) {
+            sidebarRoot.classList.remove("sidebar-navigation-lock");
+            sidebarRoot.style.removeProperty("opacity");
+            sidebarRoot.style.removeProperty("visibility");
+            sidebarRoot.style.pointerEvents = "";
+        }
+        sidebarController.revealTimer = 0;
+    }, delay);
+}
+
+function refreshSidebarForCurrentPage(options = {}) {
+    const { reset = false, reveal = false } = options;
+    clearSidebarRefreshSchedule();
+    cleanupSidebarScroll();
+    cleanupSidebarSync();
+
+    const { toc } = getSidebarElements();
+    const headings = collectArticleHeadings();
+    const enabled = buildSidebarToc(toc, headings);
+
+    setSidebarReadingMode(enabled);
+
+    if (!enabled) {
+        if (reveal) revealSidebarAfterNavigation();
+        return;
+    }
+
+    if (reset) resetSidebarScrollPosition();
+    setupSidebarScrollIsolation();
     setupSidebarScrollSync();
-    revealSidebarAfterNavigation();
+    if (reveal) revealSidebarAfterNavigation();
 }
 
-const sidebarScrollIsolationState = window.__fuwariSidebarScrollIsolationState ??= {
-    swupBound: false,
-};
+function scheduleSidebarRefresh(options = {}) {
+    clearSidebarRefreshSchedule();
 
-const setupSidebarScrollIsolationSwup = () => {
-    if (sidebarScrollIsolationState.swupBound) return;
-    sidebarScrollIsolationState.swupBound = true;
+    const run = () => refreshSidebarForCurrentPage(options);
+    sidebarController.refreshFrame = requestAnimationFrame(() => {
+        sidebarController.refreshFrame = 0;
+        run();
+    });
 
-    window.swup?.hooks?.on("content:replace", setupSidebarScrollIsolation);
-};
-
-const setupInitialSidebarScrollSync = () => {
-    sidebarScrollState.navigating = false;
-    window.requestAnimationFrame(setupSidebarScrollSync);
-};
-
-setupSidebarScrollIsolation();
-if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", setupInitialSidebarScrollSync, { once: true });
-} else {
-    setupInitialSidebarScrollSync();
+    sidebarController.refreshTimers = [
+        window.setTimeout(run, 80),
+        window.setTimeout(run, 240),
+    ];
 }
 
-if (window.swup?.hooks) {
-    setupSidebarScrollIsolationSwup();
-} else {
-    document.addEventListener("swup:enable", setupSidebarScrollIsolationSwup, { once: true });
-}
-
-const setupSidebarScrollSyncSwup = () => {
-    if (sidebarScrollState.swupBound) return;
-    sidebarScrollState.swupBound = true;
+function setupSidebarSwupHooks() {
+    if (sidebarController.swupBound) return;
+    sidebarController.swupBound = true;
 
     window.swup?.hooks?.on("visit:start", () => {
-        sidebarScrollState.navigating = true;
-        sidebarScrollState.lastScrollIntentAt = 0;
-        sidebarScrollState.lastWindowScrollY = window.scrollY;
         hideSidebarDuringNavigation();
-        teardownSidebarScrollSync();
+        cleanupSidebarScroll();
+        cleanupSidebarSync();
     });
     window.swup?.hooks?.on("content:replace", () => {
-        sidebarScrollState.navigating = true;
-        sidebarScrollState.lastScrollIntentAt = 0;
-        sidebarScrollState.lastWindowScrollY = window.scrollY;
-        hideSidebarDuringNavigation();
-        teardownSidebarScrollSync();
+        scheduleSidebarRefresh({ reset: true });
     });
-    window.swup?.hooks?.on("page:view", setupSidebarScrollSyncAfterNavigation);
-};
+    window.swup?.hooks?.on("page:view", () => {
+        scheduleSidebarRefresh({ reset: true, reveal: true });
+    });
+}
+
+if (document.readyState === "loading") {
+    document.addEventListener(
+        "DOMContentLoaded",
+        () => scheduleSidebarRefresh({ reset: false }),
+        { once: true },
+    );
+} else {
+    scheduleSidebarRefresh({ reset: false });
+}
 
 if (window.swup?.hooks) {
-    setupSidebarScrollSyncSwup();
+    setupSidebarSwupHooks();
 } else {
-    document.addEventListener("swup:enable", setupSidebarScrollSyncSwup, { once: true });
+    document.addEventListener("swup:enable", setupSidebarSwupHooks, { once: true });
 }
 </script>

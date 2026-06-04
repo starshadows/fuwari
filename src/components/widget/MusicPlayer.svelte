@@ -13,6 +13,19 @@ type Track = {
 
 type PlayMode = "shuffle" | "repeat-one" | "order";
 
+type StoredPlayerState = {
+	trackId: number;
+	currentTime: number;
+	volume: number;
+	playMode: PlayMode;
+	updatedAt: number;
+};
+
+const DEFAULT_VOLUME = 0.72;
+const PLAYER_STORAGE_KEY = "fuwari:music-player:v1";
+const PLAYER_STATE_SAVE_INTERVAL_MS = 1000;
+const RESUME_END_BUFFER_SECONDS = 3;
+
 const playModeOptions: Array<{ mode: PlayMode; icon: string; label: string }> =
 	[
 		{
@@ -40,12 +53,15 @@ let currentTime = 0;
 let duration = 0;
 let error = "";
 let audio: HTMLAudioElement;
-let volume = 0.72;
+let volume = DEFAULT_VOLUME;
 let playMode: PlayMode = "order";
 let isPlaylistOpen = false;
 let hiddenCoverUrls = new Set<string>();
 let scheduledTrackLoadId: number | undefined;
 let scheduledTrackLoadType: "idle" | "timeout" | undefined;
+let storedPlayerState: StoredPlayerState | null = null;
+let pendingResumeTime: number | null = null;
+let lastPlayerStateSaveAt = 0;
 
 $: activeTrack = tracks[activeIndex];
 $: progress = duration > 0 ? (currentTime / duration) * 100 : 0;
@@ -56,6 +72,94 @@ $: activeCoverUrl =
 		: "";
 $: currentPlayMode =
 	playModeOptions.find((item) => item.mode === playMode) ?? playModeOptions[2];
+
+const clamp = (value: number, min: number, max: number) =>
+	Math.min(max, Math.max(min, value));
+
+const isPlayMode = (value: unknown): value is PlayMode =>
+	value === "shuffle" || value === "repeat-one" || value === "order";
+
+const readStoredPlayerState = (): StoredPlayerState | null => {
+	try {
+		const raw = localStorage.getItem(PLAYER_STORAGE_KEY);
+		if (!raw) return null;
+
+		const parsed = JSON.parse(raw) as Partial<StoredPlayerState>;
+		if (
+			typeof parsed.trackId !== "number" ||
+			typeof parsed.currentTime !== "number" ||
+			typeof parsed.volume !== "number" ||
+			typeof parsed.updatedAt !== "number" ||
+			!isPlayMode(parsed.playMode)
+		) {
+			return null;
+		}
+
+		return {
+			trackId: parsed.trackId,
+			currentTime: Math.max(0, parsed.currentTime),
+			volume: clamp(parsed.volume, 0, 1),
+			playMode: parsed.playMode,
+			updatedAt: parsed.updatedAt,
+		};
+	} catch {
+		return null;
+	}
+};
+
+const savePlayerState = (force = false) => {
+	const track = tracks[activeIndex];
+	if (!track || !audio) return;
+
+	const now = Date.now();
+	if (!force && now - lastPlayerStateSaveAt < PLAYER_STATE_SAVE_INTERVAL_MS) {
+		return;
+	}
+
+	const safeCurrentTime = Number.isFinite(audio.currentTime)
+		? Math.max(0, audio.currentTime)
+		: Math.max(0, currentTime);
+
+	try {
+		localStorage.setItem(
+			PLAYER_STORAGE_KEY,
+			JSON.stringify({
+				trackId: track.id,
+				currentTime: safeCurrentTime,
+				volume,
+				playMode,
+				updatedAt: now,
+			}),
+		);
+		lastPlayerStateSaveAt = now;
+	} catch {
+		// Ignore storage failures so playback controls keep working.
+	}
+};
+
+const clampResumeTime = (value: number, durationValue: number) => {
+	if (!Number.isFinite(value) || value <= 0) return 0;
+	if (!Number.isFinite(durationValue) || durationValue <= 0) return value;
+
+	const safeMax = Math.max(0, durationValue - RESUME_END_BUFFER_SECONDS);
+	return clamp(value, 0, safeMax);
+};
+
+const queueResumeTime = (value: number) => {
+	const safeValue = Number.isFinite(value) ? Math.max(0, value) : 0;
+	pendingResumeTime = safeValue > 0 ? safeValue : null;
+	currentTime = safeValue;
+};
+
+const applyPendingResumeTime = () => {
+	if (pendingResumeTime === null) return;
+
+	const nextTime = clampResumeTime(pendingResumeTime, duration);
+	pendingResumeTime = null;
+	audio.currentTime = nextTime;
+	currentTime = nextTime;
+	savePlayerState(true);
+};
 
 const formatTime = (value: number) => {
 	if (!Number.isFinite(value)) return "0:00";
@@ -76,7 +180,18 @@ const loadTracks = async () => {
 		if (!response.ok) throw new Error(data.error ?? "歌单加载失败。");
 		tracks = data.tracks ?? [];
 		if (tracks.length > 0) {
-			audio.src = tracks[0].audioUrl;
+			const restoredIndex =
+				storedPlayerState?.trackId !== undefined
+					? tracks.findIndex((track) => track.id === storedPlayerState?.trackId)
+					: -1;
+			activeIndex = restoredIndex >= 0 ? restoredIndex : 0;
+			duration = 0;
+			queueResumeTime(
+				restoredIndex >= 0 ? (storedPlayerState?.currentTime ?? 0) : 0,
+			);
+			audio.src = tracks[activeIndex].audioUrl;
+			audio.load();
+			if (restoredIndex < 0) savePlayerState(true);
 		}
 	} catch (err) {
 		error = err instanceof Error ? err.message : "歌单加载失败。";
@@ -92,6 +207,7 @@ const play = async () => {
 	try {
 		await audio.play();
 		isPlaying = true;
+		savePlayerState(true);
 	} catch {
 		isPlaying = false;
 		error = "浏览器暂时不允许播放，请再点一次。";
@@ -101,6 +217,7 @@ const play = async () => {
 const pause = () => {
 	audio.pause();
 	isPlaying = false;
+	savePlayerState(true);
 };
 
 const togglePlay = () => {
@@ -131,10 +248,12 @@ const switchTrack = (offset: number, autoplay = isPlaying) => {
 const switchTrackTo = (index: number, autoplay = isPlaying) => {
 	if (tracks.length === 0 || index < 0 || index >= tracks.length) return;
 	activeIndex = index;
+	pendingResumeTime = null;
 	currentTime = 0;
 	duration = 0;
 	audio.src = tracks[activeIndex].audioUrl;
 	audio.load();
+	savePlayerState(true);
 	if (autoplay) play();
 };
 
@@ -142,6 +261,7 @@ const cyclePlayMode = () => {
 	const index = playModeOptions.findIndex((item) => item.mode === playMode);
 	playMode =
 		playModeOptions[(index + 1) % playModeOptions.length]?.mode ?? "order";
+	savePlayerState(true);
 };
 
 const seek = (event: Event) => {
@@ -150,12 +270,14 @@ const seek = (event: Event) => {
 	const nextTime = (Number(input.value) / 100) * duration;
 	audio.currentTime = nextTime;
 	currentTime = nextTime;
+	savePlayerState(true);
 };
 
 const changeVolume = (event: Event) => {
 	const input = event.currentTarget as HTMLInputElement;
-	volume = Number(input.value) / 100;
+	volume = clamp(Number(input.value) / 100, 0, 1);
 	if (audio) audio.volume = volume;
+	savePlayerState(true);
 };
 
 const hideCover = (url: string) => {
@@ -189,36 +311,80 @@ const cancelScheduledTrackLoad = () => {
 };
 
 onMount(() => {
+	storedPlayerState = readStoredPlayerState();
+	if (storedPlayerState) {
+		volume = storedPlayerState.volume;
+		playMode = storedPlayerState.playMode;
+	}
+
 	audio = new Audio();
 	audio.preload = "metadata";
 	audio.volume = volume;
-	audio.addEventListener("timeupdate", () => {
+
+	const handleTimeUpdate = () => {
 		currentTime = audio.currentTime;
-	});
-	audio.addEventListener("loadedmetadata", () => {
+		savePlayerState();
+	};
+
+	const handleLoadedMetadata = () => {
 		duration = audio.duration;
-	});
-	audio.addEventListener("ended", () => {
+		applyPendingResumeTime();
+	};
+
+	const handleEnded = () => {
 		if (playMode === "repeat-one") {
 			audio.currentTime = 0;
+			currentTime = 0;
+			savePlayerState(true);
 			play();
 			return;
 		}
 		switchTrack(1, true);
-	});
-	audio.addEventListener("pause", () => {
+	};
+
+	const handlePause = () => {
 		isPlaying = false;
-	});
-	audio.addEventListener("play", () => {
+		savePlayerState(true);
+	};
+
+	const handlePlay = () => {
 		isPlaying = true;
-	});
+		savePlayerState(true);
+	};
+
+	const handleVisibilityChange = () => {
+		if (document.visibilityState === "hidden") savePlayerState(true);
+	};
+
+	const handlePageHide = () => savePlayerState(true);
+
+	audio.addEventListener("timeupdate", handleTimeUpdate);
+	audio.addEventListener("loadedmetadata", handleLoadedMetadata);
+	audio.addEventListener("ended", handleEnded);
+	audio.addEventListener("pause", handlePause);
+	audio.addEventListener("play", handlePlay);
+	document.addEventListener("visibilitychange", handleVisibilityChange);
+	window.addEventListener("pagehide", handlePageHide);
+	window.addEventListener("beforeunload", handlePageHide);
 
 	scheduleTrackLoad();
+
+	return () => {
+		audio.removeEventListener("timeupdate", handleTimeUpdate);
+		audio.removeEventListener("loadedmetadata", handleLoadedMetadata);
+		audio.removeEventListener("ended", handleEnded);
+		audio.removeEventListener("pause", handlePause);
+		audio.removeEventListener("play", handlePlay);
+		document.removeEventListener("visibilitychange", handleVisibilityChange);
+		window.removeEventListener("pagehide", handlePageHide);
+		window.removeEventListener("beforeunload", handlePageHide);
+	};
 });
 
 onDestroy(() => {
 	cancelScheduledTrackLoad();
 	if (audio) {
+		savePlayerState(true);
 		audio.pause();
 		audio.src = "";
 	}
