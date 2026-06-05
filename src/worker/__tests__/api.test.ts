@@ -359,6 +359,21 @@ describe("Admin auth", () => {
 		);
 		expect(res.status).toBe(200);
 	});
+
+	it("accepts custom admin token header before bearer authorization", async () => {
+		const env = mockEnv();
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/admin/friends", {
+				headers: {
+					authorization: "Bearer not-the-admin-token",
+					"x-fuwari-admin-token": "test-admin-token",
+				},
+			}),
+			env,
+			mockCtx(),
+		);
+		expect(res.status).toBe(200);
+	});
 });
 
 // ================================================================
@@ -629,7 +644,7 @@ describe("Admin music management", () => {
 	});
 
 	function adminHeaders(): HeadersInit {
-		return { authorization: "Bearer test-admin-token" };
+		return { "x-fuwari-admin-token": "test-admin-token" };
 	}
 
 	it("preserves embedded cover URLs for tracks with blank stored covers", async () => {
@@ -1003,7 +1018,7 @@ describe("Admin comments settings", () => {
 	});
 
 	function adminHeaders(): HeadersInit {
-		return { authorization: "Bearer test-admin-token" };
+		return { "x-fuwari-admin-token": "test-admin-token" };
 	}
 
 	it("GET returns current comments enabled status", async () => {
@@ -1068,7 +1083,7 @@ describe("Admin Telegram notification settings", () => {
 	});
 
 	function adminHeaders(): HeadersInit {
-		return { authorization: "Bearer test-admin-token" };
+		return { "x-fuwari-admin-token": "test-admin-token" };
 	}
 
 	it("sends comment test notifications through shared friend settings", async () => {

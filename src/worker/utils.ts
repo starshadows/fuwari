@@ -526,6 +526,13 @@ export function readBearerToken(request: Request): string {
 		: "";
 }
 
+export function readAdminToken(request: Request): string {
+	return (
+		request.headers.get("x-fuwari-admin-token")?.trim() ||
+		readBearerToken(request)
+	);
+}
+
 export function readCookie(request: Request, name: string): string {
 	const cookie = request.headers.get("cookie") ?? "";
 	for (const part of cookie.split(";")) {
@@ -746,7 +753,7 @@ export async function requireAdmin(
 	request: Request,
 	env: Env,
 ): Promise<Response | null> {
-	const token = readBearerToken(request);
+	const token = readAdminToken(request);
 	if (!token) {
 		return json({ error: apiError("MISSING_TOKEN") }, 401);
 	}
@@ -1129,7 +1136,7 @@ export async function auditAdminAction(
 	details = "",
 ): Promise<void> {
 	try {
-		const token = readBearerToken(request);
+		const token = readAdminToken(request);
 		const actorHash = await hashToken(token || "unknown");
 		const ip = getClientIp(request);
 		await env.DB.prepare(

@@ -166,7 +166,7 @@ const setError = (value: string) => {
 
 const adminFetch = async (path: string, init: RequestInit = {}) => {
 	const headers = new Headers(init.headers);
-	headers.set("authorization", `Bearer ${token}`);
+	headers.set("x-fuwari-admin-token", token);
 
 	if (init.body && !(init.body instanceof FormData)) {
 		headers.set("content-type", "application/json");
