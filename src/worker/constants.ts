@@ -116,6 +116,7 @@ export const API_ERROR = {
 	SERVER_ERROR: "Internal server error. Please try again later.",
 	RATE_LIMITED: "Too many requests. Please try again later.",
 	CROSS_SITE: "Cross-site request rejected.",
+	INVALID_JSON: "Request body must be valid JSON object.",
 	BODY_TOO_LARGE: "Request body is too large.",
 	BODY_LENGTH_REQUIRED: "Request body length is required.",
 	SCHEMA_NOT_READY:
@@ -156,6 +157,7 @@ export const API_ERROR = {
 	MUSIC_COVER_INVALID: "Invalid cover URL.",
 	MUSIC_COVER_R2: "Cover must be a public image or an internal avatar path.",
 	MUSIC_OBJECT_KEY_INVALID: "Invalid R2 audio key.",
+	MUSIC_OBJECT_NOT_FOUND: "R2 audio object not found.",
 	MUSIC_DUPLICATE: "This music track has already been added.",
 	MUSIC_IMPORT_EMPTY: "No new tracks available to import.",
 	MUSIC_UPLOAD_EMPTY: "Please select audio files to upload.",

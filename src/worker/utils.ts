@@ -527,13 +527,15 @@ export async function readJsonBody(
 		const text = await readLimitedTextBody(request, maxBytes);
 		if (!text.trim()) return {};
 		const data = JSON.parse(text);
-		if (!data || typeof data !== "object" || Array.isArray(data)) return {};
+		if (!data || typeof data !== "object" || Array.isArray(data)) {
+			return json({ error: apiError("INVALID_JSON") }, 400);
+		}
 		return data as JsonRecord;
 	} catch (error) {
 		if (error instanceof BodyTooLargeError) {
 			return json({ error: apiError("BODY_TOO_LARGE") }, 413);
 		}
-		return {};
+		return json({ error: apiError("INVALID_JSON") }, 400);
 	}
 }
 

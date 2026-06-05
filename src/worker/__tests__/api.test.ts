@@ -1032,6 +1032,51 @@ describe("Admin music management", () => {
 		return { "x-fuwari-admin-token": "test-admin-token" };
 	}
 
+	it("rejects manual music creation when the R2 object is missing", async () => {
+		const insertStmt = {
+			bind: vi.fn().mockReturnThis(),
+			run: vi
+				.fn()
+				.mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
+		};
+		const genericStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		const db = {
+			prepare: vi.fn((sql: string) =>
+				sql.includes("INSERT INTO music_tracks") ? insertStmt : genericStmt,
+			),
+			batch: vi.fn().mockResolvedValue([]),
+			exec: vi.fn().mockResolvedValue({ count: 0, duration: 0 }),
+			dump: vi.fn().mockResolvedValue([]),
+		} as unknown as D1Database;
+
+		const bucket = mockR2Bucket();
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/admin/music", {
+				method: "POST",
+				headers: {
+					...adminHeaders(),
+					"content-type": "application/json",
+				},
+				body: JSON.stringify({
+					title: "Missing Song",
+					objectKey: "music/missing.mp3",
+					coverUrl: "/favicon/favicon-light-192.png",
+				}),
+			}),
+			mockEnv({ DB: db, MEDIA_BUCKET: bucket }),
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(404);
+		expect(bucket.head).toHaveBeenCalledWith("music/missing.mp3");
+		expect(insertStmt.run).not.toHaveBeenCalled();
+	});
+
 	it("maps duplicate music object key constraints to 409 on create", async () => {
 		const insertStmt = {
 			bind: vi.fn().mockReturnThis(),
@@ -1058,6 +1103,8 @@ describe("Admin music management", () => {
 			dump: vi.fn().mockResolvedValue([]),
 		} as unknown as D1Database;
 
+		const bucket = mockR2Bucket();
+		vi.mocked(bucket.head).mockResolvedValue({} as R2Object);
 		const res = await worker.default.fetch(
 			new Request("https://blog.example.com/api/admin/music", {
 				method: "POST",
@@ -1071,11 +1118,50 @@ describe("Admin music management", () => {
 					coverUrl: "/favicon/favicon-light-192.png",
 				}),
 			}),
-			mockEnv({ DB: db }),
+			mockEnv({ DB: db, MEDIA_BUCKET: bucket }),
 			mockCtx(),
 		);
 
 		expect(res.status).toBe(409);
+	});
+
+	it("rejects music object key updates when the R2 object is missing", async () => {
+		const updateStmt = {
+			bind: vi.fn().mockReturnThis(),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		const genericStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		const db = {
+			prepare: vi.fn((sql: string) =>
+				sql.includes("UPDATE music_tracks SET") ? updateStmt : genericStmt,
+			),
+			batch: vi.fn().mockResolvedValue([]),
+			exec: vi.fn().mockResolvedValue({ count: 0, duration: 0 }),
+			dump: vi.fn().mockResolvedValue([]),
+		} as unknown as D1Database;
+		const bucket = mockR2Bucket();
+
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/admin/music/1", {
+				method: "PATCH",
+				headers: {
+					...adminHeaders(),
+					"content-type": "application/json",
+				},
+				body: JSON.stringify({ objectKey: "music/missing.mp3" }),
+			}),
+			mockEnv({ DB: db, MEDIA_BUCKET: bucket }),
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(404);
+		expect(bucket.head).toHaveBeenCalledWith("music/missing.mp3");
+		expect(updateStmt.run).not.toHaveBeenCalled();
 	});
 
 	it("returns 404 when deleting a missing music track", async () => {

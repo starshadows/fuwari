@@ -283,6 +283,28 @@ describe("readJsonBody", () => {
 		});
 		await expect(readJsonBody(request, 64)).resolves.toEqual({ ok: true });
 	});
+
+	it("rejects malformed JSON bodies", async () => {
+		const request = new Request("https://example.com/api/test", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: "{bad json",
+		});
+		const res = await readJsonBody(request, 64);
+		expect(res).toBeInstanceOf(Response);
+		expect((res as Response).status).toBe(400);
+	});
+
+	it("rejects non-object JSON bodies", async () => {
+		const request = new Request("https://example.com/api/test", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify(["not", "an", "object"]),
+		});
+		const res = await readJsonBody(request, 64);
+		expect(res).toBeInstanceOf(Response);
+		expect((res as Response).status).toBe(400);
+	});
 });
 
 // ================================================================

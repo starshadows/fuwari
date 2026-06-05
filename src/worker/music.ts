@@ -481,6 +481,8 @@ export async function createMusicTrack(
 	if (!title || !objectKey) {
 		return json({ error: apiError("MUSIC_FIELDS_MISSING") }, 400);
 	}
+	const objectError = await requireMusicObject(env, objectKey);
+	if (objectError) return objectError;
 
 	if (!isMusicCoverUrl(coverUrl)) {
 		return json({ error: apiError("MUSIC_COVER_R2") }, 400);
@@ -547,6 +549,8 @@ export async function updateMusicTrack(
 	if (typeof body.objectKey === "string") {
 		const v = safeNormalizeMediaKey(readString(body.objectKey, 500), "music");
 		if (!v) return json({ error: apiError("MUSIC_OBJECT_KEY_INVALID") }, 400);
+		const objectError = await requireMusicObject(env, v);
+		if (objectError) return objectError;
 		fields.push("object_key = ?");
 		values.push(v);
 	}
@@ -647,6 +651,17 @@ function musicCoverUrl(value: string, objectKey = ""): string {
 
 function isMusicCoverUrl(value: string): boolean {
 	return value === DEFAULT_MUSIC_COVER_URL || isAvatarUrl(value);
+}
+
+async function requireMusicObject(
+	env: Env,
+	objectKey: string,
+): Promise<Response | null> {
+	if (!env.MEDIA_BUCKET) return json({ error: apiError("MISSING_R2") }, 503);
+	const object = await env.MEDIA_BUCKET.head(objectKey);
+	return object
+		? null
+		: json({ error: apiError("MUSIC_OBJECT_NOT_FOUND") }, 404);
 }
 
 function chunkFiles(files: File[], size: number): File[][] {
