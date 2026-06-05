@@ -1,4 +1,5 @@
 <script lang="ts">
+import TwikooComments from "@components/comments/TwikooComments.svelte";
 import { onMount } from "svelte";
 
 type FriendStatus = "pending" | "approved" | "rejected" | "all";
@@ -916,7 +917,7 @@ onMount(async () => {
 				{/if}
 			</section>
 		{:else if activeTab === "comments"}
-            <section class="rounded-xl bg-[var(--btn-plain-bg-hover)] p-4">
+            <section class="mb-4 rounded-xl bg-[var(--btn-plain-bg-hover)] p-4">
                 <div class="mb-3 font-bold text-75">评论区开关</div>
                 <label class="flex items-center gap-2 text-sm text-75">
                     <input type="checkbox" bind:checked={commentSettings.enabled} />
@@ -930,6 +931,13 @@ onMount(async () => {
                 >
                     {isSavingComments ? "保存中" : "保存设置"}
                 </button>
+            </section>
+
+            <section class="rounded-xl bg-[var(--btn-plain-bg-hover)] p-4">
+                <div class="mb-3 font-bold text-75">Twikoo 评论管理</div>
+                <div class="rounded-xl bg-[var(--card-bg)] p-4">
+                    <TwikooComments adminMode={true} adminToken={token} embedded={true} />
+                </div>
             </section>
         {:else if activeTab === "notifications"}
             <section class="mb-4 rounded-xl bg-[var(--btn-plain-bg-hover)] p-4">

@@ -1,6 +1,6 @@
 <script lang="ts">
 import HumanProof from "@components/anti-abuse/HumanProof.svelte";
-import { onMount, tick } from "svelte";
+import { onDestroy, onMount, tick } from "svelte";
 import "twikoo/dist/twikoo.css";
 
 type HumanProofDetail = { type: "altcha"; payload: string };
@@ -29,9 +29,12 @@ let proofResetSignal = 0;
 let showVerification = false;
 
 export let adminMode = false;
+export let adminToken = "";
+export let embedded = false;
 
 const publicTwikooEndpoint = "/api/twikoo";
-const adminTwikooEndpoint = "/api/twikoo/admin";
+const adminTwikooEndpoint = "/api/admin/twikoo";
+let restoreFetchBridge: (() => void) | null = null;
 
 const loadConfig = async () => {
 	isLoadingConfig = true;
@@ -51,6 +54,7 @@ const loadConfig = async () => {
 const loadTwikoo = async () => {
 	if (isTwikooLoaded) return;
 	message = "正在加载评论...";
+	installAdminFetchBridge();
 	const module = (await import("twikoo")) as TwikooModule;
 	const twikoo = resolveTwikooClient(module);
 
@@ -121,10 +125,47 @@ const revealTwikooAdmin = (attempt = 0) => {
 	}
 };
 
+const installAdminFetchBridge = () => {
+	if (!adminMode || !adminToken || restoreFetchBridge) return;
+
+	const originalFetch = window.fetch.bind(window);
+	const adminPath = new URL(adminTwikooEndpoint, window.location.origin)
+		.pathname;
+
+	window.fetch = (input, init) => {
+		const rawUrl =
+			typeof input === "string"
+				? input
+				: input instanceof URL
+					? input.href
+					: input.url;
+		const url = new URL(rawUrl, window.location.origin);
+
+		if (url.pathname !== adminPath) {
+			return originalFetch(input, init);
+		}
+
+		const headers = new Headers(
+			init?.headers ?? (input instanceof Request ? input.headers : undefined),
+		);
+		headers.set("x-fuwari-admin-token", adminToken);
+
+		if (input instanceof Request) {
+			return originalFetch(new Request(input, { ...init, headers }));
+		}
+		return originalFetch(input, { ...init, headers });
+	};
+
+	restoreFetchBridge = () => {
+		window.fetch = originalFetch;
+		restoreFetchBridge = null;
+	};
+};
+
 // 先加载 Twikoo 展示已有评论区，再决定是否展示验证
 const initComments = async () => {
 	await loadConfig();
-	if (!enabled) return;
+	if (!enabled && !adminMode) return;
 
 	// 先加载 Twikoo 展示评论列表（不验证）
 	await loadTwikoo();
@@ -166,18 +207,24 @@ const createSession = async (humanProof: HumanProofDetail) => {
 onMount(() => {
 	void initComments();
 });
+
+onDestroy(() => {
+	restoreFetchBridge?.();
+});
 </script>
 
 <section
-	class={`mt-8 border-t border-[var(--line-divider)] pt-6 ${adminMode ? "twikoo-admin-mode" : "twikoo-public-mode"}`}
+	class={`${embedded ? "" : "mt-8 border-t border-[var(--line-divider)] pt-6"} ${adminMode ? "twikoo-admin-mode" : "twikoo-public-mode"}`}
 >
-	<div class="relative mb-5 pl-4 text-2xl font-bold text-90 before:absolute before:left-0 before:top-2 before:h-5 before:w-1 before:rounded-md before:bg-[var(--primary)]">
-		评论
-	</div>
+	{#if !embedded}
+		<div class="relative mb-5 pl-4 text-2xl font-bold text-90 before:absolute before:left-0 before:top-2 before:h-5 before:w-1 before:rounded-md before:bg-[var(--primary)]">
+			评论
+		</div>
+	{/if}
 
 	{#if isLoadingConfig}
 		<div class="text-50">加载中...</div>
-	{:else if !enabled}
+	{:else if !enabled && !adminMode}
 		<div class="rounded-xl bg-[var(--btn-plain-bg-hover)] px-4 py-5 text-center text-50">
 			评论区已关闭。
 		</div>

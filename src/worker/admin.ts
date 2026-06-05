@@ -1,4 +1,4 @@
-import { areCommentsEnabled } from "./comments";
+import { areCommentsEnabled, handleTwikooRequest } from "./comments";
 import {
 	apiError,
 	COMMENTS_ENABLED_SETTING_KEY,
@@ -60,6 +60,12 @@ export async function handleAdminApi(
 	if (auth) return auth;
 
 	const segments = requestUrl.pathname.split("/").filter(Boolean);
+
+	if (segments[2] === "twikoo" && !segments[3]) {
+		return handleTwikooRequest(request, env, requestUrl, ctx, {
+			adminEndpoint: true,
+		});
+	}
 
 	// Settings
 	if (segments[2] === "settings") {
