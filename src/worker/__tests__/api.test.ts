@@ -616,6 +616,29 @@ describe("Admin auth", () => {
 		);
 		expect(res.status).toBe(200);
 	});
+
+	it("accepts a stored admin token hash when ADMIN_TOKEN is unset", async () => {
+		const { hashTokenWithPbkdf2 } = await import("../utils");
+		const token = "stored-admin-token";
+		const storedHash = await hashTokenWithPbkdf2(token);
+		const env = mockEnv({
+			ADMIN_TOKEN: undefined,
+			DB: mockSettingsDb({
+				admin_token_sha256: storedHash,
+				stats_salt: "stable-test-salt",
+			}),
+		});
+
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/admin/friends", {
+				headers: { "x-fuwari-admin-token": token },
+			}),
+			env,
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(200);
+	});
 });
 
 // ================================================================

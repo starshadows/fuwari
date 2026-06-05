@@ -165,6 +165,11 @@ const setError = (value: string) => {
 	message = "";
 };
 
+const rememberLoginActivity = () => {
+	if (!token) return;
+	sessionStorage.setItem(tokenLoginTimeKey, String(Date.now()));
+};
+
 const adminFetch = async (path: string, init: RequestInit = {}) => {
 	const headers = new Headers(init.headers);
 	headers.set("x-fuwari-admin-token", token);
@@ -177,8 +182,11 @@ const adminFetch = async (path: string, init: RequestInit = {}) => {
 	const data = await response.json().catch(() => ({}));
 	if (!response.ok) {
 		if (response.status === 401) {
+			const wasAuthed = isAuthed;
 			logout();
-			throw new Error("登录已过期，请重新登录。");
+			throw new Error(
+				wasAuthed ? "登录已过期，请重新登录。" : "管理口令不正确，请重新输入。",
+			);
 		}
 		throw new Error(data.error ?? "请求失败。");
 	}
@@ -197,7 +205,7 @@ const login = async () => {
 		activeTab = "music";
 		await loadMusic();
 		sessionStorage.setItem(tokenKey, token);
-		sessionStorage.setItem(tokenLoginTimeKey, String(Date.now()));
+		rememberLoginActivity();
 		isAuthed = true;
 		setMessage("已登录。");
 		await loadMusicObjects();
@@ -556,6 +564,7 @@ const normalizeTrackSort = async () => {
 
 const resetInactivityTimer = () => {
 	if (inactivityTimer) clearTimeout(inactivityTimer);
+	rememberLoginActivity();
 	inactivityTimer = setTimeout(logout, INACTIVITY_TIMEOUT_MS);
 };
 
