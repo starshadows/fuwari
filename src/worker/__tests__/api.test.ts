@@ -493,6 +493,25 @@ describe("Database initialization", () => {
 				.fn()
 				.mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
 		};
+		const indexNames = new Set([
+			"idx_friend_links_normalized_host_pending_approved_unique",
+			"idx_music_tracks_object_key_unique",
+			"idx_music_tracks_content_hash_unique",
+		]);
+		const indexStmt = {
+			index: "",
+			bind: vi.fn((index: string) => {
+				indexStmt.index = index;
+				return indexStmt;
+			}),
+			first: vi.fn(async () =>
+				indexNames.has(indexStmt.index) ? { name: indexStmt.index } : null,
+			),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi
+				.fn()
+				.mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
+		};
 		const friendColumnsStmt = {
 			bind: vi.fn().mockReturnThis(),
 			first: vi.fn().mockResolvedValue(null),
@@ -508,6 +527,16 @@ describe("Database initialization", () => {
 			first: vi.fn().mockResolvedValue(null),
 			all: vi.fn().mockResolvedValue({
 				results: [{ name: "id" }, { name: "content_hash" }],
+			}),
+			run: vi
+				.fn()
+				.mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
+		};
+		const commentColumnsStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+			all: vi.fn().mockResolvedValue({
+				results: [{ name: "_id", pk: 1 }],
 			}),
 			run: vi
 				.fn()
@@ -530,7 +559,13 @@ describe("Database initialization", () => {
 				if (sql.includes("INSERT INTO app_settings")) {
 					return appSettingWriteStmt;
 				}
+				if (sql.includes("sqlite_master") && sql.includes("type = 'index'")) {
+					return indexStmt;
+				}
 				if (sql.includes("sqlite_master")) return tableStmt;
+				if (sql.includes("PRAGMA table_info(comment)")) {
+					return commentColumnsStmt;
+				}
 				if (sql.includes("PRAGMA table_info(friend_links)")) {
 					return friendColumnsStmt;
 				}
@@ -561,9 +596,9 @@ describe("Database initialization", () => {
 		await expect(res.json()).resolves.toMatchObject({
 			ok: true,
 			applied: [],
-			version: "0007",
+			version: "0008",
 		});
-		expect(versionWrites).toContainEqual(["db_migration_version", "0007"]);
+		expect(versionWrites).toContainEqual(["db_migration_version", "0008"]);
 		expect(preparedSql.some((sql) => sql.startsWith("ALTER TABLE"))).toBe(
 			false,
 		);
@@ -823,6 +858,54 @@ describe("Friend link hostname deduplication", () => {
 		expect(duplicateStmt.bind).toHaveBeenCalledWith("example.com", 1);
 	});
 
+	it("maps admin friend update unique constraint races to 409", async () => {
+		const duplicateStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+		};
+		const updateStmt = {
+			bind: vi.fn().mockReturnThis(),
+			run: vi
+				.fn()
+				.mockRejectedValue(
+					new Error("UNIQUE constraint failed: friend_links.normalized_host"),
+				),
+		};
+		const genericStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		const db = {
+			prepare: vi.fn((sql: string) => {
+				if (sql.includes("normalized_host = ?") && sql.includes("id <>")) {
+					return duplicateStmt;
+				}
+				if (sql.includes("UPDATE friend_links SET")) return updateStmt;
+				return genericStmt;
+			}),
+			batch: vi.fn().mockResolvedValue([]),
+			exec: vi.fn().mockResolvedValue({ count: 0, duration: 0 }),
+			dump: vi.fn().mockResolvedValue([]),
+		} as unknown as D1Database;
+
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/admin/friends/1", {
+				method: "PATCH",
+				headers: {
+					authorization: "Bearer test-admin-token",
+					"content-type": "application/json",
+				},
+				body: JSON.stringify({ url: "https://www.example.com/about" }),
+			}),
+			mockEnv({ DB: db }),
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(409);
+	});
+
 	it("updates normalized host when admin changes a friend URL", async () => {
 		const duplicateStmt = {
 			bind: vi.fn().mockReturnThis(),
@@ -911,6 +994,52 @@ describe("Admin music management", () => {
 	function adminHeaders(): HeadersInit {
 		return { "x-fuwari-admin-token": "test-admin-token" };
 	}
+
+	it("maps duplicate music object key constraints to 409 on create", async () => {
+		const insertStmt = {
+			bind: vi.fn().mockReturnThis(),
+			run: vi
+				.fn()
+				.mockRejectedValue(
+					new Error("UNIQUE constraint failed: music_tracks.object_key"),
+				),
+		};
+		const genericStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi
+				.fn()
+				.mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
+		};
+		const db = {
+			prepare: vi.fn((sql: string) =>
+				sql.includes("INSERT INTO music_tracks") ? insertStmt : genericStmt,
+			),
+			batch: vi.fn().mockResolvedValue([]),
+			exec: vi.fn().mockResolvedValue({ count: 0, duration: 0 }),
+			dump: vi.fn().mockResolvedValue([]),
+		} as unknown as D1Database;
+
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/admin/music", {
+				method: "POST",
+				headers: {
+					...adminHeaders(),
+					"content-type": "application/json",
+				},
+				body: JSON.stringify({
+					title: "Song",
+					objectKey: "music/song.mp3",
+					coverUrl: "/favicon/favicon-light-192.png",
+				}),
+			}),
+			mockEnv({ DB: db }),
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(409);
+	});
 
 	it("preserves embedded cover URLs for tracks with blank stored covers", async () => {
 		const listStmt = {
@@ -1380,6 +1509,133 @@ describe("Admin Telegram notification settings", () => {
 	function adminHeaders(): HeadersInit {
 		return { "x-fuwari-admin-token": "test-admin-token" };
 	}
+
+	function writableSettingsDb(values: Record<string, string | undefined>) {
+		const writes: Array<{ key: string; value: string }> = [];
+		const selectStmt = {
+			key: "",
+			bind: vi.fn((key: string) => {
+				selectStmt.key = key;
+				return selectStmt;
+			}),
+			first: vi.fn(async () => {
+				const value = values[selectStmt.key];
+				return value === undefined ? null : { value };
+			}),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi
+				.fn()
+				.mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
+		};
+		const writeStmt = {
+			bind: vi.fn((key: string, value: string) => {
+				writes.push({ key, value });
+				return writeStmt;
+			}),
+			first: vi.fn().mockResolvedValue(null),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi
+				.fn()
+				.mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
+		};
+		const genericStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi
+				.fn()
+				.mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
+		};
+		const db = {
+			prepare: vi.fn((sql: string) => {
+				if (sql.includes("SELECT value FROM app_settings")) return selectStmt;
+				if (sql.includes("INSERT INTO app_settings")) return writeStmt;
+				return genericStmt;
+			}),
+			batch: vi.fn().mockResolvedValue([]),
+			exec: vi.fn().mockResolvedValue({ count: 0, duration: 0 }),
+			dump: vi.fn().mockResolvedValue([]),
+		} as unknown as D1Database;
+
+		return { db, writes };
+	}
+
+	it("preserves Telegram chatId and threadId on partial friend settings updates", async () => {
+		const { db, writes } = writableSettingsDb({
+			telegram_friend_notification: JSON.stringify({
+				enabled: true,
+				botToken: "old-token",
+				chatId: "old-chat",
+				threadId: "99",
+			}),
+		});
+
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/admin/settings/telegram", {
+				method: "POST",
+				headers: {
+					...adminHeaders(),
+					"content-type": "application/json",
+				},
+				body: JSON.stringify({ enabled: false }),
+			}),
+			mockEnv({ DB: db }),
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(200);
+		const saved = JSON.parse(
+			writes.find((write) => write.key === "telegram_friend_notification")
+				?.value ?? "{}",
+		);
+		expect(saved).toMatchObject({
+			enabled: false,
+			botToken: "old-token",
+			chatId: "old-chat",
+			threadId: "99",
+		});
+	});
+
+	it("preserves Telegram chatId and threadId on partial comment settings updates", async () => {
+		const { db, writes } = writableSettingsDb({
+			telegram_comment_notification: JSON.stringify({
+				enabled: true,
+				useFriendSettings: false,
+				botToken: "comment-token",
+				chatId: "comment-chat",
+				threadId: "34",
+			}),
+		});
+
+		const res = await worker.default.fetch(
+			new Request(
+				"https://blog.example.com/api/admin/settings/telegram/comments",
+				{
+					method: "POST",
+					headers: {
+						...adminHeaders(),
+						"content-type": "application/json",
+					},
+					body: JSON.stringify({ enabled: false }),
+				},
+			),
+			mockEnv({ DB: db }),
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(200);
+		const saved = JSON.parse(
+			writes.find((write) => write.key === "telegram_comment_notification")
+				?.value ?? "{}",
+		);
+		expect(saved).toMatchObject({
+			enabled: false,
+			useFriendSettings: false,
+			botToken: "comment-token",
+			chatId: "comment-chat",
+			threadId: "34",
+		});
+	});
 
 	it("sends comment test notifications through shared friend settings", async () => {
 		const db = mockSettingsDb({

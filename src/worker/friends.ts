@@ -14,6 +14,7 @@ import type {
 import {
 	enforceRateLimit,
 	getAppSetting,
+	isD1ConstraintError,
 	isMissingD1SchemaError,
 	isValidAvatarUrl,
 	isValidDescription,
@@ -173,6 +174,9 @@ export async function submitFriendLink(
 		);
 	} catch (error) {
 		if (isMissingD1SchemaError(error)) return schemaNotReadyResponse();
+		if (isD1ConstraintError(error)) {
+			return json({ error: apiError("FRIEND_DOMAIN_DUPLICATE") }, 409);
+		}
 		throw error;
 	}
 }

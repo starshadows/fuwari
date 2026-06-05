@@ -156,6 +156,7 @@ export const API_ERROR = {
 	MUSIC_COVER_INVALID: "Invalid cover URL.",
 	MUSIC_COVER_R2: "Cover must be a public image or an internal avatar path.",
 	MUSIC_OBJECT_KEY_INVALID: "Invalid R2 audio key.",
+	MUSIC_DUPLICATE: "This music track has already been added.",
 	MUSIC_IMPORT_EMPTY: "No new tracks available to import.",
 	MUSIC_UPLOAD_EMPTY: "Please select audio files to upload.",
 	MUSIC_UPLOAD_TYPE_INVALID:

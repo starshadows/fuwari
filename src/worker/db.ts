@@ -21,7 +21,7 @@ import {
  * Versioned migrations, aligned with ./migrations/*.sql for Wrangler CLI parity.
  *
  * When adding a new migration:
- *   1. Create ./migrations/0007_<description>.sql for `pnpm d1:migrate:*`
+ *   1. Create ./migrations/<version>_<description>.sql for `pnpm d1:migrate:*`
  *   2. Append a new entry here with the matching version and statements
  *   3. The /api/setup/init-db endpoint applies pending migrations automatically
  */
@@ -120,6 +120,68 @@ const MIGRATIONS: Migration[] = [
 		],
 		isApplied: (env) => hasColumn(env, "music_tracks", "content_hash"),
 	},
+	{
+		version: "0008",
+		description: "Fix comment primary key and add uniqueness constraints",
+		statements: [
+			`CREATE TABLE IF NOT EXISTS comment_new (
+				_id TEXT NOT NULL PRIMARY KEY,
+				uid TEXT NOT NULL,
+				nick TEXT NOT NULL,
+				mail TEXT NOT NULL,
+				mailMd5 TEXT NOT NULL,
+				link TEXT NOT NULL,
+				ua TEXT NOT NULL,
+				ip TEXT NOT NULL,
+				ipRegion TEXT NOT NULL DEFAULT '',
+				master INTEGER NOT NULL,
+				url TEXT NOT NULL,
+				href TEXT NOT NULL,
+				comment TEXT NOT NULL,
+				pid TEXT NOT NULL,
+				rid TEXT NOT NULL,
+				isSpam INTEGER NOT NULL,
+				created INTEGER NOT NULL,
+				updated INTEGER NOT NULL,
+				like TEXT NOT NULL,
+				top INTEGER NOT NULL,
+				avatar TEXT NOT NULL
+			)`,
+			`INSERT OR IGNORE INTO comment_new (
+				_id, uid, nick, mail, mailMd5, link, ua, ip, ipRegion, master,
+				url, href, comment, pid, rid, isSpam, created, updated, like, top, avatar
+			)
+			SELECT
+				_id, uid, nick, mail, mailMd5, link, ua, ip, ipRegion, master,
+				url, href, comment, pid, rid, isSpam, created, updated, like, top, avatar
+			FROM comment`,
+			"DROP TABLE comment",
+			"ALTER TABLE comment_new RENAME TO comment",
+			"CREATE INDEX IF NOT EXISTS idx_comment_created ON comment (created DESC)",
+			"CREATE INDEX IF NOT EXISTS idx_comment_ip_created ON comment (ip, created DESC)",
+			"CREATE INDEX IF NOT EXISTS idx_comment_url_created ON comment (url, created DESC)",
+			`CREATE UNIQUE INDEX IF NOT EXISTS idx_friend_links_normalized_host_pending_approved_unique
+			 ON friend_links (normalized_host)
+			 WHERE normalized_host <> '' AND status IN ('pending', 'approved')`,
+			`CREATE INDEX IF NOT EXISTS idx_friend_links_normalized_host_status
+			 ON friend_links (normalized_host, status)`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS idx_music_tracks_object_key_unique
+			 ON music_tracks (object_key)`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS idx_music_tracks_content_hash_unique
+			 ON music_tracks (content_hash)
+			 WHERE content_hash <> ''`,
+			`CREATE INDEX IF NOT EXISTS idx_music_tracks_content_hash
+			 ON music_tracks (content_hash)`,
+		],
+		isApplied: async (env) =>
+			(await hasPrimaryKey(env, "comment", "_id")) &&
+			(await hasIndex(
+				env,
+				"idx_friend_links_normalized_host_pending_approved_unique",
+			)) &&
+			(await hasIndex(env, "idx_music_tracks_object_key_unique")) &&
+			(await hasIndex(env, "idx_music_tracks_content_hash_unique")),
+	},
 ];
 
 /** Key used to track the highest applied migration version in app_settings. */
@@ -148,6 +210,37 @@ async function hasColumn(
 			name: string;
 		}>();
 		return (result.results ?? []).some((column) => column.name === columnName);
+	} catch {
+		return false;
+	}
+}
+
+async function hasPrimaryKey(
+	env: Env,
+	tableName: string,
+	columnName: string,
+): Promise<boolean> {
+	try {
+		const result = await env.DB.prepare(`PRAGMA table_info(${tableName})`).all<{
+			name: string;
+			pk: number;
+		}>();
+		return (result.results ?? []).some(
+			(column) => column.name === columnName && Number(column.pk) > 0,
+		);
+	} catch {
+		return false;
+	}
+}
+
+async function hasIndex(env: Env, indexName: string): Promise<boolean> {
+	try {
+		const row = await env.DB.prepare(
+			"SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?",
+		)
+			.bind(indexName)
+			.first<{ name: string }>();
+		return Boolean(row?.name);
 	} catch {
 		return false;
 	}

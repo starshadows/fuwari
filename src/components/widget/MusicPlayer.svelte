@@ -62,6 +62,8 @@ let scheduledTrackLoadType: "idle" | "timeout" | undefined;
 let storedPlayerState: StoredPlayerState | null = null;
 let pendingResumeTime: number | null = null;
 let lastPlayerStateSaveAt = 0;
+let isDestroyed = false;
+let tracksAbortController: AbortController | null = null;
 
 $: activeTrack = tracks[activeIndex];
 $: progress = duration > 0 ? (currentTime / duration) * 100 : 0;
@@ -171,12 +173,18 @@ const formatTime = (value: number) => {
 };
 
 const loadTracks = async () => {
+	tracksAbortController?.abort();
+	const controller = new AbortController();
+	tracksAbortController = controller;
 	isLoading = true;
 	error = "";
 
 	try {
-		const response = await fetch("/api/music/tracks");
+		const response = await fetch("/api/music/tracks", {
+			signal: controller.signal,
+		});
 		const data = await response.json();
+		if (isDestroyed || controller.signal.aborted) return;
 		if (!response.ok) throw new Error(data.error ?? "歌单加载失败。");
 		tracks = data.tracks ?? [];
 		if (tracks.length > 0) {
@@ -189,26 +197,35 @@ const loadTracks = async () => {
 			queueResumeTime(
 				restoredIndex >= 0 ? (storedPlayerState?.currentTime ?? 0) : 0,
 			);
+			if (isDestroyed || !audio) return;
 			audio.src = tracks[activeIndex].audioUrl;
 			audio.load();
 			if (restoredIndex < 0) savePlayerState(true);
 		}
 	} catch (err) {
+		if (isDestroyed || controller.signal.aborted) return;
 		error = err instanceof Error ? err.message : "歌单加载失败。";
 	} finally {
-		isLoading = false;
+		if (tracksAbortController === controller) {
+			tracksAbortController = null;
+		}
+		if (!isDestroyed && !controller.signal.aborted) {
+			isLoading = false;
+		}
 	}
 };
 
 const play = async () => {
-	if (!activeTrack) return;
+	if (!activeTrack || isDestroyed) return;
 	if (!audio.src) audio.src = activeTrack.audioUrl;
 
 	try {
 		await audio.play();
+		if (isDestroyed) return;
 		isPlaying = true;
 		savePlayerState(true);
 	} catch {
+		if (isDestroyed) return;
 		isPlaying = false;
 		error = "浏览器暂时不允许播放，请再点一次。";
 	}
@@ -311,6 +328,7 @@ const cancelScheduledTrackLoad = () => {
 };
 
 onMount(() => {
+	isDestroyed = false;
 	storedPlayerState = readStoredPlayerState();
 	if (storedPlayerState) {
 		volume = storedPlayerState.volume;
@@ -382,6 +400,9 @@ onMount(() => {
 });
 
 onDestroy(() => {
+	isDestroyed = true;
+	tracksAbortController?.abort();
+	tracksAbortController = null;
 	cancelScheduledTrackLoad();
 	if (audio) {
 		savePlayerState(true);

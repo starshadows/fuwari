@@ -1,6 +1,6 @@
 <script lang="ts">
 import TwikooComments from "@components/comments/TwikooComments.svelte";
-import { onMount } from "svelte";
+import { onDestroy, onMount } from "svelte";
 
 type FriendStatus = "pending" | "approved" | "rejected" | "all";
 type AdminTab = "friends" | "music" | "comments" | "notifications";
@@ -223,10 +223,7 @@ const logout = () => {
 	isAuthed = false;
 	sessionStorage.removeItem(tokenKey);
 	sessionStorage.removeItem(tokenLoginTimeKey);
-	if (inactivityTimer) {
-		clearTimeout(inactivityTimer);
-		inactivityTimer = null;
-	}
+	stopInactivityTimer();
 };
 
 const loadFriends = async () => {
@@ -568,7 +565,19 @@ const resetInactivityTimer = () => {
 	inactivityTimer = setTimeout(logout, INACTIVITY_TIMEOUT_MS);
 };
 
+const stopInactivityTimer = () => {
+	if (typeof document === "undefined") return;
+	document.removeEventListener("mousemove", resetInactivityTimer);
+	document.removeEventListener("keydown", resetInactivityTimer);
+	document.removeEventListener("click", resetInactivityTimer);
+	if (inactivityTimer) {
+		clearTimeout(inactivityTimer);
+		inactivityTimer = null;
+	}
+};
+
 const startInactivityTimer = () => {
+	stopInactivityTimer();
 	document.addEventListener("mousemove", resetInactivityTimer, {
 		passive: true,
 	});
@@ -591,6 +600,10 @@ onMount(async () => {
 			await login();
 		}
 	}
+});
+
+onDestroy(() => {
+	stopInactivityTimer();
 });
 </script>
 

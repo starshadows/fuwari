@@ -940,6 +940,16 @@ export function isMissingD1SchemaError(error: unknown): boolean {
 	);
 }
 
+export function isD1ConstraintError(error: unknown): boolean {
+	const message = error instanceof Error ? error.message : String(error ?? "");
+	const normalized = message.toLowerCase();
+	return (
+		normalized.includes("constraint failed") ||
+		normalized.includes("unique constraint failed") ||
+		normalized.includes("sqlite_constraint")
+	);
+}
+
 export function schemaNotReadyResponse(): Response {
 	return json({ error: apiError("SCHEMA_NOT_READY") }, 503);
 }

@@ -3,6 +3,7 @@ import {
 	APP_SETTINGS_TABLE,
 	RATE_LIMIT_STATEMENTS,
 	STATS_INIT_STATEMENTS,
+	TWIKOO_INIT_STATEMENTS,
 } from "../db-schema";
 import { normalizeStatsPath } from "../stats";
 import {
@@ -498,5 +499,12 @@ describe("db-schema runtime bootstrap", () => {
 		expect(sql).toContain("CREATE TABLE IF NOT EXISTS app_settings");
 		expect(sql).toContain("CREATE TABLE IF NOT EXISTS stats_visitors");
 		expect(sql).toContain("CREATE TABLE IF NOT EXISTS rate_limits");
+	});
+
+	it("uses _id as the Twikoo comment primary key and keeps url-created index", () => {
+		const sql = TWIKOO_INIT_STATEMENTS.join("\n");
+		expect(sql).toContain("PRIMARY KEY (_id)");
+		expect(sql).toContain("idx_comment_url_created");
+		expect(sql).toContain("ON comment (url, created DESC)");
 	});
 });

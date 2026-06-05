@@ -12,6 +12,7 @@ let result: SearchResult[] = [];
 let isSearching = false;
 let pagefindLoaded = false;
 let initialized = false;
+let searchRequestId = 0;
 
 const fakeResult: SearchResult[] = [
 	{
@@ -85,6 +86,7 @@ const setPanelVisibility = (show: boolean, isDesktop: boolean): void => {
 };
 
 const search = async (keyword: string, isDesktop: boolean): Promise<void> => {
+	const requestId = ++searchRequestId;
 	if (!keyword) {
 		setPanelVisibility(false, isDesktop);
 		result = [];
@@ -112,14 +114,18 @@ const search = async (keyword: string, isDesktop: boolean): Promise<void> => {
 			console.error("Pagefind is not available in production environment.");
 		}
 
+		if (requestId !== searchRequestId) return;
 		result = searchResults;
 		setPanelVisibility(result.length > 0, isDesktop);
 	} catch (error) {
+		if (requestId !== searchRequestId) return;
 		console.error("Search error:", error);
 		result = [];
 		setPanelVisibility(false, isDesktop);
 	} finally {
-		isSearching = false;
+		if (requestId === searchRequestId) {
+			isSearching = false;
+		}
 	}
 };
 

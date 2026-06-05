@@ -22,6 +22,7 @@ import {
 	incrementCacheVersion,
 	inferMusicMetadataFromKey,
 	isAvatarUrl,
+	isD1ConstraintError,
 	isMissingD1SchemaError,
 	json,
 	readBoolean,
@@ -99,6 +100,10 @@ export async function listAdminMusic(env: Env): Promise<Response> {
 	return json({ tracks });
 }
 
+function musicDuplicateResponse(): Response {
+	return json({ error: apiError("MUSIC_DUPLICATE") }, 409);
+}
+
 // ================================================================
 // Admin: list R2 music objects
 // ================================================================
@@ -164,21 +169,27 @@ export async function importR2MusicObjects(
 		const coverUrl = obj.cover
 			? await saveEmbeddedCover(env, obj.key, obj.cover)
 			: DEFAULT_MUSIC_COVER_URL;
-		const result = await env.DB.prepare(
-			`INSERT INTO music_tracks
+		let result: D1Result;
+		try {
+			result = await env.DB.prepare(
+				`INSERT INTO music_tracks
        (title, artist, album, object_key, cover_url, is_active, sort_order)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		)
-			.bind(
-				obj.title,
-				obj.artist,
-				obj.album,
-				obj.key,
-				coverUrl,
-				isActive,
-				sortOrder,
 			)
-			.run();
+				.bind(
+					obj.title,
+					obj.artist,
+					obj.album,
+					obj.key,
+					coverUrl,
+					isActive,
+					sortOrder,
+				)
+				.run();
+		} catch (error) {
+			if (isD1ConstraintError(error)) continue;
+			throw error;
+		}
 
 		imported.push({
 			id: result.meta.last_row_id,
@@ -319,9 +330,11 @@ export async function uploadMusicFiles(
 				continue;
 			}
 
+			let hash = "";
+			let objectKey = "";
 			try {
 				const bytes = await file.arrayBuffer();
-				const hash = await sha256Hex(bytes);
+				hash = await sha256Hex(bytes);
 				const existing = await findMusicTrackByHash(env, hash);
 				if (existing) {
 					duplicates.push({
@@ -335,7 +348,7 @@ export async function uploadMusicFiles(
 					continue;
 				}
 
-				const objectKey = buildUploadedMusicKey(fileName, hash, ext);
+				objectKey = buildUploadedMusicKey(fileName, hash, ext);
 				const objectExists = await env.MEDIA_BUCKET.head(objectKey);
 				const existingByKey = objectExists
 					? await findMusicTrackByObjectKey(env, objectKey)
@@ -394,6 +407,20 @@ export async function uploadMusicFiles(
 				});
 				sortOrder += 1;
 			} catch (error) {
+				if (isD1ConstraintError(error)) {
+					const existing =
+						(await findMusicTrackByHash(env, hash)) ??
+						(await findMusicTrackByObjectKey(env, objectKey));
+					duplicates.push({
+						fileName,
+						objectKey: existing?.objectKey ?? objectKey,
+						hash,
+						size: file.size,
+						trackId: existing?.id ?? 0,
+						status: "duplicate",
+					});
+					continue;
+				}
 				failed.push({
 					fileName,
 					status: "failed",
@@ -459,13 +486,19 @@ export async function createMusicTrack(
 		return json({ error: apiError("MUSIC_COVER_R2") }, 400);
 	}
 
-	const result = await env.DB.prepare(
-		`INSERT INTO music_tracks
+	let result: D1Result;
+	try {
+		result = await env.DB.prepare(
+			`INSERT INTO music_tracks
      (title, artist, album, object_key, cover_url, is_active, sort_order)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
-	)
-		.bind(title, artist, album, objectKey, coverUrl, isActive, sortOrder)
-		.run();
+		)
+			.bind(title, artist, album, objectKey, coverUrl, isActive, sortOrder)
+			.run();
+	} catch (error) {
+		if (isD1ConstraintError(error)) return musicDuplicateResponse();
+		throw error;
+	}
 
 	invalidateScanCache();
 	await incrementCacheVersion(env, "music");
@@ -537,11 +570,16 @@ export async function updateMusicTrack(
 	}
 
 	if (fields.length > 0) {
-		await env.DB.prepare(
-			`UPDATE music_tracks SET ${fields.join(", ")} WHERE id = ?`,
-		)
-			.bind(...values, id)
-			.run();
+		try {
+			await env.DB.prepare(
+				`UPDATE music_tracks SET ${fields.join(", ")} WHERE id = ?`,
+			)
+				.bind(...values, id)
+				.run();
+		} catch (error) {
+			if (isD1ConstraintError(error)) return musicDuplicateResponse();
+			throw error;
+		}
 	}
 
 	const track = await env.DB.prepare(

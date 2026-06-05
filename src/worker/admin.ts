@@ -33,6 +33,7 @@ import {
 	auditAdminAction,
 	getAppSetting,
 	incrementCacheVersion,
+	isD1ConstraintError,
 	isValidAvatarUrl,
 	isValidFriendUrl,
 	json,
@@ -195,8 +196,14 @@ async function updateAdminTelegramSettings(
 		botToken:
 			botToken ||
 			(readBoolean(body.clearBotToken, false) ? "" : current.botToken),
-		chatId: readString(body.chatId, 120),
-		threadId: readString(body.threadId, 40),
+		chatId:
+			typeof body.chatId === "string"
+				? readString(body.chatId, 120)
+				: current.chatId,
+		threadId:
+			typeof body.threadId === "string"
+				? readString(body.threadId, 40)
+				: current.threadId,
 	};
 
 	await writeTelegramSettings(env, settings);
@@ -265,8 +272,14 @@ async function updateAdminTelegramCommentSettings(
 		botToken:
 			botToken ||
 			(readBoolean(body.clearBotToken, false) ? "" : current.botToken),
-		chatId: readString(body.chatId, 120),
-		threadId: readString(body.threadId, 40),
+		chatId:
+			typeof body.chatId === "string"
+				? readString(body.chatId, 120)
+				: current.chatId,
+		threadId:
+			typeof body.threadId === "string"
+				? readString(body.threadId, 40)
+				: current.threadId,
 	};
 
 	await writeTelegramCommentSettings(env, settings);
@@ -459,11 +472,18 @@ async function updateFriend(
 	}
 
 	if (fields.length > 0) {
-		await env.DB.prepare(
-			`UPDATE friend_links SET ${fields.join(", ")} WHERE id = ?`,
-		)
-			.bind(...values, id)
-			.run();
+		try {
+			await env.DB.prepare(
+				`UPDATE friend_links SET ${fields.join(", ")} WHERE id = ?`,
+			)
+				.bind(...values, id)
+				.run();
+		} catch (error) {
+			if (isD1ConstraintError(error)) {
+				return json({ error: apiError("FRIEND_DOMAIN_DUPLICATE") }, 409);
+			}
+			throw error;
+		}
 		ctx.waitUntil(
 			auditAdminAction(
 				env,

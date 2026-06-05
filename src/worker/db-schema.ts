@@ -85,10 +85,11 @@ export const TWIKOO_INIT_STATEMENTS = [
     comment TEXT NOT NULL, pid TEXT NOT NULL, rid TEXT NOT NULL,
     isSpam INTEGER NOT NULL, created INTEGER NOT NULL, updated INTEGER NOT NULL,
     like TEXT NOT NULL, top INTEGER NOT NULL, avatar TEXT NOT NULL,
-    PRIMARY KEY (url, created DESC)
+    PRIMARY KEY (_id)
   )`,
 	"CREATE INDEX IF NOT EXISTS idx_comment_created ON comment (created DESC)",
 	"CREATE INDEX IF NOT EXISTS idx_comment_ip_created ON comment (ip, created DESC)",
+	"CREATE INDEX IF NOT EXISTS idx_comment_url_created ON comment (url, created DESC)",
 	"CREATE TABLE IF NOT EXISTS config (value TEXT NOT NULL)",
 	`INSERT INTO config (value)
    SELECT '' WHERE NOT EXISTS (SELECT 1 FROM config)`,
@@ -107,6 +108,7 @@ export const FRIEND_LINKS_STATEMENTS = [
     name TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
     url TEXT NOT NULL,
+    normalized_host TEXT NOT NULL DEFAULT '',
     avatar_url TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
     is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
@@ -116,6 +118,11 @@ export const FRIEND_LINKS_STATEMENTS = [
   )`,
 	`CREATE INDEX IF NOT EXISTS idx_friend_links_status_sort
    ON friend_links (status, is_active, sort_order, created_at)`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_friend_links_normalized_host_pending_approved_unique
+   ON friend_links (normalized_host)
+   WHERE normalized_host <> '' AND status IN ('pending', 'approved')`,
+	`CREATE INDEX IF NOT EXISTS idx_friend_links_normalized_host_status
+   ON friend_links (normalized_host, status)`,
 	`CREATE TRIGGER IF NOT EXISTS trg_friend_links_updated_at
    AFTER UPDATE ON friend_links FOR EACH ROW
    BEGIN
@@ -128,6 +135,7 @@ export const FRIEND_LINKS_STATEMENTS = [
     album TEXT NOT NULL DEFAULT '',
     object_key TEXT NOT NULL,
     cover_url TEXT NOT NULL DEFAULT '',
+    content_hash TEXT NOT NULL DEFAULT '',
     is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
@@ -135,6 +143,13 @@ export const FRIEND_LINKS_STATEMENTS = [
   )`,
 	`CREATE INDEX IF NOT EXISTS idx_music_tracks_active_sort
    ON music_tracks (is_active, sort_order, created_at)`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_music_tracks_object_key_unique
+   ON music_tracks (object_key)`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_music_tracks_content_hash_unique
+   ON music_tracks (content_hash)
+   WHERE content_hash <> ''`,
+	`CREATE INDEX IF NOT EXISTS idx_music_tracks_content_hash
+   ON music_tracks (content_hash)`,
 	`CREATE TRIGGER IF NOT EXISTS trg_music_tracks_updated_at
    AFTER UPDATE ON music_tracks FOR EACH ROW
    BEGIN

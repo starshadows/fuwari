@@ -239,13 +239,16 @@ async function ensureTwikooSchema(db: D1Database): Promise<void> {
 			like TEXT NOT NULL,
 			top INTEGER NOT NULL,
 			avatar TEXT NOT NULL,
-			PRIMARY KEY (url, created DESC)
+			PRIMARY KEY (_id)
 		)`),
 		db.prepare(
 			"CREATE INDEX IF NOT EXISTS idx_comment_created ON comment (created DESC)",
 		),
 		db.prepare(
 			"CREATE INDEX IF NOT EXISTS idx_comment_ip_created ON comment (ip, created DESC)",
+		),
+		db.prepare(
+			"CREATE INDEX IF NOT EXISTS idx_comment_url_created ON comment (url, created DESC)",
 		),
 		db.prepare("CREATE TABLE IF NOT EXISTS config (value TEXT NOT NULL)"),
 		db.prepare(

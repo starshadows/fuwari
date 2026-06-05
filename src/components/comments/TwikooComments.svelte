@@ -53,10 +53,13 @@ const loadConfig = async () => {
 	}
 };
 
-const loadTwikoo = async () => {
-	if (isTwikooLoaded) return;
+const loadTwikoo = async (forceReload = false) => {
+	if (isTwikooLoaded && !forceReload) return;
 	message = "正在加载评论...";
 	installAdminRequestBridge();
+	if (forceReload) {
+		document.querySelector(twikooMountSelector)?.replaceChildren();
+	}
 	const module = (await import("twikoo")) as TwikooModule;
 	const twikoo = resolveTwikooClient(module);
 
@@ -254,7 +257,8 @@ const createSession = async (humanProof: HumanProofDetail) => {
 		}
 
 		// 验证通过后重新加载 Twikoo（session cookie 已设置）
-		await loadTwikoo();
+		await loadTwikoo(true);
+		showVerification = false;
 	} catch (err) {
 		message = "";
 		error = err instanceof Error ? err.message : "评论验证失败。";
