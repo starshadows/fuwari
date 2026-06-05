@@ -57,7 +57,22 @@ export default {
 			response = await env.ASSETS.fetch(request);
 			return withSecurityHeaders(response);
 		} catch (error) {
-			console.error(error);
+			const ip =
+				request.headers.get("cf-connecting-ip") ??
+				request.headers.get("x-real-ip") ??
+				request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+				"";
+			console.error(
+				"Worker fetch error",
+				JSON.stringify({
+					method: request.method,
+					path: requestUrl.pathname,
+					ip,
+					ua: request.headers.get("user-agent") ?? "",
+					message: error instanceof Error ? error.message : String(error),
+					stack: error instanceof Error ? error.stack : undefined,
+				}),
+			);
 			const response = json({ error: apiError("SERVER_ERROR") }, 500);
 			return withServerTiming(response, startedAt);
 		}

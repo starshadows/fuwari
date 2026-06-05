@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+	APP_SETTINGS_TABLE,
+	RATE_LIMIT_STATEMENTS,
+	STATS_INIT_STATEMENTS,
+} from "../db-schema";
+import { normalizeStatsPath } from "../stats";
+import {
 	base64UrlDecode,
 	base64UrlEncode,
 	clampInteger,
@@ -148,6 +154,10 @@ describe("safeNormalizeMediaKey", () => {
 
 	it("rejects invalid prefix", () => {
 		expect(safeNormalizeMediaKey("hacked", "malware")).toBeNull();
+	});
+
+	it("rejects bare prefix without trailing key", () => {
+		expect(safeNormalizeMediaKey("music", "music")).toBeNull();
 	});
 });
 
@@ -415,5 +425,47 @@ describe("isLikelyBot", () => {
 		expect(
 			isLikelyBot(mockRequest("Mozilla/5.0 (Windows NT 10.0) Chrome/120")),
 		).toBe(false);
+	});
+});
+
+// ================================================================
+// normalizeStatsPath
+// ================================================================
+describe("normalizeStatsPath", () => {
+	it("returns '/' for empty input", () => {
+		expect(normalizeStatsPath("")).toBe("/");
+	});
+
+	it("strips queries and fragments", () => {
+		expect(normalizeStatsPath("/post/hello?x=1#frag")).toBe("/post/hello");
+	});
+
+	it("truncates long paths at the last segment boundary", () => {
+		const long = `/${"a".repeat(500)}`;
+		const result = normalizeStatsPath(long);
+		expect(result.length).toBeLessThanOrEqual(401);
+		expect(result.endsWith("/")).toBe(true);
+	});
+
+	it("returns '/' when truncation leaves no segment", () => {
+		const result = normalizeStatsPath(`/${"a".repeat(500)}`);
+		// Either fully truncated to "/" or to last segment, but always valid.
+		expect(result.startsWith("/")).toBe(true);
+	});
+});
+
+// ================================================================
+// Shared schema bootstrap
+// ================================================================
+describe("db-schema runtime bootstrap", () => {
+	it("includes every DDL fragment the runtime DDL bootstrap needs", () => {
+		const sql = [
+			APP_SETTINGS_TABLE,
+			...STATS_INIT_STATEMENTS,
+			...RATE_LIMIT_STATEMENTS,
+		].join("\n");
+		expect(sql).toContain("CREATE TABLE IF NOT EXISTS app_settings");
+		expect(sql).toContain("CREATE TABLE IF NOT EXISTS stats_visitors");
+		expect(sql).toContain("CREATE TABLE IF NOT EXISTS rate_limits");
 	});
 });

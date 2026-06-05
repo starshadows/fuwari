@@ -507,4 +507,25 @@ if (window.swup?.hooks) {
 } else {
     document.addEventListener("swup:enable", setupSidebarSwupHooks, { once: true });
 }
+
+// Clean up scroll/sync listeners when the page is parked in the
+// BFCache or the user navigates away, so a stale listener stack does
+// not leak across pageviews.
+function teardownSidebar() {
+    cleanupSidebarScroll();
+    cleanupSidebarSync();
+    clearSidebarRefreshSchedule();
+    if (sidebarController.revealTimer) {
+        window.clearTimeout(sidebarController.revealTimer);
+        sidebarController.revealTimer = 0;
+    }
+    const { sidebarRoot } = getSidebarElements();
+    if (sidebarRoot) {
+        sidebarRoot.classList.remove("sidebar-navigation-lock");
+        sidebarRoot.style.removeProperty("opacity");
+        sidebarRoot.style.removeProperty("visibility");
+        sidebarRoot.style.pointerEvents = "";
+    }
+}
+window.addEventListener("pagehide", teardownSidebar);
 </script>

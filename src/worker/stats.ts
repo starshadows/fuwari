@@ -4,6 +4,7 @@ import {
 	STATS_ACTIVE_WINDOW_MS,
 	STATS_TIMEZONE_OFFSET_MINUTES,
 } from "./constants";
+import { RUNTIME_BOOTSTRAP_STATEMENTS } from "./db-schema";
 import type { Env } from "./types";
 import type { StatsSummaryDto } from "./types/aliases";
 import {
@@ -19,62 +20,14 @@ import {
 	rejectOversizedBody,
 } from "./utils";
 
-let statsSchemaReady = false;
-
 /** Run data retention cleanup at most once per hour per Worker instance. */
 let lastCleanupDay = "";
 
-const STATS_RETENTION_DAYS = 2 * 365; // 2 years
+/** Force a schema re-check every N requests so DDL drift recovers. */
+let statsSchemaChecksSinceBootstrap = 0;
+const STATS_SCHEMA_RECHECK_INTERVAL = 1000;
 
-const STATS_SCHEMA_STATEMENTS = [
-	`CREATE TABLE IF NOT EXISTS app_settings (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL,
-    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-  )`,
-	`CREATE TABLE IF NOT EXISTS stats_visitors (
-    visitor_hash TEXT PRIMARY KEY,
-    first_seen TEXT NOT NULL,
-    last_seen TEXT NOT NULL
-  )`,
-	`CREATE TABLE IF NOT EXISTS stats_page_visitors (
-    path TEXT NOT NULL,
-    visitor_hash TEXT NOT NULL,
-    first_seen TEXT NOT NULL,
-    last_seen TEXT NOT NULL,
-    PRIMARY KEY (path, visitor_hash)
-  )`,
-	`CREATE TABLE IF NOT EXISTS stats_site_daily (
-    day TEXT PRIMARY KEY,
-    pv INTEGER NOT NULL DEFAULT 0,
-    uv INTEGER NOT NULL DEFAULT 0
-  )`,
-	`CREATE TABLE IF NOT EXISTS stats_page_daily (
-    path TEXT NOT NULL,
-    day TEXT NOT NULL,
-    pv INTEGER NOT NULL DEFAULT 0,
-    uv INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (path, day)
-  )`,
-	`CREATE TABLE IF NOT EXISTS stats_daily_visitors (
-    day TEXT NOT NULL,
-    visitor_hash TEXT NOT NULL,
-    first_seen TEXT NOT NULL,
-    PRIMARY KEY (day, visitor_hash)
-  )`,
-	`CREATE TABLE IF NOT EXISTS stats_page_daily_visitors (
-    path TEXT NOT NULL,
-    day TEXT NOT NULL,
-    visitor_hash TEXT NOT NULL,
-    first_seen TEXT NOT NULL,
-    PRIMARY KEY (path, day, visitor_hash)
-  )`,
-	`CREATE TABLE IF NOT EXISTS stats_active_visitors (
-    visitor_hash TEXT PRIMARY KEY,
-    path TEXT NOT NULL,
-    last_seen TEXT NOT NULL
-  )`,
-];
+const STATS_RETENTION_DAYS = 2 * 365; // 2 years
 
 async function ensureStatsReady(env: Env): Promise<Response | null> {
 	if (!env.DB) {
@@ -84,11 +37,14 @@ async function ensureStatsReady(env: Env): Promise<Response | null> {
 		);
 	}
 
-	if (!statsSchemaReady) {
+	statsSchemaChecksSinceBootstrap += 1;
+	if (
+		statsSchemaChecksSinceBootstrap === 1 ||
+		statsSchemaChecksSinceBootstrap % STATS_SCHEMA_RECHECK_INTERVAL === 0
+	) {
 		await env.DB.batch(
-			STATS_SCHEMA_STATEMENTS.map((stmt) => env.DB.prepare(stmt)),
+			RUNTIME_BOOTSTRAP_STATEMENTS.map((stmt) => env.DB.prepare(stmt)),
 		);
-		statsSchemaReady = true;
 	}
 
 	await ensureStatsSaltCached(env);
@@ -350,7 +306,7 @@ async function getStatsSummary(
 	};
 }
 
-function normalizeStatsPath(value: string): string {
+export function normalizeStatsPath(value: string): string {
 	let path = value.trim();
 	if (!path) return "/";
 	try {
@@ -362,7 +318,12 @@ function normalizeStatsPath(value: string): string {
 	}
 	path = path.split("#")[0]?.split("?")[0] ?? "/";
 	if (!path.startsWith("/")) path = `/${path}`;
-	path = path.replace(/\/{2,}/g, "/").slice(0, 400);
+	path = path.replace(/\/{2,}/g, "/");
+	if (path.length > 400) {
+		const truncated = path.slice(0, 400);
+		const lastSlash = truncated.lastIndexOf("/");
+		path = lastSlash > 0 ? `${truncated.slice(0, lastSlash + 1)}` : "/";
+	}
 	if (path.length > 1) path = path.replace(/\/+$/, "/");
 	return path || "/";
 }

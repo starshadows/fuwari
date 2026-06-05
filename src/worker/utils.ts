@@ -7,6 +7,7 @@ import {
 	RATE_LIMIT_MAX_AGE_SECONDS,
 	SECURITY_HEADERS,
 } from "./constants";
+import { RUNTIME_BOOTSTRAP_STATEMENTS } from "./db-schema";
 import type { Env } from "./types";
 import type {
 	EmbeddedCover,
@@ -705,6 +706,7 @@ export function safeNormalizeMediaKey(
 		.replace(/\\/g, "/")
 		.replace(/^\/+/, "")
 		.trim();
+	if (clean === prefix) clean = "";
 	if (clean.startsWith(`${prefix}/`)) {
 		clean = clean.slice(prefix.length + 1);
 	}
@@ -931,33 +933,20 @@ export function addNumberUpdate(
 // Rate limiting
 // ================================================================
 
-let rateLimitSchemaReady = false;
 let statsSaltCache: string | null = null;
-
-const RATE_LIMIT_INIT_STATEMENTS = [
-	`CREATE TABLE IF NOT EXISTS app_settings (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL,
-    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-  )`,
-	`CREATE TABLE IF NOT EXISTS rate_limits (
-    scope TEXT NOT NULL,
-    actor_hash TEXT NOT NULL,
-    window_start INTEGER NOT NULL,
-    count INTEGER NOT NULL DEFAULT 0,
-    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    PRIMARY KEY (scope, actor_hash, window_start)
-  )`,
-	`CREATE INDEX IF NOT EXISTS idx_rate_limits_updated_at
-   ON rate_limits (updated_at)`,
-];
+let rateLimitSchemaChecksSinceBootstrap = 0;
+const RATE_LIMIT_SCHEMA_RECHECK_INTERVAL = 1000;
 
 async function ensureRateLimitReady(env: Env): Promise<void> {
-	if (!rateLimitSchemaReady) {
+	rateLimitSchemaChecksSinceBootstrap += 1;
+	if (
+		rateLimitSchemaChecksSinceBootstrap === 1 ||
+		rateLimitSchemaChecksSinceBootstrap % RATE_LIMIT_SCHEMA_RECHECK_INTERVAL ===
+			0
+	) {
 		await env.DB.batch(
-			RATE_LIMIT_INIT_STATEMENTS.map((stmt) => env.DB.prepare(stmt)),
+			RUNTIME_BOOTSTRAP_STATEMENTS.map((stmt) => env.DB.prepare(stmt)),
 		);
-		rateLimitSchemaReady = true;
 	}
 	await ensureStatsSalt(env);
 }
