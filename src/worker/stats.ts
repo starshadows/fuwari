@@ -350,8 +350,17 @@ async function getStatsVisitorHash(
 	const salt = await ensureStatsSaltCached(env);
 	const userAgent = request.headers.get("user-agent") ?? "";
 	const ip = getClientIp(request);
-	const source = clientVisitorId
-		? `client:${clientVisitorId}:${userAgent}`
-		: `request:${ip}:${userAgent}`;
+	const source = getStatsVisitorSource(ip, userAgent, clientVisitorId);
 	return hashToken(`${salt}:${source}`);
+}
+
+export function getStatsVisitorSource(
+	ip: string,
+	userAgent: string,
+	clientVisitorId: string,
+): string {
+	if (ip) return `request:${ip}:${userAgent}`;
+	return clientVisitorId
+		? `client:${clientVisitorId}:${userAgent}`
+		: `request:${userAgent}`;
 }

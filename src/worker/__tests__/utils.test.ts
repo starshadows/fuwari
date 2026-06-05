@@ -5,7 +5,7 @@ import {
 	STATS_INIT_STATEMENTS,
 	TWIKOO_INIT_STATEMENTS,
 } from "../db-schema";
-import { normalizeStatsPath } from "../stats";
+import { getStatsVisitorSource, normalizeStatsPath } from "../stats";
 import {
 	base64UrlDecode,
 	base64UrlEncode,
@@ -505,6 +505,43 @@ describe("normalizeStatsPath", () => {
 		const result = normalizeStatsPath(`/${"a".repeat(500)}`);
 		// Either fully truncated to "/" or to last segment, but always valid.
 		expect(result.startsWith("/")).toBe(true);
+	});
+});
+
+// ================================================================
+// getStatsVisitorSource
+// ================================================================
+describe("getStatsVisitorSource", () => {
+	const ua = "Mozilla/5.0 (compatible; TestBot)";
+
+	it("binds visitor identity to IP/UA when a client IP is available", () => {
+		expect(getStatsVisitorSource("1.2.3.4", ua, "")).toBe(
+			`request:1.2.3.4:${ua}`,
+		);
+		const withClientId = getStatsVisitorSource("1.2.3.4", ua, "forged-id");
+		expect(withClientId).toBe(`request:1.2.3.4:${ua}`);
+	});
+
+	it("ignores client-supplied visitorId once the IP changes", () => {
+		const a = getStatsVisitorSource("1.2.3.4", ua, "stable-id");
+		const b = getStatsVisitorSource("5.6.7.8", ua, "stable-id");
+		expect(a).not.toBe(b);
+	});
+
+	it("rotating client visitorId alone cannot produce a new identity", () => {
+		const a = getStatsVisitorSource("1.2.3.4", ua, "id-1");
+		const b = getStatsVisitorSource("1.2.3.4", ua, "id-2");
+		expect(a).toBe(b);
+	});
+
+	it("falls back to the client visitorId when no IP is present", () => {
+		expect(getStatsVisitorSource("", ua, "client-id")).toBe(
+			`client:client-id:${ua}`,
+		);
+	});
+
+	it("falls back to user-agent only when neither IP nor client id is present", () => {
+		expect(getStatsVisitorSource("", ua, "")).toBe(`request:${ua}`);
 	});
 });
 
