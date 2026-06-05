@@ -4,6 +4,7 @@ import {
 	DEFAULT_MUSIC_COVER_URL,
 	MAX_JSON_BODY_BYTES,
 	MAX_MUSIC_UPLOAD_BYTES,
+	MAX_MUSIC_UPLOAD_REQUEST_BYTES,
 	MUSIC_OBJECT_SCAN_LIMIT,
 	MUSIC_PREFIX,
 	MUSIC_UPLOAD_R2_BATCH_SIZE,
@@ -21,10 +22,11 @@ import {
 	incrementCacheVersion,
 	inferMusicMetadataFromKey,
 	isAvatarUrl,
+	isMissingD1SchemaError,
 	json,
 	readBoolean,
 	readInteger,
-	readJson,
+	readJsonBody,
 	readMusicMetadataFromR2,
 	readString,
 	rejectOversizedBody,
@@ -38,33 +40,38 @@ import {
 // ================================================================
 
 export async function getPublicMusicTracks(env: Env): Promise<Response> {
-	const result = await env.DB.prepare(
-		`SELECT id, title, artist, album, object_key AS objectKey, cover_url AS coverUrl
+	try {
+		const result = await env.DB.prepare(
+			`SELECT id, title, artist, album, object_key AS objectKey, cover_url AS coverUrl
      FROM music_tracks
      WHERE is_active = 1
      ORDER BY sort_order ASC, created_at DESC`,
-	).all();
+		).all();
 
-	const tracks = (result.results ?? []).map((track) => {
-		const row = track as Record<string, string | number>;
-		return {
-			id: row.id,
-			title: row.title,
-			artist: row.artist,
-			album: row.album,
-			objectKey: row.objectKey,
-			coverUrl: musicCoverUrl(
-				String(row.coverUrl ?? ""),
-				String(row.objectKey),
-			),
-			audioUrl: `/media/music/${stripMediaPrefix(
-				String(row.objectKey),
-				"music",
-			)}`,
-		};
-	});
+		const tracks = (result.results ?? []).map((track) => {
+			const row = track as Record<string, string | number>;
+			return {
+				id: row.id,
+				title: row.title,
+				artist: row.artist,
+				album: row.album,
+				objectKey: row.objectKey,
+				coverUrl: musicCoverUrl(
+					String(row.coverUrl ?? ""),
+					String(row.objectKey),
+				),
+				audioUrl: `/media/music/${stripMediaPrefix(
+					String(row.objectKey),
+					"music",
+				)}`,
+			};
+		});
 
-	return json({ tracks });
+		return json({ tracks });
+	} catch (error) {
+		if (isMissingD1SchemaError(error)) return json({ tracks: [] });
+		throw error;
+	}
 }
 
 // ================================================================
@@ -120,7 +127,8 @@ export async function importR2MusicObjects(
 	const bodyError = rejectOversizedBody(request, MAX_JSON_BODY_BYTES);
 	if (bodyError) return bodyError;
 
-	const body = await readJson(request);
+	const body = await readJsonBody(request, MAX_JSON_BODY_BYTES);
+	if (body instanceof Response) return body;
 	const requestedKeys = Array.isArray(body.objectKeys)
 		? (body.objectKeys as string[])
 				.filter((key): key is string => typeof key === "string")
@@ -259,6 +267,13 @@ export async function uploadMusicFiles(
 	if (!contentType.toLowerCase().includes("multipart/form-data")) {
 		return json({ error: apiError("MUSIC_UPLOAD_TYPE_INVALID") }, 400);
 	}
+
+	const bodyError = rejectOversizedBody(
+		request,
+		MAX_MUSIC_UPLOAD_REQUEST_BYTES,
+		{ requireContentLength: true },
+	);
+	if (bodyError) return bodyError;
 
 	const formData = await request.formData();
 	const files = formData
@@ -423,7 +438,8 @@ export async function createMusicTrack(
 	const bodyError = rejectOversizedBody(request, MAX_JSON_BODY_BYTES);
 	if (bodyError) return bodyError;
 
-	const body = await readJson(request);
+	const body = await readJsonBody(request, MAX_JSON_BODY_BYTES);
+	if (body instanceof Response) return body;
 	const title = readString(body.title, 80);
 	const artist = readString(body.artist, 80);
 	const album = readString(body.album, 80);
@@ -478,7 +494,8 @@ export async function updateMusicTrack(
 	const bodyError = rejectOversizedBody(request, MAX_JSON_BODY_BYTES);
 	if (bodyError) return bodyError;
 
-	const body = await readJson(request);
+	const body = await readJsonBody(request, MAX_JSON_BODY_BYTES);
+	if (body instanceof Response) return body;
 	const fields: string[] = [];
 	const values: (string | number)[] = [];
 

@@ -18,6 +18,7 @@ import {
 	normalizeFriendHostname,
 	readBoolean,
 	readInteger,
+	readJsonBody,
 	readString,
 	rejectCrossSiteWrite,
 	rejectOversizedBody,
@@ -250,6 +251,36 @@ describe("rejectOversizedBody", () => {
 
 	it("allows requests without content-length", () => {
 		expect(rejectOversizedBody(requestWithLength(), 10)).toBeNull();
+	});
+
+	it("can require content-length for multipart-style uploads", () => {
+		expect(
+			rejectOversizedBody(requestWithLength(), 10, {
+				requireContentLength: true,
+			})?.status,
+		).toBe(411);
+	});
+});
+
+describe("readJsonBody", () => {
+	it("rejects streamed JSON bodies that exceed the limit without content-length", async () => {
+		const request = new Request("https://example.com/api/test", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ value: "x".repeat(32) }),
+		});
+		const res = await readJsonBody(request, 16);
+		expect(res).toBeInstanceOf(Response);
+		expect((res as Response).status).toBe(413);
+	});
+
+	it("parses streamed JSON bodies within the limit", async () => {
+		const request = new Request("https://example.com/api/test", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ ok: true }),
+		});
+		await expect(readJsonBody(request, 64)).resolves.toEqual({ ok: true });
 	});
 });
 

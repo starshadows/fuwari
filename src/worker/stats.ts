@@ -14,7 +14,7 @@ import {
 	hashToken,
 	isLikelyBot,
 	json,
-	readJson,
+	readJsonBody,
 	readString,
 	rejectCrossSiteWrite,
 	rejectOversizedBody,
@@ -108,7 +108,8 @@ export async function recordStatsVisit(
 	const bodyError = rejectOversizedBody(request, MAX_JSON_BODY_BYTES);
 	if (bodyError) return bodyError;
 
-	const body = await readJson(request);
+	const body = await readJsonBody(request, MAX_JSON_BODY_BYTES);
+	if (body instanceof Response) return body;
 	const path = normalizeStatsPath(readString(body.path, 400) || "/");
 	const visitorHash = await getStatsVisitorHash(
 		request,

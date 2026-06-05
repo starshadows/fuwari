@@ -22,6 +22,8 @@ export const MAX_JSON_BODY_BYTES: number = 64 * 1024; // 64 KB — general JSON 
 export const MAX_TWIKOO_BODY_BYTES: number = 10 * 1024 * 1024; // 10 MB — Twikoo (includes uploads)
 export const MAX_IMAGE_UPLOAD_BYTES: number = 5 * 1024 * 1024; // 5 MB — decoded image payload
 export const MAX_MUSIC_UPLOAD_BYTES: number = 25 * 1024 * 1024; // 25 MB — per uploaded audio file
+export const MAX_MUSIC_UPLOAD_REQUEST_BYTES: number =
+	MAX_MUSIC_UPLOAD_BYTES * 2 + 1024 * 1024;
 export const MUSIC_UPLOAD_R2_BATCH_SIZE: number = 10;
 
 // ----------------------------------------------------------------
@@ -115,6 +117,9 @@ export const API_ERROR = {
 	RATE_LIMITED: "Too many requests. Please try again later.",
 	CROSS_SITE: "Cross-site request rejected.",
 	BODY_TOO_LARGE: "Request body is too large.",
+	BODY_LENGTH_REQUIRED: "Request body length is required.",
+	SCHEMA_NOT_READY:
+		"Database schema is not ready. Run the D1 migrations before using this endpoint.",
 	MISSING_TOKEN: "Missing admin token.",
 	INVALID_TOKEN: "Invalid admin token.",
 	TOKEN_NOT_INITIALIZED:

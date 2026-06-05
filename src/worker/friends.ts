@@ -14,6 +14,7 @@ import type {
 import {
 	enforceRateLimit,
 	getAppSetting,
+	isMissingD1SchemaError,
 	isValidAvatarUrl,
 	isValidDescription,
 	isValidDisplayName,
@@ -22,10 +23,11 @@ import {
 	normalizeFriendHostname,
 	readBoolean,
 	readHumanProof,
-	readJson,
+	readJsonBody,
 	readString,
 	rejectCrossSiteWrite,
 	rejectOversizedBody,
+	schemaNotReadyResponse,
 	setAppSetting,
 } from "./utils";
 
@@ -34,14 +36,19 @@ import {
 // ================================================================
 
 export async function getApprovedFriends(env: Env): Promise<Response> {
-	const result = await env.DB.prepare(
-		`SELECT id, name, description, url, avatar_url AS avatarUrl
+	try {
+		const result = await env.DB.prepare(
+			`SELECT id, name, description, url, avatar_url AS avatarUrl
      FROM friend_links
      WHERE status = 'approved' AND is_active = 1
      ORDER BY sort_order ASC, created_at DESC`,
-	).all();
+		).all();
 
-	return json({ friends: result.results ?? [] });
+		return json({ friends: result.results ?? [] });
+	} catch (error) {
+		if (isMissingD1SchemaError(error)) return json({ friends: [] });
+		throw error;
+	}
 }
 
 // ================================================================
@@ -66,7 +73,8 @@ export async function submitFriendLink(
 	const bodyError = rejectOversizedBody(request, MAX_JSON_BODY_BYTES);
 	if (bodyError) return bodyError;
 
-	const body = await readJson(request);
+	const body = await readJsonBody(request, MAX_JSON_BODY_BYTES);
+	if (body instanceof Response) return body;
 	const name = readString(body.name, 40);
 	const description = readString(body.description, 120);
 	const linkUrl = readString(body.url, 400);
@@ -99,66 +107,74 @@ export async function submitFriendLink(
 		return json({ error: apiError("FRIEND_URL_INVALID") }, 400);
 	}
 
-	const domainDup = await env.DB.prepare(
-		`SELECT id FROM friend_links
+	try {
+		const domainDup = await env.DB.prepare(
+			`SELECT id FROM friend_links
 	     WHERE normalized_host = ? AND status IN ('pending', 'approved')
 	     LIMIT 1`,
-	)
-		.bind(normalizedHost)
-		.first<{ id: number }>();
-	if (domainDup) {
-		return json({ error: apiError("FRIEND_DOMAIN_DUPLICATE") }, 409);
-	}
+		)
+			.bind(normalizedHost)
+			.first<{ id: number }>();
+		if (domainDup) {
+			return json({ error: apiError("FRIEND_DOMAIN_DUPLICATE") }, 409);
+		}
 
-	// Pending flood protection: limit pending submissions per actor.
-	const pendingCount = await env.DB.prepare(
-		`SELECT COUNT(*) AS count FROM friend_links
+		// Pending flood protection: limit pending submissions per actor.
+		const pendingCount = await env.DB.prepare(
+			`SELECT COUNT(*) AS count FROM friend_links
 	     WHERE status = 'pending'
 	     AND created_at > datetime('now', '-1 hour')`,
-	).first<{ count: number }>();
-	if ((pendingCount?.count ?? 0) > 10) {
-		return json({ error: apiError("FRIEND_PENDING_LIMIT") }, 429);
-	}
+		).first<{ count: number }>();
+		if ((pendingCount?.count ?? 0) > 10) {
+			return json({ error: apiError("FRIEND_PENDING_LIMIT") }, 429);
+		}
 
-	const duplicate = await env.DB.prepare(
-		`SELECT id, status FROM friend_links
+		const duplicate = await env.DB.prepare(
+			`SELECT id, status FROM friend_links
      WHERE url = ? AND status IN ('pending', 'approved')
      LIMIT 1`,
-	)
-		.bind(linkUrl)
-		.first<{ id: number; status: string }>();
-	if (duplicate) {
-		return json({ error: apiError("FRIEND_DUPLICATE") }, 409);
-	}
+		)
+			.bind(linkUrl)
+			.first<{ id: number; status: string }>();
+		if (duplicate) {
+			return json({ error: apiError("FRIEND_DUPLICATE") }, 409);
+		}
 
-	const proofError = await verifyHumanProof(
-		request,
-		env,
-		"friends",
-		humanProof,
-	);
-	if (proofError) return proofError;
+		const proofError = await verifyHumanProof(
+			request,
+			env,
+			"friends",
+			humanProof,
+		);
+		if (proofError) return proofError;
 
-	const insert = await env.DB.prepare(
-		`INSERT INTO friend_links (name, description, url, normalized_host, avatar_url, status)
+		const insert = await env.DB.prepare(
+			`INSERT INTO friend_links (name, description, url, normalized_host, avatar_url, status)
 	     VALUES (?, ?, ?, ?, ?, 'pending')`,
-	)
-		.bind(name, description, linkUrl, normalizedHost, avatarUrl)
-		.run();
+		)
+			.bind(name, description, linkUrl, normalizedHost, avatarUrl)
+			.run();
 
-	ctx.waitUntil(
-		sendTelegramFriendNotification(env, {
-			id: Number(insert.meta.last_row_id ?? 0),
-			name,
-			description,
-			url: linkUrl,
-			avatarUrl,
-		}).catch((error) => {
-			console.warn("Telegram friend notification failed", error);
-		}),
-	);
+		ctx.waitUntil(
+			sendTelegramFriendNotification(env, {
+				id: Number(insert.meta.last_row_id ?? 0),
+				name,
+				description,
+				url: linkUrl,
+				avatarUrl,
+			}).catch((error) => {
+				console.warn("Telegram friend notification failed", error);
+			}),
+		);
 
-	return json({ ok: true, message: "申请已提交，审核通过后会自动展示。" }, 201);
+		return json(
+			{ ok: true, message: "申请已提交，审核通过后会自动展示。" },
+			201,
+		);
+	} catch (error) {
+		if (isMissingD1SchemaError(error)) return schemaNotReadyResponse();
+		throw error;
+	}
 }
 
 // ================================================================

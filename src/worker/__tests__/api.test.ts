@@ -342,6 +342,232 @@ describe("JSON body size limits", () => {
 		);
 		expect(res.status).toBe(413);
 	});
+
+	it("rejects oversized JSON bodies without content-length", async () => {
+		const env = mockEnv();
+		const body = JSON.stringify({ value: "x".repeat(70 * 1024) });
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/friends", {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					origin: "https://blog.example.com",
+				},
+				body,
+			}),
+			env,
+			mockCtx(),
+		);
+		expect(res.status).toBe(413);
+	});
+});
+
+// ================================================================
+// Public API schema fallback
+// ================================================================
+describe("Public API schema fallback", () => {
+	let worker: Awaited<typeof import("../index")>;
+
+	beforeAll(async () => {
+		vi.stubGlobal("caches", {
+			default: {
+				match: vi.fn().mockResolvedValue(undefined),
+				put: vi.fn().mockResolvedValue(undefined),
+			},
+		});
+		worker = await import("../index");
+	});
+
+	afterAll(() => {
+		vi.unstubAllGlobals();
+	});
+
+	function missingSchemaDb(table: string): D1Database {
+		const missingStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi
+				.fn()
+				.mockRejectedValue(new Error("no such table: app_settings")),
+			all: vi.fn().mockRejectedValue(new Error(`no such table: ${table}`)),
+			run: vi
+				.fn()
+				.mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
+		};
+		return {
+			prepare: vi.fn().mockReturnValue(missingStmt),
+			batch: vi.fn().mockResolvedValue([]),
+			exec: vi.fn().mockResolvedValue({ count: 0, duration: 0 }),
+			dump: vi.fn().mockResolvedValue([]),
+		} as unknown as D1Database;
+	}
+
+	it("returns an empty friends list when friend_links is missing", async () => {
+		const env = mockEnv({ DB: missingSchemaDb("friend_links") });
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/friends"),
+			env,
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(200);
+		await expect(res.json()).resolves.toEqual({ friends: [] });
+	});
+
+	it("returns an empty music list when music_tracks is missing", async () => {
+		const env = mockEnv({ DB: missingSchemaDb("music_tracks") });
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/music/tracks"),
+			env,
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(200);
+		await expect(res.json()).resolves.toEqual({ tracks: [] });
+	});
+});
+
+// ================================================================
+// Database initialization
+// ================================================================
+describe("Database initialization", () => {
+	let worker: Awaited<typeof import("../index")>;
+
+	beforeAll(async () => {
+		worker = await import("../index");
+	});
+
+	it("syncs migration version when Wrangler migrations already applied", async () => {
+		const tables = new Set([
+			"app_settings",
+			"friend_links",
+			"music_tracks",
+			"stats_visitors",
+			"stats_page_daily",
+			"rate_limits",
+			"comment",
+			"config",
+			"counter",
+			"admin_audit_log",
+		]);
+		const preparedSql: string[] = [];
+		const versionWrites: unknown[][] = [];
+
+		const appSettingSelectStmt = {
+			key: "",
+			bind: vi.fn((key: string) => {
+				appSettingSelectStmt.key = key;
+				return appSettingSelectStmt;
+			}),
+			first: vi.fn(async () =>
+				appSettingSelectStmt.key === "stats_salt"
+					? { value: "stable-salt" }
+					: null,
+			),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi
+				.fn()
+				.mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
+		};
+		const appSettingWriteStmt = {
+			bind: vi.fn((...values: unknown[]) => {
+				versionWrites.push(values);
+				return appSettingWriteStmt;
+			}),
+			first: vi.fn().mockResolvedValue(null),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi
+				.fn()
+				.mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
+		};
+		const tableStmt = {
+			table: "",
+			bind: vi.fn((table: string) => {
+				tableStmt.table = table;
+				return tableStmt;
+			}),
+			first: vi.fn(async () =>
+				tables.has(tableStmt.table) ? { name: tableStmt.table } : null,
+			),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi
+				.fn()
+				.mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
+		};
+		const friendColumnsStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+			all: vi.fn().mockResolvedValue({
+				results: [{ name: "id" }, { name: "normalized_host" }],
+			}),
+			run: vi
+				.fn()
+				.mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
+		};
+		const musicColumnsStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+			all: vi.fn().mockResolvedValue({
+				results: [{ name: "id" }, { name: "content_hash" }],
+			}),
+			run: vi
+				.fn()
+				.mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
+		};
+		const genericStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue({ count: 1 }),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi
+				.fn()
+				.mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
+		};
+		const db = {
+			prepare: vi.fn((sql: string) => {
+				preparedSql.push(sql);
+				if (sql.includes("SELECT value FROM app_settings")) {
+					return appSettingSelectStmt;
+				}
+				if (sql.includes("INSERT INTO app_settings")) {
+					return appSettingWriteStmt;
+				}
+				if (sql.includes("sqlite_master")) return tableStmt;
+				if (sql.includes("PRAGMA table_info(friend_links)")) {
+					return friendColumnsStmt;
+				}
+				if (sql.includes("PRAGMA table_info(music_tracks)")) {
+					return musicColumnsStmt;
+				}
+				return genericStmt;
+			}),
+			batch: vi.fn().mockResolvedValue([]),
+			exec: vi.fn().mockResolvedValue({ count: 0, duration: 0 }),
+			dump: vi.fn().mockResolvedValue([]),
+		} as unknown as D1Database;
+
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/setup/init-db", {
+				method: "POST",
+				headers: {
+					authorization: "Bearer test-admin-token",
+					"content-type": "application/json",
+				},
+				body: "{}",
+			}),
+			mockEnv({ DB: db }),
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(200);
+		await expect(res.json()).resolves.toMatchObject({
+			ok: true,
+			applied: [],
+			version: "0007",
+		});
+		expect(versionWrites).toContainEqual(["db_migration_version", "0007"]);
+		expect(preparedSql.some((sql) => sql.startsWith("ALTER TABLE"))).toBe(
+			false,
+		);
+	});
 });
 
 // ================================================================
@@ -791,6 +1017,27 @@ describe("Admin music management", () => {
 		expect(res.status).toBe(401);
 	});
 
+	it("rejects authorized music upload without content-length", async () => {
+		const env = mockEnv();
+		const formData = new FormData();
+		formData.append(
+			"files",
+			new File(["audio"], "song.mp3", { type: "audio/mpeg" }),
+		);
+
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/admin/music/upload", {
+				method: "POST",
+				headers: { "x-fuwari-admin-token": "test-admin-token" },
+				body: formData,
+			}),
+			env,
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(411);
+	});
+
 	it("returns duplicate result for uploaded music with an existing content hash", async () => {
 		const bytes = new TextEncoder().encode("same audio");
 		const digest = await crypto.subtle.digest("SHA-256", bytes);
@@ -835,7 +1082,10 @@ describe("Admin music management", () => {
 		const res = await worker.default.fetch(
 			new Request("https://blog.example.com/api/admin/music/upload", {
 				method: "POST",
-				headers: { "x-fuwari-admin-token": "test-admin-token" },
+				headers: {
+					"content-length": "1024",
+					"x-fuwari-admin-token": "test-admin-token",
+				},
 				body: formData,
 			}),
 			env,
@@ -910,7 +1160,10 @@ describe("Admin music management", () => {
 		const res = await worker.default.fetch(
 			new Request("https://blog.example.com/api/admin/music/upload", {
 				method: "POST",
-				headers: { "x-fuwari-admin-token": "test-admin-token" },
+				headers: {
+					"content-length": "4096",
+					"x-fuwari-admin-token": "test-admin-token",
+				},
 				body: formData,
 			}),
 			env,
@@ -979,7 +1232,10 @@ describe("Admin music management", () => {
 		const res = await worker.default.fetch(
 			new Request("https://blog.example.com/api/admin/music/upload", {
 				method: "POST",
-				headers: { "x-fuwari-admin-token": "test-admin-token" },
+				headers: {
+					"content-length": "1024",
+					"x-fuwari-admin-token": "test-admin-token",
+				},
 				body: formData,
 			}),
 			env,
@@ -1398,7 +1654,10 @@ describe("Twikoo security", () => {
 		const res = await worker.default.fetch(
 			new Request("https://blog.example.com/api/admin/music/upload", {
 				method: "POST",
-				headers: { "x-fuwari-admin-token": "test-admin-token" },
+				headers: {
+					"content-length": String(50 * 1024 * 1024 + 1),
+					"x-fuwari-admin-token": "test-admin-token",
+				},
 				body: formData,
 			}),
 			env,

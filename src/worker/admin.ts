@@ -39,7 +39,7 @@ import {
 	normalizeFriendHostname,
 	readBoolean,
 	readInteger,
-	readJson,
+	readJsonBody,
 	readString,
 	rejectOversizedBody,
 	requireAdmin,
@@ -142,7 +142,8 @@ async function updateAdminCommentsSettings(
 	const bodyError = rejectOversizedBody(request, MAX_JSON_BODY_BYTES);
 	if (bodyError) return bodyError;
 
-	const body = await readJson(request);
+	const body = await readJsonBody(request, MAX_JSON_BODY_BYTES);
+	if (body instanceof Response) return body;
 	const enabled = readBoolean(body.enabled, true);
 	await setAppSetting(
 		env,
@@ -186,7 +187,8 @@ async function updateAdminTelegramSettings(
 	const bodyError = rejectOversizedBody(request, MAX_JSON_BODY_BYTES);
 	if (bodyError) return bodyError;
 
-	const body = await readJson(request);
+	const body = await readJsonBody(request, MAX_JSON_BODY_BYTES);
+	if (body instanceof Response) return body;
 	const botToken = readString(body.botToken, 256);
 	const settings: TelegramSettings = {
 		enabled: readBoolean(body.enabled, current.enabled),
@@ -251,7 +253,8 @@ async function updateAdminTelegramCommentSettings(
 	const bodyError = rejectOversizedBody(request, MAX_JSON_BODY_BYTES);
 	if (bodyError) return bodyError;
 
-	const body = await readJson(request);
+	const body = await readJsonBody(request, MAX_JSON_BODY_BYTES);
+	if (body instanceof Response) return body;
 	const botToken = readString(body.botToken, 256);
 	const settings: TelegramCommentSettings = {
 		enabled: readBoolean(body.enabled, current.enabled),
@@ -369,7 +372,8 @@ async function updateFriend(
 	const bodyError = rejectOversizedBody(request, MAX_JSON_BODY_BYTES);
 	if (bodyError) return bodyError;
 
-	const body = await readJson(request);
+	const body = await readJsonBody(request, MAX_JSON_BODY_BYTES);
+	if (body instanceof Response) return body;
 	const fields: string[] = [];
 	const values: (string | number)[] = [];
 

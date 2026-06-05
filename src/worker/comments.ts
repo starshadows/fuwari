@@ -24,7 +24,7 @@ import {
 	md5,
 	readCookie,
 	readHumanProof,
-	readJson,
+	readJsonBody,
 	rejectCrossSiteWrite,
 	rejectOversizedBody,
 	safeNormalizeMediaKey,
@@ -70,7 +70,8 @@ export async function createCommentsSession(
 	const bodyError = rejectOversizedBody(request, MAX_JSON_BODY_BYTES);
 	if (bodyError) return bodyError;
 
-	const body = await readJson(request);
+	const body = await readJsonBody(request, MAX_JSON_BODY_BYTES);
+	if (body instanceof Response) return body;
 	const proofError = await verifyHumanProof(
 		request,
 		env,
@@ -231,14 +232,13 @@ export async function handleTwikooRequest(
 	let event = "";
 	let preParsedBody: Record<string, unknown> | undefined;
 	if (request.method !== "OPTIONS") {
-		try {
-			const cloned = request.clone();
-			preParsedBody = (await cloned.json()) as Record<string, unknown>;
-			event =
-				typeof preParsedBody.event === "string" ? preParsedBody.event : "";
-		} catch {
-			// Malformed JSON — let the adapter handle the error.
-		}
+		const boundedBody = await readJsonBody(
+			request.clone() as Request,
+			MAX_TWIKOO_BODY_BYTES,
+		);
+		if (boundedBody instanceof Response) return boundedBody;
+		preParsedBody = boundedBody;
+		event = typeof preParsedBody.event === "string" ? preParsedBody.event : "";
 	}
 
 	const isWrite = WRITE_EVENTS.has(event);

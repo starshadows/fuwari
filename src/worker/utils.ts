@@ -3,6 +3,7 @@ import {
 	apiError,
 	CACHE_VERSION_DOMAINS,
 	type CacheDomain,
+	MAX_JSON_BODY_BYTES,
 	MUSIC_METADATA_READ_BYTES,
 	RATE_LIMIT_MAX_AGE_SECONDS,
 	SECURITY_HEADERS,
@@ -93,12 +94,17 @@ export async function cachedResponse(
  */
 async function getCacheVersion(env: Env, domain: CacheDomain): Promise<number> {
 	const key = CACHE_VERSION_DOMAINS[domain];
-	const row = await env.DB.prepare(
-		"SELECT value FROM app_settings WHERE key = ?",
-	)
-		.bind(key)
-		.first<{ value: string }>();
-	return Number(row?.value ?? "1");
+	try {
+		const row = await env.DB.prepare(
+			"SELECT value FROM app_settings WHERE key = ?",
+		)
+			.bind(key)
+			.first<{ value: string }>();
+		return Number(row?.value ?? "1");
+	} catch (error) {
+		if (isMissingD1SchemaError(error)) return 1;
+		throw error;
+	}
 }
 
 /**
@@ -466,12 +472,67 @@ export function maskSecret(value: string): string {
 // Request parsing
 // ================================================================
 
-export async function readJson(request: Request): Promise<JsonRecord> {
+class BodyTooLargeError extends Error {
+	constructor() {
+		super("Request body exceeds the configured limit.");
+		this.name = "BodyTooLargeError";
+	}
+}
+
+async function readLimitedTextBody(
+	request: Request,
+	maxBytes: number,
+): Promise<string> {
+	if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) {
+		throw new BodyTooLargeError();
+	}
+
+	const reader = request.body?.getReader();
+	if (!reader) return "";
+
+	const decoder = new TextDecoder();
+	let bytes = 0;
+	let text = "";
 	try {
-		const data = await request.json();
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			bytes += value.byteLength;
+			if (bytes > maxBytes) {
+				await reader.cancel().catch(() => {});
+				throw new BodyTooLargeError();
+			}
+			text += decoder.decode(value, { stream: true });
+		}
+		text += decoder.decode();
+		return text;
+	} finally {
+		reader.releaseLock();
+	}
+}
+
+export async function readJson(request: Request): Promise<JsonRecord> {
+	const result = await readJsonBody(request, MAX_JSON_BODY_BYTES);
+	return result instanceof Response ? {} : result;
+}
+
+export async function readJsonBody(
+	request: Request,
+	maxBytes: number,
+): Promise<JsonRecord | Response> {
+	const lengthError = rejectOversizedBody(request, maxBytes);
+	if (lengthError) return lengthError;
+
+	try {
+		const text = await readLimitedTextBody(request, maxBytes);
+		if (!text.trim()) return {};
+		const data = JSON.parse(text);
 		if (!data || typeof data !== "object" || Array.isArray(data)) return {};
 		return data as JsonRecord;
-	} catch {
+	} catch (error) {
+		if (error instanceof BodyTooLargeError) {
+			return json({ error: apiError("BODY_TOO_LARGE") }, 413);
+		}
 		return {};
 	}
 }
@@ -484,9 +545,22 @@ export async function readJson(request: Request): Promise<JsonRecord> {
 export function rejectOversizedBody(
 	request: Request,
 	maxBytes: number,
+	options: { requireContentLength?: boolean } = {},
 ): Response | null {
-	const length = Number(request.headers.get("content-length") ?? "0");
-	if (!Number.isFinite(length) || length < 0 || length > maxBytes) {
+	const rawLength = request.headers.get("content-length");
+	if (rawLength === null || rawLength.trim() === "") {
+		if (options.requireContentLength) {
+			return json({ error: apiError("BODY_LENGTH_REQUIRED") }, 411);
+		}
+		return null;
+	}
+
+	if (!/^\d+$/.test(rawLength.trim())) {
+		return json({ error: apiError("BODY_TOO_LARGE") }, 413);
+	}
+
+	const length = Number(rawLength);
+	if (!Number.isSafeInteger(length) || length > maxBytes) {
 		return json({ error: apiError("BODY_TOO_LARGE") }, 413);
 	}
 	return null;
@@ -856,16 +930,35 @@ export async function saveStoredAdminTokenHash(
 // DB helpers: app_settings
 // ================================================================
 
+export function isMissingD1SchemaError(error: unknown): boolean {
+	const message = error instanceof Error ? error.message : String(error ?? "");
+	const normalized = message.toLowerCase();
+	return (
+		normalized.includes("no such table") ||
+		normalized.includes("no such column") ||
+		normalized.includes("no such index")
+	);
+}
+
+export function schemaNotReadyResponse(): Response {
+	return json({ error: apiError("SCHEMA_NOT_READY") }, 503);
+}
+
 export async function getAppSetting(
 	env: Env,
 	key: string,
 ): Promise<string | null> {
-	const row = await env.DB.prepare(
-		"SELECT value FROM app_settings WHERE key = ?",
-	)
-		.bind(key)
-		.first<{ value: string }>();
-	return row?.value ?? null;
+	try {
+		const row = await env.DB.prepare(
+			"SELECT value FROM app_settings WHERE key = ?",
+		)
+			.bind(key)
+			.first<{ value: string }>();
+		return row?.value ?? null;
+	} catch (error) {
+		if (isMissingD1SchemaError(error)) return null;
+		throw error;
+	}
 }
 
 export async function setAppSetting(

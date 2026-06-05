@@ -11,7 +11,7 @@ import {
 	enforceRateLimit,
 	json,
 	readBearerToken,
-	readJson,
+	readJsonBody,
 	readString,
 	rejectOversizedBody,
 	timingSafeEqual,
@@ -29,6 +29,7 @@ interface Migration {
 	version: string;
 	description: string;
 	statements: string[];
+	isApplied: (env: Env) => Promise<boolean>;
 }
 
 const MIGRATIONS: Migration[] = [
@@ -37,21 +38,33 @@ const MIGRATIONS: Migration[] = [
 		description:
 			"Create social features (friend_links, music_tracks, app_settings)",
 		statements: [APP_SETTINGS_TABLE, ...FRIEND_LINKS_STATEMENTS],
+		isApplied: async (env) =>
+			(await hasTable(env, "app_settings")) &&
+			(await hasTable(env, "friend_links")) &&
+			(await hasTable(env, "music_tracks")),
 	},
 	{
 		version: "0002",
 		description: "Create visitor statistics tables",
 		statements: [...STATS_INIT_STATEMENTS],
+		isApplied: async (env) =>
+			(await hasTable(env, "stats_visitors")) &&
+			(await hasTable(env, "stats_page_daily")),
 	},
 	{
 		version: "0003",
 		description: "Create rate_limits table",
 		statements: [...RATE_LIMIT_STATEMENTS],
+		isApplied: (env) => hasTable(env, "rate_limits"),
 	},
 	{
 		version: "0004",
 		description: "Create comments and notifications tables",
 		statements: [...TWIKOO_INIT_STATEMENTS],
+		isApplied: async (env) =>
+			(await hasTable(env, "comment")) &&
+			(await hasTable(env, "config")) &&
+			(await hasTable(env, "counter")),
 	},
 	{
 		version: "0005",
@@ -72,6 +85,7 @@ const MIGRATIONS: Migration[] = [
 			`CREATE INDEX IF NOT EXISTS idx_audit_log_resource
 		   ON admin_audit_log (resource, created_at)`,
 		],
+		isApplied: (env) => hasTable(env, "admin_audit_log"),
 	},
 	{
 		version: "0006",
@@ -94,6 +108,7 @@ const MIGRATIONS: Migration[] = [
 			`CREATE INDEX IF NOT EXISTS idx_friend_links_normalized_host_status
 			 ON friend_links (normalized_host, status)`,
 		],
+		isApplied: (env) => hasColumn(env, "friend_links", "normalized_host"),
 	},
 	{
 		version: "0007",
@@ -103,11 +118,58 @@ const MIGRATIONS: Migration[] = [
 			`CREATE INDEX IF NOT EXISTS idx_music_tracks_content_hash
 			 ON music_tracks (content_hash)`,
 		],
+		isApplied: (env) => hasColumn(env, "music_tracks", "content_hash"),
 	},
 ];
 
 /** Key used to track the highest applied migration version in app_settings. */
 const MIGRATION_VERSION_KEY = "db_migration_version";
+
+async function hasTable(env: Env, tableName: string): Promise<boolean> {
+	try {
+		const row = await env.DB.prepare(
+			"SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+		)
+			.bind(tableName)
+			.first<{ name: string }>();
+		return Boolean(row?.name);
+	} catch {
+		return false;
+	}
+}
+
+async function hasColumn(
+	env: Env,
+	tableName: string,
+	columnName: string,
+): Promise<boolean> {
+	try {
+		const result = await env.DB.prepare(`PRAGMA table_info(${tableName})`).all<{
+			name: string;
+		}>();
+		return (result.results ?? []).some((column) => column.name === columnName);
+	} catch {
+		return false;
+	}
+}
+
+async function detectAppliedMigrationVersion(env: Env): Promise<string> {
+	let detected = "0000";
+	for (const migration of MIGRATIONS) {
+		if (!(await migration.isApplied(env))) break;
+		detected = migration.version;
+	}
+	return detected;
+}
+
+async function getEffectiveAppliedMigrationVersion(env: Env): Promise<string> {
+	const recorded = await getAppliedMigrationVersion(env);
+	const detected = await detectAppliedMigrationVersion(env);
+	if (compareVersions(detected, recorded) <= 0) return recorded;
+
+	await setAppliedMigrationVersion(env, detected);
+	return detected;
+}
 
 /**
  * Read the currently applied migration version from app_settings.
@@ -189,7 +251,13 @@ export async function initializeDatabase(
 	);
 	if (rateLimit) return rateLimit;
 
-	const tokenResult = await readSetupToken(request, requestUrl);
+	const postBody =
+		request.method === "POST"
+			? await readJsonBody(request, MAX_JSON_BODY_BYTES)
+			: {};
+	if (postBody instanceof Response) return postBody;
+
+	const tokenResult = readSetupToken(request, requestUrl, postBody);
 	if (tokenResult instanceof Response) return tokenResult;
 	if (!tokenResult) {
 		return json(
@@ -207,8 +275,7 @@ export async function initializeDatabase(
 
 	let requestedVersions: string[] = [];
 	if (request.method === "POST") {
-		const body = await readJson(request);
-		const raw = body.versions;
+		const raw = postBody.versions;
 		if (Array.isArray(raw)) {
 			requestedVersions = raw
 				.filter((entry): entry is string => typeof entry === "string")
@@ -217,7 +284,7 @@ export async function initializeDatabase(
 		}
 	}
 
-	const applied = await getAppliedMigrationVersion(env);
+	const applied = await getEffectiveAppliedMigrationVersion(env);
 	const pending = MIGRATIONS.filter(
 		(migration) => compareVersions(migration.version, applied) > 0,
 	).filter(
@@ -231,8 +298,14 @@ export async function initializeDatabase(
 	}
 
 	const executed: string[] = [];
+	const skipped: string[] = [];
 	try {
 		for (const migration of pending) {
+			if (await migration.isApplied(env)) {
+				await setAppliedMigrationVersion(env, migration.version);
+				skipped.push(migration.version);
+				continue;
+			}
 			for (const statement of migration.statements) {
 				await env.DB.prepare(statement).run();
 			}
@@ -256,14 +329,16 @@ export async function initializeDatabase(
 	return json({
 		ok: true,
 		applied: executed,
+		skipped,
 		version: pending[pending.length - 1]?.version ?? applied,
 	});
 }
 
-async function readSetupToken(
+function readSetupToken(
 	request: Request,
 	requestUrl: URL,
-): Promise<string | Response | null> {
+	body: Record<string, unknown>,
+): string | Response | null {
 	if (requestUrl.searchParams.get("token")) {
 		return json(
 			{
@@ -285,7 +360,6 @@ async function readSetupToken(
 	const bearer = readBearerToken(request);
 	if (bearer) return bearer;
 	if (request.method === "POST") {
-		const body = await readJson(request);
 		const token = readString(body.token, 200);
 		if (token) return token;
 	}
