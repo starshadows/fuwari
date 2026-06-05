@@ -34,6 +34,8 @@ export let embedded = false;
 
 const publicTwikooEndpoint = "/api/twikoo";
 const adminTwikooEndpoint = "/api/admin/twikoo";
+const twikooHostSelector = "#twikoo-comments";
+const twikooMountSelector = "#twikoo-comments-mount";
 let restoreFetchBridge: (() => void) | null = null;
 
 const loadConfig = async () => {
@@ -66,7 +68,7 @@ const loadTwikoo = async () => {
 			adminMode ? adminTwikooEndpoint : publicTwikooEndpoint,
 			window.location.origin,
 		).href,
-		el: "#twikoo-comments",
+		el: twikooMountSelector,
 		path: window.location.pathname,
 		lang: "zh-CN",
 	});
@@ -101,21 +103,28 @@ type TwikooVueRoot = {
 	showAdmin?: boolean;
 	showAdminEntry?: boolean;
 	onShowAdminEntry?: (value: boolean) => void;
+	$children?: TwikooVueRoot[];
+	$forceUpdate?: () => void;
 	$nextTick?: (callback: () => void) => void;
 };
 
 const revealTwikooAdmin = (attempt = 0) => {
-	const root = document.querySelector("#twikoo-comments #twikoo") as
+	const host = document.querySelector(twikooHostSelector);
+	const root = (host?.querySelector("#twikoo") ??
+		document.querySelector("#twikoo")) as
 		| (Element & { __vue__?: TwikooVueRoot })
 		| null;
-	const vueRoot = root?.__vue__;
+	const vueApp = root?.__vue__ ?? root?.firstElementChild?.__vue__;
+	const vueRoot = vueApp?.$children?.[0] ?? vueApp;
 
 	if (vueRoot) {
 		vueRoot.onShowAdminEntry?.(true);
 		vueRoot.showAdminEntry = true;
 		vueRoot.showAdmin = true;
+		vueRoot.$forceUpdate?.();
 		vueRoot.$nextTick?.(() => {
 			vueRoot.showAdmin = true;
+			vueRoot.$forceUpdate?.();
 		});
 		return;
 	}
@@ -230,7 +239,9 @@ onDestroy(() => {
 		</div>
 	{:else}
 		<!-- 评论区容器 — 始终展示 Twikoo 已有评论列表 -->
-		<div id="twikoo-comments"></div>
+		<div id="twikoo-comments">
+			<div id="twikoo-comments-mount"></div>
+		</div>
 
 		{#if message}
 			<div class="mt-3 text-sm text-[var(--primary)]">{message}</div>
