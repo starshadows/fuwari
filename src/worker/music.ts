@@ -270,6 +270,11 @@ export async function uploadMusicFiles(
 		return json({ error: apiError("MUSIC_UPLOAD_EMPTY") }, 400);
 	}
 
+	const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
+	if (totalBytes > MAX_MUSIC_UPLOAD_BYTES * 2) {
+		return json({ error: apiError("MUSIC_UPLOAD_TOO_MANY") }, 400);
+	}
+
 	const maxSortRow = await env.DB.prepare(
 		"SELECT COALESCE(MAX(sort_order), 0) AS maxSort FROM music_tracks",
 	).first<{ maxSort: number }>();

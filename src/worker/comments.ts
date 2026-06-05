@@ -178,6 +178,10 @@ const WRITE_EVENTS = new Set<string>([
 	"UPLOAD_IMAGE",
 	"COMMENT_LIKE",
 	"COUNTER_GET",
+	"SET_CONFIG",
+	"COMMENT_SET_FOR_ADMIN",
+	"COMMENT_DELETE_FOR_ADMIN",
+	"COMMENT_EXPORT_FOR_ADMIN",
 	"SET_PASSWORD",
 	"LOGIN",
 ]);
@@ -267,6 +271,14 @@ export async function handleTwikooRequest(
 	}
 
 	// Dedicated rate limits per write event type.
+	if (event === "COMMENT_SUBMIT") {
+		const rl = await enforceRateLimit(request, env, {
+			scope: "twikoo-comment-submit",
+			limit: 10,
+			windowSeconds: 10 * 60,
+		});
+		if (rl) return rl;
+	}
 	if (event === "UPLOAD_IMAGE") {
 		const rl = await enforceRateLimit(request, env, {
 			scope: "twikoo-upload",
@@ -341,8 +353,7 @@ export async function handleTwikooRequest(
 					const isReply = Boolean(event.pid);
 					const title = isReply ? "新的评论回复" : "新的评论";
 
-					const commentExcerpt = event.comment
-						.replace(/<\/?[^>]+(>|$)/g, "")
+					const commentExcerpt = stripHtmlForNotification(event.comment)
 						.replace(/\s+/g, " ")
 						.trim()
 						.slice(0, 300);
@@ -351,7 +362,6 @@ export async function handleTwikooRequest(
 						title,
 						"",
 						`昵称：${event.nick}`,
-						`邮箱：${event.mail}`,
 						`页面：${pageUrl}`,
 						isReply ? `回复：${event.pid.slice(0, 8)}` : "",
 						"",
@@ -371,6 +381,34 @@ export async function handleTwikooRequest(
 			);
 		},
 	});
+}
+
+function stripHtmlForNotification(value: string): string {
+	let text = "";
+	let inTag = false;
+	let quote: '"' | "'" | "" = "";
+
+	for (const char of value) {
+		if (inTag) {
+			if (quote) {
+				if (char === quote) quote = "";
+				continue;
+			}
+			if (char === '"' || char === "'") {
+				quote = char;
+				continue;
+			}
+			if (char === ">") inTag = false;
+			continue;
+		}
+		if (char === "<") {
+			inTag = true;
+			continue;
+		}
+		text += char;
+	}
+
+	return text;
 }
 
 function createTwikooR2Binding(

@@ -13,6 +13,7 @@ import {
 	readBoolean,
 	readInteger,
 	readString,
+	rejectCrossSiteWrite,
 	rejectOversizedBody,
 	safeDecodeURIComponent,
 	safeNormalizeMediaKey,
@@ -281,6 +282,26 @@ describe("isSameOrigin", () => {
 });
 
 // ================================================================
+// rejectCrossSiteWrite
+// ================================================================
+describe("rejectCrossSiteWrite", () => {
+	it("rejects requests missing both origin and referer", async () => {
+		const request = new Request("https://example.com/api/write", {
+			method: "POST",
+		});
+		expect(rejectCrossSiteWrite(request)?.status).toBe(403);
+	});
+
+	it("allows same-origin referer when origin is absent", async () => {
+		const request = new Request("https://example.com/api/write", {
+			method: "POST",
+			headers: { referer: "https://example.com/page" },
+		});
+		expect(rejectCrossSiteWrite(request)).toBeNull();
+	});
+});
+
+// ================================================================
 // normalizeFriendHostname
 // ================================================================
 describe("normalizeFriendHostname", () => {
@@ -378,6 +399,16 @@ describe("isLikelyBot", () => {
 
 	it("detects curl", () => {
 		expect(isLikelyBot(mockRequest("curl/8.0"))).toBe(true);
+	});
+
+	it("detects Cloudflare health checks", () => {
+		expect(isLikelyBot(mockRequest("health-check"))).toBe(true);
+	});
+
+	it("detects compatible Mozilla bot user agents", () => {
+		expect(
+			isLikelyBot(mockRequest("Mozilla/5.0 (compatible; Discordbot/2.0)")),
+		).toBe(true);
 	});
 
 	it("passes human browsers", () => {

@@ -1,3 +1,4 @@
+import { MUSIC_METADATA_READ_BYTES } from "./constants";
 import type { EmbeddedCover, MusicMetadata } from "./types/aliases";
 
 // ================================================================
@@ -13,6 +14,7 @@ export function parseId3Metadata(
 
 	const flags = bytes[5];
 	const tagSize = readSyncSafeInteger(bytes, 6);
+	if (tagSize > MUSIC_METADATA_READ_BYTES) return {};
 	const end = Math.min(bytes.length, 10 + tagSize);
 	let offset = 10;
 

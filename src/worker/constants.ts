@@ -2,6 +2,7 @@
 // Environment variable & settings keys
 // ----------------------------------------------------------------
 export const ADMIN_TOKEN_SETTING_KEY = "admin_token_sha256";
+export const ADMIN_AUDIT_SALT_SETTING_KEY = "admin_audit_salt";
 export const STATS_SALT_SETTING_KEY = "stats_salt";
 export const COMMENTS_ENABLED_SETTING_KEY = "comments_enabled";
 export const TELEGRAM_SETTINGS_KEY = "telegram_friend_notification";

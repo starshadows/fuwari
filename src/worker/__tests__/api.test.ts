@@ -225,6 +225,22 @@ describe("Cross-site protection", () => {
 		expect(res.status).toBe(403);
 	});
 
+	it("rejects POST without origin or referer", async () => {
+		const env = mockEnv();
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/friends", {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+				},
+				body: JSON.stringify({}),
+			}),
+			env,
+			mockCtx(),
+		);
+		expect(res.status).toBe(403);
+	});
+
 	it("allows same-origin POSTs through validation", async () => {
 		const env = mockEnv();
 		const res = await worker.default.fetch(
@@ -684,7 +700,7 @@ describe("Admin music management", () => {
 
 		const adminRes = await worker.default.fetch(
 			new Request("https://blog.example.com/api/admin/music", {
-				headers: adminHeaders(),
+				headers: { "x-fuwari-admin-token": "test-admin-token" },
 			}),
 			env,
 			mockCtx(),
@@ -819,7 +835,7 @@ describe("Admin music management", () => {
 		const res = await worker.default.fetch(
 			new Request("https://blog.example.com/api/admin/music/upload", {
 				method: "POST",
-				headers: adminHeaders(),
+				headers: { "x-fuwari-admin-token": "test-admin-token" },
 				body: formData,
 			}),
 			env,
@@ -894,7 +910,7 @@ describe("Admin music management", () => {
 		const res = await worker.default.fetch(
 			new Request("https://blog.example.com/api/admin/music/upload", {
 				method: "POST",
-				headers: adminHeaders(),
+				headers: { "x-fuwari-admin-token": "test-admin-token" },
 				body: formData,
 			}),
 			env,
@@ -963,7 +979,7 @@ describe("Admin music management", () => {
 		const res = await worker.default.fetch(
 			new Request("https://blog.example.com/api/admin/music/upload", {
 				method: "POST",
-				headers: adminHeaders(),
+				headers: { "x-fuwari-admin-token": "test-admin-token" },
 				body: formData,
 			}),
 			env,
@@ -1326,6 +1342,7 @@ describe("Twikoo security", () => {
 				method: "POST",
 				headers: {
 					"content-type": "application/json",
+					origin: "https://blog.example.com",
 					"x-fuwari-admin-token": "test-admin-token",
 				},
 				body: JSON.stringify({
@@ -1339,6 +1356,58 @@ describe("Twikoo security", () => {
 		expect(res.status).toBe(200);
 		const body = (await res.json()) as { code?: number };
 		expect(body.code).toBe(0);
+	});
+
+	it("rejects cross-site Twikoo admin writes without origin or referer", async () => {
+		const { db } = mockD1Result("{}");
+		const env = mockEnv({ DB: db });
+
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/admin/twikoo", {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					"x-fuwari-admin-token": "test-admin-token",
+				},
+				body: JSON.stringify({
+					event: "SET_CONFIG",
+				}),
+			}),
+			env,
+			mockCtx(),
+		);
+		expect(res.status).toBe(403);
+	});
+
+	it("rejects oversized aggregate music upload payloads", async () => {
+		const env = mockEnv();
+		const formData = new FormData();
+		formData.append(
+			"files",
+			new File([new Uint8Array(25 * 1024 * 1024)], "song-a.mp3", {
+				type: "audio/mpeg",
+			}),
+		);
+		formData.append(
+			"files",
+			new File([new Uint8Array(25 * 1024 * 1024 + 1)], "song-b.mp3", {
+				type: "audio/mpeg",
+			}),
+		);
+
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/admin/music/upload", {
+				method: "POST",
+				headers: { "x-fuwari-admin-token": "test-admin-token" },
+				body: formData,
+			}),
+			env,
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(400);
+		const body = (await res.json()) as { error: string };
+		expect(body.error).toContain("一次上传的音乐文件过多");
 	});
 
 	it("allows read-only Twikoo events without a session", async () => {

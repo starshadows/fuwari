@@ -1,4 +1,5 @@
 import {
+	ADMIN_AUDIT_SALT_SETTING_KEY,
 	apiError,
 	CACHE_VERSION_DOMAINS,
 	type CacheDomain,
@@ -684,6 +685,9 @@ export function rejectCrossSiteWrite(request: Request): Response | null {
 		return json({ error: apiError("CROSS_SITE") }, 403);
 	}
 	const referer = request.headers.get("referer");
+	if (!origin && !referer) {
+		return json({ error: apiError("CROSS_SITE") }, 403);
+	}
 	if (!origin && referer && !isSameOrigin(referer, request.url)) {
 		return json({ error: apiError("CROSS_SITE") }, 403);
 	}
@@ -740,7 +744,7 @@ export function embeddedCoverUrlForMusicKey(objectKey: string): string {
 
 export function isLikelyBot(request: Request): boolean {
 	const userAgent = request.headers.get("user-agent")?.toLowerCase() ?? "";
-	return /bot|crawler|spider|slurp|curl|wget|python|go-http-client|headless/.test(
+	return /bot|crawler|spider|slurp|curl|wget|python|go-http-client|headless|health-check|mozilla\/5\.0 \(compatible\)/.test(
 		userAgent,
 	);
 }
@@ -1137,17 +1141,27 @@ export async function auditAdminAction(
 ): Promise<void> {
 	try {
 		const token = readAdminToken(request);
-		const actorHash = await hashToken(token || "unknown");
+		const salt = await ensureAdminAuditSalt(env);
+		const actorHash = await hashToken(`${salt}:${token || "unknown"}`);
 		const ip = getClientIp(request);
 		await env.DB.prepare(
 			`INSERT INTO admin_audit_log (actor_hash, action, resource, resource_id, details, ip)
-	     VALUES (?, ?, ?, ?, ?, ?)`,
+	    	 VALUES (?, ?, ?, ?, ?, ?)`,
 		)
 			.bind(actorHash, action, resource, String(resourceId), details, ip)
 			.run();
 	} catch {
 		// Audit logging failures should never affect the main request.
 	}
+}
+
+async function ensureAdminAuditSalt(env: Env): Promise<string> {
+	const existing = await getAppSetting(env, ADMIN_AUDIT_SALT_SETTING_KEY);
+	if (existing) return existing;
+
+	const salt = crypto.randomUUID();
+	await setAppSetting(env, ADMIN_AUDIT_SALT_SETTING_KEY, salt);
+	return (await getAppSetting(env, ADMIN_AUDIT_SALT_SETTING_KEY)) ?? salt;
 }
 
 // ================================================================

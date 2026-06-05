@@ -140,10 +140,10 @@ export async function submitFriendLink(
 	if (proofError) return proofError;
 
 	const insert = await env.DB.prepare(
-		`INSERT INTO friend_links (name, description, url, avatar_url, status)
-     VALUES (?, ?, ?, ?, 'pending')`,
+		`INSERT INTO friend_links (name, description, url, normalized_host, avatar_url, status)
+	     VALUES (?, ?, ?, ?, ?, 'pending')`,
 	)
-		.bind(name, description, linkUrl, avatarUrl)
+		.bind(name, description, linkUrl, normalizedHost, avatarUrl)
 		.run();
 
 	ctx.waitUntil(
