@@ -36,7 +36,7 @@ const publicTwikooEndpoint = "/api/twikoo";
 const adminTwikooEndpoint = "/api/admin/twikoo";
 const twikooHostSelector = "#twikoo-comments";
 const twikooMountSelector = "#twikoo-comments-mount";
-let restoreFetchBridge: (() => void) | null = null;
+let restoreAdminRequestBridge: (() => void) | null = null;
 
 const loadConfig = async () => {
 	isLoadingConfig = true;
@@ -56,7 +56,7 @@ const loadConfig = async () => {
 const loadTwikoo = async () => {
 	if (isTwikooLoaded) return;
 	message = "正在加载评论...";
-	installAdminFetchBridge();
+	installAdminRequestBridge();
 	const module = (await import("twikoo")) as TwikooModule;
 	const twikoo = resolveTwikooClient(module);
 
@@ -134,12 +134,27 @@ const revealTwikooAdmin = (attempt = 0) => {
 	}
 };
 
-const installAdminFetchBridge = () => {
-	if (!adminMode || !adminToken || restoreFetchBridge) return;
+const installAdminRequestBridge = () => {
+	if (!adminMode || !adminToken || restoreAdminRequestBridge) return;
 
 	const originalFetch = window.fetch.bind(window);
+	const originalOpen = window.XMLHttpRequest.prototype.open;
+	const originalSetRequestHeader =
+		window.XMLHttpRequest.prototype.setRequestHeader;
+	const originalSend = window.XMLHttpRequest.prototype.send;
 	const adminPath = new URL(adminTwikooEndpoint, window.location.origin)
 		.pathname;
+	const trackedRequests = new WeakMap<XMLHttpRequest, boolean>();
+	const tokenAttachedRequests = new WeakSet<XMLHttpRequest>();
+
+	const shouldAttachAdminToken = (rawUrl: string | URL) => {
+		try {
+			const url = new URL(rawUrl, window.location.origin);
+			return url.pathname === adminPath;
+		} catch {
+			return false;
+		}
+	};
 
 	window.fetch = (input, init) => {
 		const rawUrl =
@@ -165,9 +180,45 @@ const installAdminFetchBridge = () => {
 		return originalFetch(input, { ...init, headers });
 	};
 
-	restoreFetchBridge = () => {
+	window.XMLHttpRequest.prototype.open = function (
+		method: string,
+		url: string | URL,
+		async = true,
+		username?: string | null,
+		password?: string | null,
+	) {
+		trackedRequests.set(this, shouldAttachAdminToken(url));
+
+		if (username !== undefined) {
+			return originalOpen.call(this, method, url, async, username, password);
+		}
+		return originalOpen.call(this, method, url, async);
+	};
+
+	window.XMLHttpRequest.prototype.setRequestHeader = function (header, value) {
+		if (
+			trackedRequests.get(this) &&
+			header.toLowerCase() === "x-fuwari-admin-token"
+		) {
+			tokenAttachedRequests.add(this);
+		}
+		return originalSetRequestHeader.call(this, header, value);
+	};
+
+	window.XMLHttpRequest.prototype.send = function (body) {
+		if (trackedRequests.get(this) && !tokenAttachedRequests.has(this)) {
+			originalSetRequestHeader.call(this, "x-fuwari-admin-token", adminToken);
+			tokenAttachedRequests.add(this);
+		}
+		return originalSend.call(this, body);
+	};
+
+	restoreAdminRequestBridge = () => {
 		window.fetch = originalFetch;
-		restoreFetchBridge = null;
+		window.XMLHttpRequest.prototype.open = originalOpen;
+		window.XMLHttpRequest.prototype.setRequestHeader = originalSetRequestHeader;
+		window.XMLHttpRequest.prototype.send = originalSend;
+		restoreAdminRequestBridge = null;
 	};
 };
 
@@ -218,7 +269,7 @@ onMount(() => {
 });
 
 onDestroy(() => {
-	restoreFetchBridge?.();
+	restoreAdminRequestBridge?.();
 });
 </script>
 
