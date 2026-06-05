@@ -608,7 +608,12 @@ export async function deleteMusicTrack(
 ): Promise<Response> {
 	if (!Number.isInteger(id))
 		return json({ error: apiError("MUSIC_ID_INVALID") }, 400);
-	await env.DB.prepare("DELETE FROM music_tracks WHERE id = ?").bind(id).run();
+	const result = await env.DB.prepare("DELETE FROM music_tracks WHERE id = ?")
+		.bind(id)
+		.run();
+	if ((result.meta.changes ?? 0) === 0) {
+		return json({ error: apiError("MUSIC_NOT_FOUND") }, 404);
+	}
 	invalidateScanCache();
 	await incrementCacheVersion(env, "music");
 	ctx.waitUntil(auditAdminAction(env, request, "delete", "music", id));

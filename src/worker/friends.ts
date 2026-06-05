@@ -13,7 +13,10 @@ import type {
 } from "./types/aliases";
 import {
 	enforceRateLimit,
+	ensureStatsSaltCached,
 	getAppSetting,
+	getClientIp,
+	hashToken,
 	isD1ConstraintError,
 	isMissingD1SchemaError,
 	isValidAvatarUrl,
@@ -107,8 +110,16 @@ export async function submitFriendLink(
 	if (!normalizedHost) {
 		return json({ error: apiError("FRIEND_URL_INVALID") }, 400);
 	}
+	const proofError = await verifyHumanProof(
+		request,
+		env,
+		"friends",
+		humanProof,
+	);
+	if (proofError) return proofError;
 
 	try {
+		const submitterHash = await getFriendSubmitterHash(request, env);
 		const domainDup = await env.DB.prepare(
 			`SELECT id FROM friend_links
 	     WHERE normalized_host = ? AND status IN ('pending', 'approved')
@@ -124,8 +135,11 @@ export async function submitFriendLink(
 		const pendingCount = await env.DB.prepare(
 			`SELECT COUNT(*) AS count FROM friend_links
 	     WHERE status = 'pending'
+	     AND submitter_hash = ?
 	     AND created_at > datetime('now', '-1 hour')`,
-		).first<{ count: number }>();
+		)
+			.bind(submitterHash)
+			.first<{ count: number }>();
 		if ((pendingCount?.count ?? 0) > 10) {
 			return json({ error: apiError("FRIEND_PENDING_LIMIT") }, 429);
 		}
@@ -141,19 +155,18 @@ export async function submitFriendLink(
 			return json({ error: apiError("FRIEND_DUPLICATE") }, 409);
 		}
 
-		const proofError = await verifyHumanProof(
-			request,
-			env,
-			"friends",
-			humanProof,
-		);
-		if (proofError) return proofError;
-
 		const insert = await env.DB.prepare(
-			`INSERT INTO friend_links (name, description, url, normalized_host, avatar_url, status)
-	     VALUES (?, ?, ?, ?, ?, 'pending')`,
+			`INSERT INTO friend_links (name, description, url, normalized_host, avatar_url, submitter_hash, status)
+	     VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
 		)
-			.bind(name, description, linkUrl, normalizedHost, avatarUrl)
+			.bind(
+				name,
+				description,
+				linkUrl,
+				normalizedHost,
+				avatarUrl,
+				submitterHash,
+			)
 			.run();
 
 		ctx.waitUntil(
@@ -179,6 +192,17 @@ export async function submitFriendLink(
 		}
 		throw error;
 	}
+}
+
+async function getFriendSubmitterHash(
+	request: Request,
+	env: Env,
+): Promise<string> {
+	const salt = await ensureStatsSaltCached(env);
+	const userAgent = request.headers.get("user-agent") ?? "";
+	return hashToken(
+		`${salt}:friend-submit:${getClientIp(request)}:${userAgent}`,
+	);
 }
 
 // ================================================================

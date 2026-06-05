@@ -112,6 +112,11 @@ let musicSectionsOpen = {
 	scan: false,
 	tracks: false,
 };
+const musicSectionPanelIds = {
+	upload: "friend-admin-music-upload-panel",
+	scan: "friend-admin-music-scan-panel",
+	tracks: "friend-admin-music-tracks-panel",
+} as const;
 let musicFileInput: HTMLInputElement | null = null;
 let isSavingComments = false;
 let isSavingFriendTelegram = false;
@@ -738,6 +743,7 @@ onDestroy(() => {
 						type="button"
 						class="min-w-0 flex-1 text-left"
 						aria-expanded={musicSectionsOpen.upload}
+						aria-controls={musicSectionPanelIds.upload}
 						on:click={() => toggleMusicSection("upload")}
 					>
 						<div class="font-bold text-75">批量上传音乐</div>
@@ -749,6 +755,7 @@ onDestroy(() => {
 						type="button"
 						class="admin-collapse-button"
 						aria-expanded={musicSectionsOpen.upload}
+						aria-controls={musicSectionPanelIds.upload}
 						on:click={() => toggleMusicSection("upload")}
 					>
 						{musicSectionsOpen.upload ? "收起" : "展开"}
@@ -756,7 +763,7 @@ onDestroy(() => {
 				</div>
 
 				{#if musicSectionsOpen.upload}
-					<div class="mt-4 flex flex-col gap-3">
+					<div id={musicSectionPanelIds.upload} class="mt-4 flex flex-col gap-3">
 						<input
 							bind:this={musicFileInput}
 							type="file"
@@ -817,6 +824,7 @@ onDestroy(() => {
 						type="button"
 						class="min-w-0 flex-1 text-left"
 						aria-expanded={musicSectionsOpen.scan}
+						aria-controls={musicSectionPanelIds.scan}
 						on:click={() => toggleMusicSection("scan")}
 					>
 						<div class="font-bold text-75">智能扫描 R2 音乐</div>
@@ -838,6 +846,7 @@ onDestroy(() => {
 							type="button"
 							class="admin-collapse-button"
 							aria-expanded={musicSectionsOpen.scan}
+							aria-controls={musicSectionPanelIds.scan}
 							on:click={() => toggleMusicSection("scan")}
 						>
 							{musicSectionsOpen.scan ? "收起" : "展开"}
@@ -847,7 +856,7 @@ onDestroy(() => {
 
 				{#if musicSectionsOpen.scan}
 					{#if musicObjects.length > 0}
-						<div class="mt-3 flex max-h-[32rem] flex-col gap-2 overflow-y-auto pr-1">
+						<div id={musicSectionPanelIds.scan} class="mt-3 flex max-h-[32rem] flex-col gap-2 overflow-y-auto pr-1">
 							{#each musicObjects as object}
 								<div class="rounded-lg bg-[var(--card-bg)] px-3 py-3">
 									<div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -884,6 +893,7 @@ onDestroy(() => {
 						type="button"
 						class="min-w-0 flex-1 text-left"
 						aria-expanded={musicSectionsOpen.tracks}
+						aria-controls={musicSectionPanelIds.tracks}
 						on:click={() => toggleMusicSection("tracks")}
 					>
 						<div class="font-bold text-75">已入库音乐</div>
@@ -897,6 +907,7 @@ onDestroy(() => {
 							type="button"
 							class="admin-collapse-button"
 							aria-expanded={musicSectionsOpen.tracks}
+							aria-controls={musicSectionPanelIds.tracks}
 							on:click={() => toggleMusicSection("tracks")}
 						>
 							{musicSectionsOpen.tracks ? "收起" : "展开"}
@@ -905,7 +916,7 @@ onDestroy(() => {
 				</div>
 
 				{#if musicSectionsOpen.tracks}
-					<div class="flex max-h-[52rem] flex-col gap-3 overflow-y-auto pr-1">
+					<div id={musicSectionPanelIds.tracks} class="flex max-h-[52rem] flex-col gap-3 overflow-y-auto pr-1">
 						{#each tracks as track}
 							<div class="rounded-xl bg-[var(--card-bg)] p-4">
 								<div class="grid grid-cols-1 gap-3 md:grid-cols-2">

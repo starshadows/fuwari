@@ -182,6 +182,18 @@ const MIGRATIONS: Migration[] = [
 			(await hasIndex(env, "idx_music_tracks_object_key_unique")) &&
 			(await hasIndex(env, "idx_music_tracks_content_hash_unique")),
 	},
+	{
+		version: "0009",
+		description: "Add friend submitter hash for actor-scoped limits",
+		statements: [
+			"ALTER TABLE friend_links ADD COLUMN submitter_hash TEXT NOT NULL DEFAULT ''",
+			`CREATE INDEX IF NOT EXISTS idx_friend_links_submitter_pending_created
+			 ON friend_links (submitter_hash, status, created_at)`,
+		],
+		isApplied: async (env) =>
+			(await hasColumn(env, "friend_links", "submitter_hash")) &&
+			(await hasIndex(env, "idx_friend_links_submitter_pending_created")),
+	},
 ];
 
 /** Key used to track the highest applied migration version in app_settings. */

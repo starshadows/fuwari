@@ -485,22 +485,27 @@ async function commentLike(
 ): Promise<JsonRecord> {
 	validate(event, ["id"]);
 	const id = readString(event.id, 80);
-	const comment = await db
-		.prepare("SELECT _id, like FROM comment WHERE _id = ?")
-		.bind(id)
-		.first<{ _id: string; like: string }>();
-	if (!comment) return {};
+	for (let attempt = 0; attempt < 3; attempt += 1) {
+		const comment = await db
+			.prepare("SELECT _id, like FROM comment WHERE _id = ?")
+			.bind(id)
+			.first<{ _id: string; like: string }>();
+		if (!comment) return {};
 
-	const likes = parseLikeArray(comment.like);
-	const next = likes.includes(accessToken)
-		? likes.filter((item) => item !== accessToken)
-		: [...likes, accessToken];
+		const likes = parseLikeArray(comment.like);
+		const next = likes.includes(accessToken)
+			? likes.filter((item) => item !== accessToken)
+			: [...likes, accessToken];
 
-	await db
-		.prepare("UPDATE comment SET like = ?, updated = ? WHERE _id = ?")
-		.bind(JSON.stringify(next), Date.now(), id)
-		.run();
-	return {};
+		const result = await db
+			.prepare(
+				"UPDATE comment SET like = ?, updated = ? WHERE _id = ? AND like = ?",
+			)
+			.bind(JSON.stringify(next), Date.now(), id, comment.like)
+			.run();
+		if ((result.meta.changes ?? 0) > 0) return {};
+	}
+	throw new Error("Comment like conflict, please retry.");
 }
 
 async function counterGet(

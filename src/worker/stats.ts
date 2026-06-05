@@ -120,67 +120,58 @@ export async function recordStatsVisit(
 	const day = getStatsDay();
 
 	if (!isLikelyBot(request)) {
-		await env.DB.prepare(
-			`INSERT INTO stats_active_visitors (visitor_hash, path, last_seen)
+		const statements: D1PreparedStatement[] = [
+			env.DB.prepare(
+				`INSERT INTO stats_active_visitors (visitor_hash, path, last_seen)
        VALUES (?, ?, ?)
        ON CONFLICT(visitor_hash) DO UPDATE SET
          path = excluded.path,
          last_seen = excluded.last_seen`,
-		)
-			.bind(visitorHash, path, now)
-			.run();
+			).bind(visitorHash, path, now),
+		];
 
 		if (!heartbeatOnly) {
-			await env.DB.prepare(
-				`INSERT INTO stats_visitors (visitor_hash, first_seen, last_seen)
+			statements.push(
+				env.DB.prepare(
+					`INSERT INTO stats_visitors (visitor_hash, first_seen, last_seen)
          VALUES (?, ?, ?)
          ON CONFLICT(visitor_hash) DO UPDATE SET last_seen = excluded.last_seen`,
-			)
-				.bind(visitorHash, now, now)
-				.run();
+				).bind(visitorHash, now, now),
 
-			await env.DB.prepare(
-				`INSERT INTO stats_page_visitors (path, visitor_hash, first_seen, last_seen)
+				env.DB.prepare(
+					`INSERT INTO stats_page_visitors (path, visitor_hash, first_seen, last_seen)
          VALUES (?, ?, ?, ?)
          ON CONFLICT(path, visitor_hash) DO UPDATE SET last_seen = excluded.last_seen`,
-			)
-				.bind(path, visitorHash, now, now)
-				.run();
+				).bind(path, visitorHash, now, now),
 
-			await env.DB.prepare(
-				`INSERT OR IGNORE INTO stats_daily_visitors (day, visitor_hash, first_seen)
+				env.DB.prepare(
+					`INSERT OR IGNORE INTO stats_daily_visitors (day, visitor_hash, first_seen)
          VALUES (?, ?, ?)`,
-			)
-				.bind(day, visitorHash, now)
-				.run();
+				).bind(day, visitorHash, now),
 
-			await env.DB.prepare(
-				`INSERT OR IGNORE INTO stats_page_daily_visitors (path, day, visitor_hash, first_seen)
+				env.DB.prepare(
+					`INSERT OR IGNORE INTO stats_page_daily_visitors (path, day, visitor_hash, first_seen)
          VALUES (?, ?, ?, ?)`,
-			)
-				.bind(path, day, visitorHash, now)
-				.run();
+				).bind(path, day, visitorHash, now),
 
-			await env.DB.prepare(
-				`INSERT INTO stats_site_daily (day, pv, uv)
+				env.DB.prepare(
+					`INSERT INTO stats_site_daily (day, pv, uv)
          VALUES (?, 1, (SELECT COUNT(*) FROM stats_daily_visitors WHERE day = ?))
          ON CONFLICT(day) DO UPDATE SET
            pv = pv + 1,
            uv = (SELECT COUNT(*) FROM stats_daily_visitors WHERE day = ?)`,
-			)
-				.bind(day, day, day)
-				.run();
+				).bind(day, day, day),
 
-			await env.DB.prepare(
-				`INSERT INTO stats_page_daily (path, day, pv, uv)
+				env.DB.prepare(
+					`INSERT INTO stats_page_daily (path, day, pv, uv)
          VALUES (?, ?, 1, (SELECT COUNT(*) FROM stats_page_daily_visitors WHERE path = ? AND day = ?))
          ON CONFLICT(path, day) DO UPDATE SET
            pv = pv + 1,
            uv = (SELECT COUNT(*) FROM stats_page_daily_visitors WHERE path = ? AND day = ?)`,
-			)
-				.bind(path, day, path, day, path, day)
-				.run();
+				).bind(path, day, path, day, path, day),
+			);
 		}
+		await env.DB.batch(statements);
 	}
 
 	return json(await getStatsSummary(env, path));

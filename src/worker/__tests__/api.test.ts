@@ -495,6 +495,7 @@ describe("Database initialization", () => {
 		};
 		const indexNames = new Set([
 			"idx_friend_links_normalized_host_pending_approved_unique",
+			"idx_friend_links_submitter_pending_created",
 			"idx_music_tracks_object_key_unique",
 			"idx_music_tracks_content_hash_unique",
 		]);
@@ -516,7 +517,11 @@ describe("Database initialization", () => {
 			bind: vi.fn().mockReturnThis(),
 			first: vi.fn().mockResolvedValue(null),
 			all: vi.fn().mockResolvedValue({
-				results: [{ name: "id" }, { name: "normalized_host" }],
+				results: [
+					{ name: "id" },
+					{ name: "normalized_host" },
+					{ name: "submitter_hash" },
+				],
 			}),
 			run: vi
 				.fn()
@@ -596,9 +601,9 @@ describe("Database initialization", () => {
 		await expect(res.json()).resolves.toMatchObject({
 			ok: true,
 			applied: [],
-			version: "0008",
+			version: "0009",
 		});
-		expect(versionWrites).toContainEqual(["db_migration_version", "0008"]);
+		expect(versionWrites).toContainEqual(["db_migration_version", "0009"]);
 		expect(preparedSql.some((sql) => sql.startsWith("ALTER TABLE"))).toBe(
 			false,
 		);
@@ -782,7 +787,7 @@ describe("Friend link hostname deduplication", () => {
 		});
 	}
 
-	it("rejects public submissions for an existing normalized host", async () => {
+	it("requires human proof before public duplicate checks", async () => {
 		const duplicateStmt = {
 			bind: vi.fn().mockReturnThis(),
 			first: vi.fn().mockResolvedValue({ id: 1 }),
@@ -814,8 +819,8 @@ describe("Friend link hostname deduplication", () => {
 			mockCtx(),
 		);
 
-		expect(res.status).toBe(409);
-		expect(duplicateStmt.bind).toHaveBeenCalledWith("example.com");
+		expect(res.status).toBe(400);
+		expect(duplicateStmt.bind).not.toHaveBeenCalled();
 	});
 
 	it("rejects admin URL updates for an existing normalized host", async () => {
@@ -969,6 +974,38 @@ describe("Friend link hostname deduplication", () => {
 			1,
 		);
 	});
+
+	it("returns 404 when deleting a missing friend", async () => {
+		const deleteStmt = {
+			bind: vi.fn().mockReturnThis(),
+			run: vi.fn().mockResolvedValue({ success: true, meta: { changes: 0 } }),
+		};
+		const genericStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		const db = {
+			prepare: vi.fn((sql: string) =>
+				sql.includes("DELETE FROM friend_links") ? deleteStmt : genericStmt,
+			),
+			batch: vi.fn().mockResolvedValue([]),
+			exec: vi.fn().mockResolvedValue({ count: 0, duration: 0 }),
+			dump: vi.fn().mockResolvedValue([]),
+		} as unknown as D1Database;
+
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/admin/friends/99", {
+				method: "DELETE",
+				headers: { authorization: "Bearer test-admin-token" },
+			}),
+			mockEnv({ DB: db }),
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(404);
+	});
 });
 
 // ================================================================
@@ -1039,6 +1076,40 @@ describe("Admin music management", () => {
 		);
 
 		expect(res.status).toBe(409);
+	});
+
+	it("returns 404 when deleting a missing music track", async () => {
+		const deleteStmt = {
+			bind: vi.fn().mockReturnThis(),
+			run: vi.fn().mockResolvedValue({ success: true, meta: { changes: 0 } }),
+		};
+		const genericStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi
+				.fn()
+				.mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
+		};
+		const db = {
+			prepare: vi.fn((sql: string) =>
+				sql.includes("DELETE FROM music_tracks") ? deleteStmt : genericStmt,
+			),
+			batch: vi.fn().mockResolvedValue([]),
+			exec: vi.fn().mockResolvedValue({ count: 0, duration: 0 }),
+			dump: vi.fn().mockResolvedValue([]),
+		} as unknown as D1Database;
+
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/admin/music/99", {
+				method: "DELETE",
+				headers: adminHeaders(),
+			}),
+			mockEnv({ DB: db }),
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(404);
 	});
 
 	it("preserves embedded cover URLs for tracks with blank stored covers", async () => {

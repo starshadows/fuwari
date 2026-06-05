@@ -110,6 +110,7 @@ export const FRIEND_LINKS_STATEMENTS = [
     url TEXT NOT NULL,
     normalized_host TEXT NOT NULL DEFAULT '',
     avatar_url TEXT NOT NULL,
+    submitter_hash TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
     is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
     sort_order INTEGER NOT NULL DEFAULT 0,
@@ -123,6 +124,8 @@ export const FRIEND_LINKS_STATEMENTS = [
    WHERE normalized_host <> '' AND status IN ('pending', 'approved')`,
 	`CREATE INDEX IF NOT EXISTS idx_friend_links_normalized_host_status
    ON friend_links (normalized_host, status)`,
+	`CREATE INDEX IF NOT EXISTS idx_friend_links_submitter_pending_created
+   ON friend_links (submitter_hash, status, created_at)`,
 	`CREATE TRIGGER IF NOT EXISTS trg_friend_links_updated_at
    AFTER UPDATE ON friend_links FOR EACH ROW
    BEGIN

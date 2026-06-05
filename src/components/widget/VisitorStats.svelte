@@ -24,7 +24,6 @@ type StatsSummary = {
 const VISITOR_ID_KEY = "starshadow-visitor-id";
 const MIN_HEARTBEAT_DELAY_MS = 60 * 1000;
 const MAX_HEARTBEAT_DELAY_MS = 120 * 1000;
-const SUMMARY_REFRESH_AFTER_BEACON_MS = 200;
 
 let stats: StatsSummary | null = null;
 let isLoading = true;
@@ -99,36 +98,48 @@ const statsPayload = (path: string) =>
 		visitorId: getVisitorId(),
 	});
 
-const sendStatsPost = (
+const applyStatsSummary = (data: StatsSummary, path = currentPath()) => {
+	if (path !== currentPath()) return;
+	stats = data;
+	error = "";
+	isLoading = false;
+};
+
+const sendStatsPost = async (
 	endpoint: "visit" | "heartbeat",
 	path = currentPath(),
-): boolean => {
+): Promise<StatsSummary | null> => {
 	const url = `/api/stats/${endpoint}`;
 	const body = statsPayload(path);
 
 	try {
-		if (navigator.sendBeacon) {
-			const blob = new Blob([body], { type: "application/json" });
-			if (navigator.sendBeacon(url, blob)) return true;
-		}
+		const response = await fetch(url, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body,
+			keepalive: true,
+			cache: "no-store",
+		});
+		const data = await response.json();
+		if (!response.ok) throw new Error(data.error ?? "统计加载失败。");
+		return data;
 	} catch {
-		// Ignore write failures; stats must never block navigation or rendering.
+		try {
+			if (navigator.sendBeacon) {
+				const blob = new Blob([body], { type: "application/json" });
+				navigator.sendBeacon(url, blob);
+			}
+		} catch {
+			// Ignore write failures; stats must never block navigation or rendering.
+		}
 	}
-
-	void fetch(url, {
-		method: "POST",
-		headers: { "content-type": "application/json" },
-		body,
-		keepalive: true,
-	}).catch(() => {
-		// Ignore write failures; the next visit or heartbeat can recover.
-	});
-	return false;
+	return null;
 };
 
 const loadStatsSummary = async (path = currentPath()) => {
 	const response = await fetch(
-		`/api/stats/summary?path=${encodeURIComponent(path)}`,
+		`/api/stats/summary?path=${encodeURIComponent(path)}&_=${Date.now()}`,
+		{ cache: "no-store" },
 	);
 	const data = await response.json();
 	if (!response.ok) throw new Error(data.error ?? "统计加载失败。");
@@ -146,17 +157,18 @@ const recordVisit = () => {
 
 	lastTrackedPath = path;
 	lastTrackedAt = now;
-	const usedBeacon = sendStatsPost("visit", path);
-	const refresh = () =>
-		void loadStatsSummary(path).catch((err) => {
+	void sendStatsPost("visit", path)
+		.then((summary) => {
+			if (summary) {
+				applyStatsSummary(summary, path);
+				return;
+			}
+			return loadStatsSummary(path);
+		})
+		.catch((err) => {
 			error = err instanceof Error ? err.message : "统计加载失败。";
 			isLoading = false;
 		});
-	if (usedBeacon) {
-		window.setTimeout(refresh, SUMMARY_REFRESH_AFTER_BEACON_MS);
-	} else {
-		refresh();
-	}
 };
 
 const clearHeartbeat = () => {
@@ -176,16 +188,18 @@ const scheduleHeartbeat = () => {
 };
 
 const sendHeartbeat = () => {
-	const usedBeacon = sendStatsPost("heartbeat");
-	const refresh = () =>
-		void loadStatsSummary().catch(() => {
+	const path = currentPath();
+	void sendStatsPost("heartbeat", path)
+		.then((summary) => {
+			if (summary) {
+				applyStatsSummary(summary, path);
+				return;
+			}
+			return loadStatsSummary(path);
+		})
+		.catch(() => {
 			// Keep the last visible stats; the next page view or heartbeat can recover.
 		});
-	if (usedBeacon) {
-		window.setTimeout(refresh, SUMMARY_REFRESH_AFTER_BEACON_MS);
-	} else {
-		refresh();
-	}
 };
 
 const handleVisibilityChange = () => {

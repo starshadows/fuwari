@@ -544,7 +544,12 @@ async function deleteFriend(
 ): Promise<Response> {
 	if (!Number.isInteger(id))
 		return json({ error: apiError("FRIEND_ID_INVALID") }, 400);
-	await env.DB.prepare("DELETE FROM friend_links WHERE id = ?").bind(id).run();
+	const result = await env.DB.prepare("DELETE FROM friend_links WHERE id = ?")
+		.bind(id)
+		.run();
+	if ((result.meta.changes ?? 0) === 0) {
+		return json({ error: apiError("FRIEND_NOT_FOUND") }, 404);
+	}
 	ctx.waitUntil(auditAdminAction(env, request, "delete", "friend", id));
 	return json({ ok: true });
 }

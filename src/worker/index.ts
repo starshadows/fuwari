@@ -15,7 +15,6 @@ import { getPublicMusicTracks } from "./music";
 import { getStatsSummaryResponse, recordStatsVisit } from "./stats";
 import type { Env } from "./types";
 import {
-	cachedResponse,
 	cachedResponseV,
 	json,
 	withSecurityHeaders,
@@ -131,9 +130,7 @@ async function handleApi(
 
 	// Stats
 	if (pathname === "/api/stats/summary" && request.method === "GET") {
-		return cachedResponse(request, ctx, 60, () =>
-			getStatsSummaryResponse(env, requestUrl),
-		);
+		return getStatsSummaryResponse(env, requestUrl);
 	}
 	if (pathname === "/api/stats/visit" && request.method === "POST") {
 		return recordStatsVisit(request, env, false, ctx);

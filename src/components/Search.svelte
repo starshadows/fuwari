@@ -13,6 +13,8 @@ let isSearching = false;
 let pagefindLoaded = false;
 let initialized = false;
 let searchRequestId = 0;
+let panelOpen = false;
+const searchPanelId = "search-panel";
 
 const fakeResult: SearchResult[] = [
 	{
@@ -70,19 +72,12 @@ const sanitizeExcerpt = (html: string): string => {
 };
 
 const togglePanel = () => {
-	const panel = document.getElementById("search-panel");
-	panel?.classList.toggle("float-panel-closed");
+	panelOpen = !panelOpen;
 };
 
 const setPanelVisibility = (show: boolean, isDesktop: boolean): void => {
-	const panel = document.getElementById("search-panel");
-	if (!panel || !isDesktop) return;
-
-	if (show) {
-		panel.classList.remove("float-panel-closed");
-	} else {
-		panel.classList.add("float-panel-closed");
-	}
+	if (!isDesktop) return;
+	panelOpen = show;
 };
 
 const search = async (keyword: string, isDesktop: boolean): Promise<void> => {
@@ -140,6 +135,21 @@ onMount(() => {
 		if (keywordDesktop) search(keywordDesktop, true);
 		if (keywordMobile) search(keywordMobile, false);
 	};
+	const handleKeydown = (event: KeyboardEvent) => {
+		if (event.key === "Escape") panelOpen = false;
+	};
+	const handlePagefindReady = () => {
+		console.log("Pagefind ready event received.");
+		initializeSearch();
+	};
+	const handlePagefindLoadError = () => {
+		console.warn(
+			"Pagefind load error event received. Search functionality will be limited.",
+		);
+		initializeSearch();
+	};
+
+	document.addEventListener("keydown", handleKeydown);
 
 	if (import.meta.env.DEV) {
 		console.log(
@@ -147,16 +157,8 @@ onMount(() => {
 		);
 		initializeSearch();
 	} else {
-		document.addEventListener("pagefindready", () => {
-			console.log("Pagefind ready event received.");
-			initializeSearch();
-		});
-		document.addEventListener("pagefindloaderror", () => {
-			console.warn(
-				"Pagefind load error event received. Search functionality will be limited.",
-			);
-			initializeSearch(); // Initialize with pagefindLoaded as false
-		});
+		document.addEventListener("pagefindready", handlePagefindReady);
+		document.addEventListener("pagefindloaderror", handlePagefindLoadError);
 
 		// Fallback in case events are not caught or pagefind is already loaded by the time this script runs
 		setTimeout(() => {
@@ -166,6 +168,12 @@ onMount(() => {
 			}
 		}, 2000); // Adjust timeout as needed
 	}
+
+	return () => {
+		document.removeEventListener("keydown", handleKeydown);
+		document.removeEventListener("pagefindready", handlePagefindReady);
+		document.removeEventListener("pagefindloaderror", handlePagefindLoadError);
+	};
 });
 
 $: if (initialized && keywordDesktop) {
@@ -179,6 +187,12 @@ $: if (initialized && keywordMobile) {
 		await search(keywordMobile, false);
 	})();
 }
+
+$: if (initialized && !keywordDesktop && !keywordMobile) {
+	searchRequestId += 1;
+	result = [];
+	panelOpen = false;
+}
 </script>
 
 <!-- search bar for desktop view -->
@@ -187,20 +201,20 @@ $: if (initialized && keywordMobile) {
       dark:bg-white/5 dark:hover:bg-white/10 dark:focus-within:bg-white/10
 ">
     <Icon icon="material-symbols:search" class="absolute text-[1.25rem] pointer-events-none ml-3 transition my-auto text-black/30 dark:text-white/30"></Icon>
-    <input placeholder="{i18n(I18nKey.search)}" bind:value={keywordDesktop} on:focus={() => search(keywordDesktop, true)}
+    <input aria-label={i18n(I18nKey.search)} placeholder={i18n(I18nKey.search)} bind:value={keywordDesktop} on:focus={() => search(keywordDesktop, true)}
            class="transition-all pl-10 text-sm bg-transparent outline-0
          h-full w-40 active:w-60 focus:w-60 text-black/50 dark:text-white/50"
     >
 </div>
 
 <!-- toggle btn for phone/tablet view -->
-<button on:click={togglePanel} aria-label="Search Panel" id="search-switch"
+<button on:click={togglePanel} aria-label={i18n(I18nKey.search)} aria-controls={searchPanelId} aria-expanded={panelOpen} id="search-switch"
         class="btn-plain scale-animation lg:!hidden rounded-lg w-11 h-11 active:scale-90">
     <Icon icon="material-symbols:search" class="text-[1.25rem]"></Icon>
 </button>
 
 <!-- search panel -->
-<div id="search-panel" class="float-panel float-panel-closed search-panel absolute md:w-[30rem]
+<div id={searchPanelId} role="search" aria-label={i18n(I18nKey.search)} class:float-panel-closed={!panelOpen} class="float-panel search-panel absolute md:w-[30rem]
 top-20 left-4 md:left-[unset] right-4 shadow-2xl rounded-2xl p-2">
 
     <!-- search bar inside panel for phone/tablet -->
@@ -209,7 +223,7 @@ top-20 left-4 md:left-[unset] right-4 shadow-2xl rounded-2xl p-2">
       dark:bg-white/5 dark:hover:bg-white/10 dark:focus-within:bg-white/10
   ">
         <Icon icon="material-symbols:search" class="absolute text-[1.25rem] pointer-events-none ml-3 transition my-auto text-black/30 dark:text-white/30"></Icon>
-        <input placeholder="Search" bind:value={keywordMobile}
+        <input aria-label={i18n(I18nKey.search)} placeholder={i18n(I18nKey.search)} bind:value={keywordMobile}
                class="pl-10 absolute inset-0 text-sm bg-transparent outline-0
                focus:w-60 text-black/50 dark:text-white/50"
         >
