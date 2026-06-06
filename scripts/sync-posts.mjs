@@ -3,12 +3,14 @@ import path from "node:path";
 
 const projectRoot = process.cwd();
 const postsDir = path.join(projectRoot, "src", "content", "posts");
+const postsTmpDir = path.join(projectRoot, "src", "content", ".posts-sync-tmp");
 const baseUrl = stripTrailingSlash(
 	process.env.CONTENT_SYNC_BASE_URL ||
 		process.env.FUWARI_CONTENT_API_BASE_URL ||
 		"",
 );
 const token = process.env.CONTENT_SYNC_TOKEN || "";
+const strict = process.env.CONTENT_SYNC_STRICT === "true";
 
 if (!baseUrl || !token) {
 	await fs.mkdir(postsDir, { recursive: true });
@@ -19,43 +21,56 @@ if (!baseUrl || !token) {
 }
 
 const headers = { authorization: `Bearer ${token}` };
-const manifest = await fetchJson(`${baseUrl}/api/content/manifest`, headers);
-const posts = Array.isArray(manifest.posts) ? manifest.posts : [];
+try {
+	const manifest = await fetchJson(`${baseUrl}/api/content/manifest`, headers);
+	const posts = Array.isArray(manifest.posts) ? manifest.posts : [];
 
-await fs.rm(postsDir, { recursive: true, force: true });
-await fs.mkdir(postsDir, { recursive: true });
+	await fs.rm(postsTmpDir, { recursive: true, force: true });
+	await fs.mkdir(postsTmpDir, { recursive: true });
 
-let fileCount = 0;
-for (const post of posts) {
-	if (!isSafeSlug(post.slug)) {
-		throw new Error(`Unsafe content slug in manifest: ${post.slug}`);
+	let fileCount = 0;
+	for (const post of posts) {
+		if (!isSafeSlug(post.slug)) {
+			throw new Error(`Unsafe content slug in manifest: ${post.slug}`);
+		}
+		const files = Array.isArray(post.files) ? post.files : [];
+		for (const file of files) {
+			if (!isSafeLocalPath(file.path) || typeof file.key !== "string") {
+				throw new Error(
+					`Unsafe content manifest entry for ${post.slug || "unknown"}.`,
+				);
+			}
+			const target = path.join(postsTmpDir, String(post.slug), file.path);
+			if (
+				!target.startsWith(path.join(postsTmpDir, String(post.slug)) + path.sep)
+			) {
+				throw new Error(`Content object escapes posts directory: ${file.path}`);
+			}
+			await fs.mkdir(path.dirname(target), { recursive: true });
+			const objectUrl = `${baseUrl}/api/content/object?key=${encodeURIComponent(file.key)}`;
+			const response = await fetch(objectUrl, { headers });
+			if (!response.ok) {
+				throw new Error(`Failed to download ${file.key}: ${response.status}`);
+			}
+			await fs.writeFile(target, new Uint8Array(await response.arrayBuffer()));
+			fileCount += 1;
+		}
 	}
-	const files = Array.isArray(post.files) ? post.files : [];
-	for (const file of files) {
-		if (!isSafeLocalPath(file.path) || typeof file.key !== "string") {
-			throw new Error(
-				`Unsafe content manifest entry for ${post.slug || "unknown"}.`,
-			);
-		}
-		const target = path.join(postsDir, String(post.slug), file.path);
-		if (!target.startsWith(path.join(postsDir, String(post.slug)) + path.sep)) {
-			throw new Error(`Content object escapes posts directory: ${file.path}`);
-		}
-		await fs.mkdir(path.dirname(target), { recursive: true });
-		const objectUrl = `${baseUrl}/api/content/object?key=${encodeURIComponent(file.key)}`;
-		const response = await fetch(objectUrl, { headers });
-		if (!response.ok) {
-			throw new Error(`Failed to download ${file.key}: ${response.status}`);
-		}
-		await fs.writeFile(target, new Uint8Array(await response.arrayBuffer()));
-		fileCount += 1;
-	}
+
+	await fs.writeFile(path.join(postsTmpDir, ".gitkeep"), "");
+	await fs.rm(postsDir, { recursive: true, force: true });
+	await fs.rename(postsTmpDir, postsDir);
+	console.log(
+		`[sync-posts] Synced ${posts.length} posts and ${fileCount} files.`,
+	);
+} catch (error) {
+	await fs.rm(postsTmpDir, { recursive: true, force: true });
+	if (strict) throw error;
+	await fs.mkdir(postsDir, { recursive: true });
+	console.warn(
+		`[sync-posts] Content sync failed; keeping local posts unchanged. Set CONTENT_SYNC_STRICT=true to fail the build. ${error instanceof Error ? error.message : String(error)}`,
+	);
 }
-
-await fs.writeFile(path.join(postsDir, ".gitkeep"), "");
-console.log(
-	`[sync-posts] Synced ${posts.length} posts and ${fileCount} files.`,
-);
 
 function stripTrailingSlash(value) {
 	return value.replace(/\/+$/g, "");
