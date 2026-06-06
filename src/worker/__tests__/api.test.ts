@@ -195,6 +195,40 @@ tags: [Astro, R2]
 		expect(parsed.files).toHaveLength(2);
 	});
 
+	it("accepts a full posts archive and ignores .gitkeep", async () => {
+		const parsed = await content.parsePostArchive(
+			articleZip({
+				"posts/.gitkeep": "",
+				"posts/hello-fuwari.md": `---
+title: Hello Fuwari
+published: 2026-01-01
+---
+# Hello`,
+				"posts/cloudflare-origin-protection/index.md": `---
+title: Origin Protection
+published: 2026-01-02
+---
+# Origin`,
+				"posts/cloudflare-origin-protection/aop-direct-test.png": "image",
+			}),
+		);
+		expect(parsed).not.toBeInstanceOf(Response);
+		if (parsed instanceof Response) return;
+		expect(parsed.map((post) => post.slug).sort()).toEqual([
+			"cloudflare-origin-protection",
+			"hello-fuwari",
+		]);
+		const hello = parsed.find((post) => post.slug === "hello-fuwari");
+		expect(hello?.sourceKey).toBe("posts/hello-fuwari/index.md");
+		const origin = parsed.find(
+			(post) => post.slug === "cloudflare-origin-protection",
+		);
+		expect(origin?.files.map((file) => file.path).sort()).toEqual([
+			"aop-direct-test.png",
+			"index.md",
+		]);
+	});
+
 	it("rejects path traversal entries", async () => {
 		const parsed = await content.parsePostZip(
 			articleZip({

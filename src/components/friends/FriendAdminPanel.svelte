@@ -322,7 +322,11 @@ const uploadContentZip = async () => {
 		selectedContentZip = null;
 		if (contentFileInput) contentFileInput.value = "";
 		await loadContentPosts();
-		setMessage(`文章 ${data.post?.slug ?? ""} 已上传为草稿。`);
+		const importedCount = Array.isArray(data.posts) ? data.posts.length : 1;
+		const skippedCount = Array.isArray(data.skipped) ? data.skipped.length : 0;
+		setMessage(
+			`文章上传完成：新增 ${importedCount} 篇，跳过已有 ${skippedCount} 篇。`,
+		);
 	} catch (err) {
 		setError(err instanceof Error ? err.message : "文章上传失败。");
 	} finally {
@@ -890,7 +894,7 @@ onDestroy(() => {
 					>
 						{isDeployingContent ? "触发中..." : "触发 Vercel 部署"}
 					</button>
-					<div class="text-sm text-50">ZIP 必须包含一个顶层文件夹，且其中有 index.md 或 index.mdx。</div>
+					<div class="text-sm text-50">支持单篇文章 ZIP，或直接上传整个 posts 文件夹 ZIP；.gitkeep 会自动忽略。</div>
 				</div>
 			</section>
 

@@ -262,21 +262,66 @@ async function uploadContentPost(
 		return json({ error: apiError("BODY_TOO_LARGE") }, 413);
 	}
 
-	const parsed = await parsePostZip(await fileValue.arrayBuffer());
-	if (parsed instanceof Response) return parsed;
+	const requestedStatus = readString(formData.get("status"), 20);
+	const status: ContentPostStatus =
+		requestedStatus === "published" ? "published" : "draft";
+	const parsedPosts = await parsePostArchive(await fileValue.arrayBuffer());
+	if (parsedPosts instanceof Response) return parsedPosts;
 
-	const existing = await getContentRow(env, parsed.slug);
-	if (existing) return json({ error: apiError("CONTENT_DUPLICATE") }, 409);
+	const imported: ContentPostDto[] = [];
+	const skipped: string[] = [];
+	const isBulkUpload = parsedPosts.length > 1;
+	for (const parsed of parsedPosts) {
+		const existing = await getContentRow(env, parsed.slug);
+		if (existing) {
+			if (!isBulkUpload)
+				return json({ error: apiError("CONTENT_DUPLICATE") }, 409);
+			skipped.push(parsed.slug);
+			continue;
+		}
 
+		const post = await saveParsedPost(env, parsed, status);
+		if (!post) {
+			if (!isBulkUpload)
+				return json({ error: apiError("CONTENT_DUPLICATE") }, 409);
+			skipped.push(parsed.slug);
+			continue;
+		}
+		imported.push(post);
+		ctx.waitUntil(
+			auditAdminAction(
+				env,
+				request,
+				"import",
+				"content",
+				parsed.slug,
+				JSON.stringify({ status, fileCount: parsed.files.length }),
+			),
+		);
+	}
+
+	return json(
+		{
+			ok: true,
+			post: imported[0] ?? null,
+			posts: imported,
+			skipped,
+		},
+		imported.length > 0 ? 201 : 200,
+	);
+}
+
+async function saveParsedPost(
+	env: Env,
+	parsed: ParsedPostZip,
+	status: ContentPostStatus,
+): Promise<ContentPostDto | null> {
 	for (const file of parsed.files) {
 		await env.MEDIA_BUCKET.put(file.key, file.bytes, {
 			httpMetadata: { contentType: file.contentType },
 		});
 	}
 
-	const requestedStatus = readString(formData.get("status"), 20);
-	const status: ContentPostStatus =
-		requestedStatus === "published" ? "published" : "draft";
 	const deployStatus = status === "published" ? "pending" : "idle";
 
 	let insertedId = 0;
@@ -308,27 +353,13 @@ async function uploadContentPost(
 		insertedId = Number(result.meta.last_row_id ?? 0);
 	} catch (error) {
 		if (isD1ConstraintError(error)) {
-			return json({ error: apiError("CONTENT_DUPLICATE") }, 409);
+			return null;
 		}
 		throw error;
 	}
 
-	ctx.waitUntil(
-		auditAdminAction(
-			env,
-			request,
-			"import",
-			"content",
-			parsed.slug,
-			JSON.stringify({ status, fileCount: parsed.files.length }),
-		),
-	);
-
 	const row = await getContentRow(env, parsed.slug);
-	return json(
-		{ ok: true, post: row ? toContentPostDto(row) : { id: insertedId } },
-		201,
-	);
+	return row ? toContentPostDto(row) : ({ id: insertedId } as ContentPostDto);
 }
 
 async function publishContentPost(
@@ -491,6 +522,16 @@ async function markDeployFailed(
 export async function parsePostZip(
 	bytes: ArrayBuffer,
 ): Promise<ParsedPostZip | Response> {
+	const parsed = await parsePostArchive(bytes);
+	if (parsed instanceof Response) return parsed;
+	if (parsed.length !== 1)
+		return json({ error: apiError("CONTENT_ZIP_INVALID") }, 400);
+	return parsed[0];
+}
+
+export async function parsePostArchive(
+	bytes: ArrayBuffer,
+): Promise<ParsedPostZip[] | Response> {
 	let entries: Record<string, Uint8Array>;
 	try {
 		entries = unzipSync(new Uint8Array(bytes));
@@ -502,7 +543,10 @@ export async function parsePostZip(
 	let expandedBytes = 0;
 	for (const [rawName, fileBytes] of Object.entries(entries)) {
 		const path = normalizeZipPath(rawName);
-		if (!path) return json({ error: apiError("CONTENT_ZIP_INVALID") }, 400);
+		if (!path) {
+			if (isIgnorableZipEntry(rawName)) continue;
+			return json({ error: apiError("CONTENT_ZIP_INVALID") }, 400);
+		}
 		if (path.endsWith("/")) continue;
 		expandedBytes += fileBytes.byteLength;
 		if (expandedBytes > MAX_POST_EXPANDED_BYTES) {
@@ -517,18 +561,100 @@ export async function parsePostZip(
 		return json({ error: apiError("CONTENT_ZIP_TOO_MANY_FILES") }, 400);
 	}
 
-	const topLevel = normalized[0]?.path.split("/")[0] ?? "";
+	const articles = groupArchiveEntries(normalized);
+	if (articles instanceof Response) return articles;
+
+	const parsedPosts: ParsedPostZip[] = [];
+	for (const article of articles) {
+		const parsed = await parseArticleEntries(article.slug, article.entries);
+		if (parsed instanceof Response) return parsed;
+		parsedPosts.push(parsed);
+	}
+	return parsedPosts;
+}
+
+function groupArchiveEntries(
+	entries: Array<{ path: string; bytes: Uint8Array }>,
+):
+	| Array<{ slug: string; entries: Array<{ path: string; bytes: Uint8Array }> }>
+	| Response {
+	const cleanEntries = stripPostsRoot(entries).filter(
+		(entry) => !entry.path.split("/").some((part) => part.startsWith(".")),
+	);
+	if (cleanEntries.length === 0) {
+		return json({ error: apiError("CONTENT_ZIP_INVALID") }, 400);
+	}
+
+	const articles = new Map<
+		string,
+		Array<{ path: string; bytes: Uint8Array }>
+	>();
+	for (const entry of cleanEntries) {
+		const parts = entry.path.split("/");
+		if (parts.length === 1 && /\.(md|mdx)$/i.test(parts[0])) {
+			const slug = parts[0].replace(/\.(md|mdx)$/i, "");
+			if (!isValidContentSlug(slug)) {
+				return json({ error: apiError("CONTENT_SLUG_INVALID") }, 400);
+			}
+			appendArticleEntry(articles, slug, {
+				path: `index${pathExtension(parts[0])}`,
+				bytes: entry.bytes,
+			});
+			continue;
+		}
+
+		if (parts.length < 2)
+			return json({ error: apiError("CONTENT_ZIP_INVALID") }, 400);
+		const slug = parts[0];
+		if (!isValidContentSlug(slug)) {
+			return json({ error: apiError("CONTENT_SLUG_INVALID") }, 400);
+		}
+		appendArticleEntry(articles, slug, {
+			path: parts.slice(1).join("/"),
+			bytes: entry.bytes,
+		});
+	}
+
+	return [...articles.entries()].map(([slug, articleEntries]) => ({
+		slug,
+		entries: articleEntries,
+	}));
+}
+
+function stripPostsRoot(
+	entries: Array<{ path: string; bytes: Uint8Array }>,
+): Array<{ path: string; bytes: Uint8Array }> {
+	const firstParts = entries.map((entry) => entry.path.split("/")[0]);
+	if (firstParts.length > 0 && firstParts.every((part) => part === "posts")) {
+		return entries.map((entry) => ({
+			...entry,
+			path: entry.path.split("/").slice(1).join("/"),
+		}));
+	}
+	return entries;
+}
+
+function appendArticleEntry(
+	articles: Map<string, Array<{ path: string; bytes: Uint8Array }>>,
+	slug: string,
+	entry: { path: string; bytes: Uint8Array },
+) {
+	const existing = articles.get(slug) ?? [];
+	existing.push(entry);
+	articles.set(slug, existing);
+}
+
+async function parseArticleEntries(
+	topLevel: string,
+	normalized: Array<{ path: string; bytes: Uint8Array }>,
+): Promise<ParsedPostZip | Response> {
 	if (!isValidContentSlug(topLevel)) {
 		return json({ error: apiError("CONTENT_SLUG_INVALID") }, 400);
 	}
 
 	const indexFiles = normalized.filter((entry) => {
 		const parts = entry.path.split("/");
-		return (
-			parts.length === 2 &&
-			parts[0] === topLevel &&
-			/^index\.(md|mdx)$/i.test(parts[1])
-		);
+		return parts.length === 1 && /^index\.(md|mdx)$/i.test(parts[0]);
 	});
 	if (indexFiles.length !== 1) {
 		return json({ error: apiError("CONTENT_ZIP_INVALID") }, 400);
@@ -537,10 +663,10 @@ export async function parsePostZip(
 	const files: ParsedZipFile[] = [];
 	for (const entry of normalized) {
 		const parts = entry.path.split("/");
-		if (parts[0] !== topLevel || parts.length < 2) {
+		if (parts.length < 1) {
 			return json({ error: apiError("CONTENT_ZIP_INVALID") }, 400);
 		}
-		const relativePath = parts.slice(1).join("/");
+		const relativePath = parts.join("/");
 		const ext = extensionOf(relativePath);
 		const isIndex = entry === indexFiles[0];
 		if (!isIndex && !ALLOWED_ASSET_EXTENSIONS.has(ext)) {
@@ -579,6 +705,11 @@ export async function parsePostZip(
 	};
 }
 
+function pathExtension(value: string): string {
+	const index = value.lastIndexOf(".");
+	return index < 0 ? "" : value.slice(index);
+}
+
 function normalizeZipPath(value: string): string {
 	const clean = value.replace(/\\/g, "/").replace(/^\.\//, "").trim();
 	if (
@@ -590,14 +721,18 @@ function normalizeZipPath(value: string): string {
 		return "";
 	}
 	const parts = clean.split("/");
-	if (
-		parts.some(
-			(part) => !part || part === "." || part === ".." || part.startsWith("."),
-		)
-	) {
+	if (parts.some((part) => !part || part === "." || part === "..")) {
 		return "";
 	}
 	return parts.join("/");
+}
+
+function isIgnorableZipEntry(value: string): boolean {
+	const clean = value.replace(/\\/g, "/").replace(/^\.\//, "").trim();
+	if (!clean || clean.endsWith("/")) return true;
+	return clean
+		.split("/")
+		.some((part) => part.startsWith(".") && part !== "." && part !== "..");
 }
 
 function isValidContentSlug(value: string): boolean {
