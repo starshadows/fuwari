@@ -8,6 +8,7 @@ on:
       - ".github/workflows/deploy-worker.yml"
       - "package.json"
       - "pnpm-lock.yaml"
+      - "src/**"
       - "src/worker/**"
       - "!src/worker/__tests__/**"
       - "wrangler.jsonc"

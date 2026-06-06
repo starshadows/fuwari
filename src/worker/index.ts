@@ -54,6 +54,16 @@ export default {
 				return withServerTiming(withSecurityHeaders(response), startedAt);
 			}
 
+			if (requestUrl.pathname.startsWith("/_astro/")) {
+				response = await handleStaticAsset(request, env);
+				return withServerTiming(withSecurityHeaders(response), startedAt);
+			}
+
+			if (requestUrl.pathname.startsWith("/friends/admin")) {
+				response = await handleWorkerAdminPage(request, env, requestUrl);
+				return withServerTiming(withSecurityHeaders(response), startedAt);
+			}
+
 			response = json({ error: apiError("NOT_FOUND") }, 404);
 			return withServerTiming(withSecurityHeaders(response), startedAt);
 		} catch (error) {
@@ -78,6 +88,32 @@ export default {
 		}
 	},
 };
+
+async function handleStaticAsset(
+	request: Request,
+	env: Env,
+): Promise<Response> {
+	if (!env.ASSETS) return json({ error: apiError("NOT_FOUND") }, 404);
+	return env.ASSETS.fetch(request);
+}
+
+async function handleWorkerAdminPage(
+	request: Request,
+	env: Env,
+	requestUrl: URL,
+): Promise<Response> {
+	if (!env.ASSETS) return json({ error: apiError("NOT_FOUND") }, 404);
+	if (requestUrl.pathname === "/friends/admin") {
+		return Response.redirect(`${requestUrl.origin}/friends/admin/`, 308);
+	}
+	if (requestUrl.pathname !== "/friends/admin/") {
+		return json({ error: apiError("NOT_FOUND") }, 404);
+	}
+
+	const assetUrl = new URL(request.url);
+	assetUrl.pathname = "/worker-admin/friends/admin/";
+	return env.ASSETS.fetch(new Request(assetUrl, request));
+}
 
 async function handleApi(
 	request: Request,

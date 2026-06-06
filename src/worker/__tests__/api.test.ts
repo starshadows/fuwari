@@ -45,6 +45,12 @@ function mockR2Bucket(): R2Bucket {
 	return bucket;
 }
 
+function mockAssets(): Fetcher {
+	return {
+		fetch: vi.fn().mockResolvedValue(new Response("admin html")),
+	} as unknown as Fetcher;
+}
+
 function mockEnv(overrides: Partial<Env> = {}): Env {
 	return {
 		DB: mockD1Result().db,
@@ -150,6 +156,49 @@ describe("Route dispatch", () => {
 			mockCtx(),
 		);
 		expect(res.status).toBe(404);
+	});
+
+	it("serves admin page from Worker assets", async () => {
+		const assets = mockAssets();
+		const env = mockEnv({ ASSETS: assets });
+		const res = await worker.default.fetch(
+			new Request("https://api.example.com/friends/admin/"),
+			env,
+			mockCtx(),
+		);
+		expect(res.status).toBe(200);
+		expect(await res.text()).toBe("admin html");
+		expect(assets.fetch).toHaveBeenCalledOnce();
+		const assetRequest = vi.mocked(assets.fetch).mock.calls[0]?.[0] as Request;
+		expect(new URL(assetRequest.url).pathname).toBe(
+			"/worker-admin/friends/admin/",
+		);
+	});
+
+	it("redirects admin page to trailing slash", async () => {
+		const env = mockEnv({ ASSETS: mockAssets() });
+		const res = await worker.default.fetch(
+			new Request("https://api.example.com/friends/admin"),
+			env,
+			mockCtx(),
+		);
+		expect(res.status).toBe(308);
+		expect(res.headers.get("location")).toBe(
+			"https://api.example.com/friends/admin/",
+		);
+	});
+
+	it("serves Astro assets from Worker assets", async () => {
+		const assets = mockAssets();
+		const env = mockEnv({ ASSETS: assets });
+		const res = await worker.default.fetch(
+			new Request("https://api.example.com/_astro/admin.js"),
+			env,
+			mockCtx(),
+		);
+		expect(res.status).toBe(200);
+		expect(await res.text()).toBe("admin html");
+		expect(assets.fetch).toHaveBeenCalledOnce();
 	});
 });
 
