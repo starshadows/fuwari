@@ -5,6 +5,7 @@ on:
     branches: [ main ]
     paths:
       - "migrations/**"
+      - ".github/workflows/deploy-worker.yml"
       - "package.json"
       - "pnpm-lock.yaml"
       - "src/worker/**"
@@ -17,6 +18,9 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -34,15 +38,21 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Check Cloudflare credentials
+        id: cloudflare-credentials
+        run: |
+          if [ -n "$CLOUDFLARE_ACCOUNT_ID" ] && [ -n "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "Cloudflare deployment skipped: CLOUDFLARE_ACCOUNT_ID or CLOUDFLARE_API_TOKEN is not configured."
+          fi
+
       - name: Apply D1 migrations
+        if: steps.cloudflare-credentials.outputs.configured == 'true'
         continue-on-error: true
-        env:
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: pnpm wrangler d1 migrations apply fuwari-data --remote --yes
 
       - name: Deploy Worker
-        env:
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        if: steps.cloudflare-credentials.outputs.configured == 'true'
         run: pnpm worker:deploy
