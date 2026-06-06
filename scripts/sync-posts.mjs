@@ -57,6 +57,7 @@ try {
 		}
 	}
 
+	await validateSyncedMarkdownAssets(postsTmpDir);
 	await fs.writeFile(path.join(postsTmpDir, ".gitkeep"), "");
 	await fs.rm(postsDir, { recursive: true, force: true });
 	await fs.rename(postsTmpDir, postsDir);
@@ -96,4 +97,59 @@ function isSafeSlug(value) {
 	return (
 		typeof value === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,120}$/.test(value)
 	);
+}
+
+async function validateSyncedMarkdownAssets(rootDir) {
+	for (const postDirName of await fs.readdir(rootDir)) {
+		if (postDirName.startsWith(".")) continue;
+		const postDir = path.join(rootDir, postDirName);
+		const stat = await fs.stat(postDir).catch(() => null);
+		if (!stat?.isDirectory()) continue;
+
+		for (const entry of await fs.readdir(postDir)) {
+			if (!/^index\.(md|mdx)$/i.test(entry)) continue;
+			const markdownPath = path.join(postDir, entry);
+			const markdown = await fs.readFile(markdownPath, "utf8");
+			for (const reference of markdownRelativeReferences(markdown)) {
+				const target = path.normalize(path.join(postDir, reference));
+				if (!target.startsWith(postDir + path.sep)) {
+					throw new Error(
+						`Synced post ${postDirName} references an unsafe asset path: ${reference}`,
+					);
+				}
+				const asset = await fs.stat(target).catch(() => null);
+				if (!asset?.isFile()) {
+					throw new Error(
+						`Synced post ${postDirName} references a missing asset: ${reference}`,
+					);
+				}
+			}
+		}
+	}
+}
+
+function markdownRelativeReferences(markdown) {
+	const references = new Set();
+	const markdownImagePattern = /!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
+	const htmlSourcePattern = /\b(?:src|href)=["'](\.\.?\/[^"']+)["']/g;
+
+	for (const match of markdown.matchAll(markdownImagePattern)) {
+		const value = normalizeMarkdownUrl(match[1]);
+		if (isLocalRelativeReference(value)) references.add(value);
+	}
+
+	for (const match of markdown.matchAll(htmlSourcePattern)) {
+		const value = normalizeMarkdownUrl(match[1]);
+		if (isLocalRelativeReference(value)) references.add(value);
+	}
+
+	return references;
+}
+
+function normalizeMarkdownUrl(value) {
+	return decodeURI(value.split(/[?#]/, 1)[0] ?? "").trim();
+}
+
+function isLocalRelativeReference(value) {
+	return value.startsWith("./") || value.startsWith("../");
 }
