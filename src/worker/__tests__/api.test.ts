@@ -2144,7 +2144,7 @@ describe("Twikoo security", () => {
 		);
 		expect(res.status).toBe(401);
 		const body = (await res.json()) as { error: string };
-		expect(body.error).toContain("human verification");
+		expect(body.error).toContain("评论人机验证");
 	});
 
 	it("rejects UPLOAD_IMAGE without a valid comments session", async () => {
@@ -2159,7 +2159,7 @@ describe("Twikoo security", () => {
 		);
 		expect(res.status).toBe(401);
 		const body = (await res.json()) as { error: string };
-		expect(body.error).toContain("human verification");
+		expect(body.error).toContain("评论人机验证");
 	});
 
 	it("blocks COMMENT_SUBMIT when comments are globally disabled", async () => {
@@ -2176,7 +2176,7 @@ describe("Twikoo security", () => {
 		);
 		expect(res.status).toBe(403);
 		const body = (await res.json()) as { error: string };
-		expect(body.error).toContain("Comments are disabled");
+		expect(body.error).toContain("评论功能已关闭");
 	});
 
 	it("blocks UPLOAD_IMAGE when comments are globally disabled", async () => {
@@ -2191,7 +2191,7 @@ describe("Twikoo security", () => {
 		);
 		expect(res.status).toBe(403);
 		const body = (await res.json()) as { error: string };
-		expect(body.error).toContain("Comments are disabled");
+		expect(body.error).toContain("评论功能已关闭");
 	});
 
 	it("rejects cross-site Twikoo write from foreign origin", async () => {
@@ -2216,7 +2216,7 @@ describe("Twikoo security", () => {
 		);
 		expect(res.status).toBe(403);
 		const body = (await res.json()) as { error: string };
-		expect(body.error).toContain("Cross-site");
+		expect(body.error).toContain("跨站请求");
 	});
 
 	it("SET_PASSWORD succeeds as no-op (password managed via env var)", async () => {
@@ -2298,7 +2298,7 @@ describe("Twikoo security", () => {
 
 		expect(res.status).toBe(400);
 		const body = (await res.json()) as { error: string };
-		expect(body.error).toContain("Aggregate upload size");
+		expect(body.error).toContain("上传总大小");
 	});
 
 	it("allows read-only Twikoo events without a session", async () => {
