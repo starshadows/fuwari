@@ -22,6 +22,16 @@ import {
 	withServerTiming,
 } from "./utils";
 
+const BLOG_ORIGIN = "https://blog.starshadow.cc";
+const ADMIN_PAGE_PATH = "/friends/admin/";
+const ADMIN_ASSET_PREFIX = "/friends/admin/_asset/";
+const ADMIN_ASSET_PATH_PREFIXES = [
+	"/_astro/",
+	"/favicon/",
+	"/sakana/",
+	"/vendor/",
+];
+
 export default {
 	async fetch(
 		request: Request,
@@ -41,6 +51,11 @@ export default {
 					},
 					410,
 				);
+				return withServerTiming(withSecurityHeaders(response), startedAt);
+			}
+
+			if (requestUrl.pathname.startsWith("/friends/admin")) {
+				response = await handleAccessProtectedAdminPage(request, requestUrl);
 				return withServerTiming(withSecurityHeaders(response), startedAt);
 			}
 
@@ -78,6 +93,146 @@ export default {
 		}
 	},
 };
+
+async function handleAccessProtectedAdminPage(
+	request: Request,
+	requestUrl: URL,
+): Promise<Response> {
+	if (requestUrl.pathname === "/friends/admin") {
+		const redirectUrl = new URL(request.url);
+		redirectUrl.pathname = ADMIN_PAGE_PATH;
+		return Response.redirect(redirectUrl.toString(), 308);
+	}
+	if (requestUrl.pathname.startsWith(ADMIN_ASSET_PREFIX)) {
+		return handleAccessProtectedAdminAsset(request, requestUrl);
+	}
+	if (requestUrl.pathname !== ADMIN_PAGE_PATH) {
+		return json({ error: apiError("NOT_FOUND") }, 404);
+	}
+	if (request.method !== "GET" && request.method !== "HEAD") {
+		return json({ error: apiError("METHOD_NOT_ALLOWED") }, 405);
+	}
+
+	const upstreamUrl = new URL(ADMIN_PAGE_PATH, BLOG_ORIGIN);
+	upstreamUrl.search = requestUrl.search;
+	const upstream = await fetch(upstreamUrl, {
+		headers: {
+			accept: request.headers.get("accept") ?? "text/html",
+			"user-agent": request.headers.get("user-agent") ?? "fuwari-worker",
+		},
+	});
+
+	const headers = new Headers({
+		"cache-control": "no-store",
+		"content-type":
+			upstream.headers.get("content-type") ?? "text/html; charset=utf-8",
+		"x-robots-tag": "noindex,nofollow",
+	});
+
+	if (!upstream.ok) {
+		return new Response(
+			request.method === "HEAD" ? null : await upstream.text(),
+			{
+				status: upstream.status,
+				headers,
+			},
+		);
+	}
+
+	const html = await upstream.text();
+	return new Response(
+		request.method === "HEAD" ? null : rewriteAdminPageHtml(html),
+		{
+			status: upstream.status,
+			headers,
+		},
+	);
+}
+
+function rewriteAdminPageHtml(html: string): string {
+	return html
+		.replace(
+			/\b(src|component-url|renderer-url)=("|')\/(?!\/)([^"']+)/g,
+			(_, attr: string, quote: string, path: string) =>
+				`${attr}=${quote}${toAdminAssetUrl(path)}`,
+		)
+		.replace(
+			/\bhref=("|')\/(?!\/)(_astro|favicon|sakana|vendor)\/([^"']+)/g,
+			(_, quote: string, prefix: string, rest: string) =>
+				`href=${quote}${toAdminAssetUrl(`/${prefix}/${rest}`)}`,
+		)
+		.replace(
+			/\bhref=("|')\/(?!\/)([^"']+)/g,
+			(_, quote: string, path: string) => `href=${quote}${BLOG_ORIGIN}/${path}`,
+		)
+		.replace(
+			/(["'`])\/(?!\/)(_astro|favicon|sakana|vendor)\//g,
+			(_, quote: string, prefix: string) =>
+				`${quote}${ADMIN_ASSET_PREFIX}${prefix}/`,
+		);
+}
+
+async function handleAccessProtectedAdminAsset(
+	request: Request,
+	requestUrl: URL,
+): Promise<Response> {
+	if (request.method !== "GET" && request.method !== "HEAD") {
+		return json({ error: apiError("METHOD_NOT_ALLOWED") }, 405);
+	}
+
+	const assetPath = getAdminAssetPath(requestUrl.pathname);
+	if (!assetPath) {
+		return json({ error: apiError("NOT_FOUND") }, 404);
+	}
+
+	const upstreamUrl = new URL(assetPath, BLOG_ORIGIN);
+	upstreamUrl.search = requestUrl.search;
+	const upstream = await fetch(upstreamUrl, {
+		method: request.method === "HEAD" ? "HEAD" : "GET",
+		headers: {
+			accept: request.headers.get("accept") ?? "*/*",
+			"user-agent": request.headers.get("user-agent") ?? "fuwari-worker",
+		},
+	});
+
+	const headers = new Headers({
+		"cache-control":
+			upstream.headers.get("cache-control") ?? "public, max-age=3600",
+		"x-robots-tag": "noindex,nofollow",
+	});
+	for (const headerName of ["content-type", "etag", "last-modified"]) {
+		const value = upstream.headers.get(headerName);
+		if (value) headers.set(headerName, value);
+	}
+
+	return new Response(request.method === "HEAD" ? null : upstream.body, {
+		status: upstream.status,
+		headers,
+	});
+}
+
+function getAdminAssetPath(pathname: string): string | null {
+	const assetPath = `/${pathname.slice(ADMIN_ASSET_PREFIX.length)}`;
+	let decodedPath: string;
+	try {
+		decodedPath = decodeURIComponent(assetPath);
+	} catch {
+		return null;
+	}
+	if (decodedPath.includes("..") || decodedPath.includes("\\")) {
+		return null;
+	}
+	if (
+		!ADMIN_ASSET_PATH_PREFIXES.some((prefix) => assetPath.startsWith(prefix))
+	) {
+		return null;
+	}
+	return assetPath;
+}
+
+function toAdminAssetUrl(path: string): string {
+	return `${ADMIN_ASSET_PREFIX}${path.replace(/^\/+/, "")}`;
+}
 
 async function handleApi(
 	request: Request,

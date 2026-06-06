@@ -152,30 +152,112 @@ describe("Route dispatch", () => {
 		expect(res.status).toBe(404);
 	});
 
-	it("does not serve the frontend admin page from the API Worker", async () => {
+	it("serves only the Access-protected admin shell from the API Worker", async () => {
+		const upstreamFetch = vi
+			.fn()
+			.mockResolvedValue(
+				new Response(
+					[
+						'<link rel="stylesheet" href="/_astro/admin.css">',
+						'<script type="module" src="/_astro/admin.js"></script>',
+						'<astro-island component-url="/_astro/FriendAdminPanel.js" renderer-url="/_astro/client.svelte.js">',
+						'<a href="/archive/">Archive</a>',
+						'<script>const image = "/sakana/starshadow.webp"</script>',
+						'<script>fetch("/api/admin/friends")</script>',
+					].join(""),
+					{ headers: { "content-type": "text/html; charset=utf-8" } },
+				),
+			);
+		const originalFetch = globalThis.fetch;
+		vi.stubGlobal("fetch", upstreamFetch);
 		const env = mockEnv();
-		const res = await worker.default.fetch(
-			new Request("https://api.example.com/friends/admin/"),
-			env,
-			mockCtx(),
-		);
-		expect(res.status).toBe(404);
+		try {
+			const res = await worker.default.fetch(
+				new Request("https://api.example.com/friends/admin/"),
+				env,
+				mockCtx(),
+			);
+			expect(res.status).toBe(200);
+			expect(res.headers.get("cache-control")).toBe("no-store");
+			expect(res.headers.get("x-robots-tag")).toBe("noindex,nofollow");
+			expect(upstreamFetch).toHaveBeenCalledOnce();
+			expect(String(upstreamFetch.mock.calls[0]?.[0])).toBe(
+				"https://blog.starshadow.cc/friends/admin/",
+			);
+			const html = await res.text();
+			expect(html).toContain('src="/friends/admin/_asset/_astro/admin.js"');
+			expect(html).toContain(
+				'component-url="/friends/admin/_asset/_astro/FriendAdminPanel.js"',
+			);
+			expect(html).toContain('href="https://blog.starshadow.cc/archive/"');
+			expect(html).toContain(
+				'const image = "/friends/admin/_asset/sakana/starshadow.webp"',
+			);
+			expect(html).toContain('fetch("/api/admin/friends")');
+		} finally {
+			vi.stubGlobal("fetch", originalFetch);
+		}
 	});
 
-	it("does not redirect frontend admin paths on the API Worker", async () => {
+	it("redirects admin shell path to trailing slash", async () => {
 		const env = mockEnv();
 		const res = await worker.default.fetch(
 			new Request("https://api.example.com/friends/admin"),
 			env,
 			mockCtx(),
 		);
+		expect(res.status).toBe(308);
+		expect(res.headers.get("location")).toBe(
+			"https://api.example.com/friends/admin/",
+		);
+	});
+
+	it("does not serve admin subpaths from the API Worker", async () => {
+		const env = mockEnv();
+		const res = await worker.default.fetch(
+			new Request("https://api.example.com/friends/admin/anything"),
+			env,
+			mockCtx(),
+		);
 		expect(res.status).toBe(404);
 	});
 
-	it("does not serve hidden frontend build paths on the API Worker", async () => {
+	it("proxies admin shell assets only under the Access-protected path", async () => {
+		const upstreamFetch = vi.fn().mockResolvedValue(
+			new Response("console.log('admin')", {
+				headers: { "content-type": "text/javascript; charset=utf-8" },
+			}),
+		);
+		const originalFetch = globalThis.fetch;
+		vi.stubGlobal("fetch", upstreamFetch);
+		const env = mockEnv();
+		try {
+			const res = await worker.default.fetch(
+				new Request(
+					"https://api.example.com/friends/admin/_asset/_astro/admin.js",
+				),
+				env,
+				mockCtx(),
+			);
+			expect(res.status).toBe(200);
+			expect(res.headers.get("content-type")).toBe(
+				"text/javascript; charset=utf-8",
+			);
+			expect(String(upstreamFetch.mock.calls[0]?.[0])).toBe(
+				"https://blog.starshadow.cc/_astro/admin.js",
+			);
+			await expect(res.text()).resolves.toBe("console.log('admin')");
+		} finally {
+			vi.stubGlobal("fetch", originalFetch);
+		}
+	});
+
+	it("rejects non-admin asset paths under the protected admin shell", async () => {
 		const env = mockEnv();
 		const res = await worker.default.fetch(
-			new Request("https://api.example.com/worker-admin/friends/admin/"),
+			new Request(
+				"https://api.example.com/friends/admin/_asset/posts/example/",
+			),
 			env,
 			mockCtx(),
 		);
