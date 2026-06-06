@@ -53,11 +53,11 @@
 | 对象存储 | Cloudflare R2 | 存头像/音乐/封面/评论图片 |
 | 部署工具 | Wrangler 4 | 本地开发和线上部署 |
 ||||
-| 包管理器 | pnpm 9.14.4 | 锁定版本 |
+| 包管理器 | pnpm 9.14.4 | `packageManager` 和 CI 显式锁定 |
 | 语言 | TypeScript 6 | 全栈类型检查 |
 | 代码检查 | Biome 2.4 | 格式化和 lint，tab 缩进 |
-| 测试 | Vitest 4 | Worker-focused 测试，当前 164 个用例 |
-| Node | >= 22 | Wrangler 要求 |
+| 测试 | Vitest 4 | Worker-focused 测试，当前 172 个用例 |
+| Node | 22.22.3 | `.node-version`、`.nvmrc`、`package.json#engines` 和 CI 对齐 |
 
 ---
 
@@ -67,6 +67,7 @@
 
 ```bash
 # 安装依赖
+corepack enable
 corepack pnpm install
 
 # 启动 Astro 开发服务器（纯前端）
@@ -230,7 +231,7 @@ corepack pnpm build    # 确保能正常构建
 
 **图片：** `ImageWrapper.astro` 用 Astro Image 组件自动生成 webp + srcset。
 
-**搜索：** Pagefind 在 `pnpm build` 后索引 `dist/`。开发模式下搜索返回空结果是正常的。
+**搜索：** Pagefind 在 `pnpm build` 后用 `--force-language zh` 索引 `dist/`。开发模式下搜索返回空结果是正常的。
 
 ### 5.2 线上部署与路由
 
@@ -705,7 +706,7 @@ Worker 必须配置 `ADMIN_TOKEN` Secret 后才能初始化数据库；初始化
 - `deploy-worker.yml`：当 Worker、migrations、wrangler 或依赖配置变化时部署 Cloudflare Worker。
 - `biome.yml`：使用 Biome 官方 action 做代码质量检查。
 
-`deploy-worker.yml` 会先尝试执行远端 D1 migrations，再执行 `pnpm worker:deploy`。D1 migration step 设置了 `continue-on-error: true`，避免迁移权限或远端状态问题阻断 Worker 发布。
+`deploy-worker.yml` 会先执行远端 D1 migrations，再执行 `pnpm worker:deploy`。远端迁移失败会阻断 Worker 发布，避免代码和数据库结构不一致。
 
 Vercel 前端部署由 Vercel Git 集成触发，不再使用仓库里的 Vercel deploy hook workflow。
 

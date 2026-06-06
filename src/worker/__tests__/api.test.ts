@@ -153,16 +153,21 @@ describe("Route dispatch", () => {
 	});
 
 	it("serves only the Access-protected admin shell from the API Worker", async () => {
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 		const upstreamFetch = vi
 			.fn()
 			.mockResolvedValue(
 				new Response(
 					[
 						'<link rel="stylesheet" href="/_astro/admin.css">',
+						"<link rel='preload' href='/_astro/preload.js'>",
 						'<script type="module" src="/_astro/admin.js"></script>',
 						'<astro-island component-url="/_astro/FriendAdminPanel.js" renderer-url="/_astro/client.svelte.js">',
+						"<astro-island component-url='/_astro/SingleQuotePanel.js'>",
 						'<img srcset="/_astro/small.webp 640w, /_astro/large.webp 1280w">',
+						'<meta property="og:image" content="/sakana/starshadow.webp">',
 						'<a href="/">Home</a>',
+						'<a href="//cdn.example.com/app.js">CDN</a>',
 						'<a href="/archive/">Archive</a>',
 						'<script>const pagefind = "/pagefind/pagefind.js"</script>',
 						'<script>const image = "/sakana/starshadow.webp"</script>',
@@ -195,9 +200,19 @@ describe("Route dispatch", () => {
 				'component-url="https://blog.starshadow.cc/_astro/FriendAdminPanel.js"',
 			);
 			expect(html).toContain(
+				"component-url='https://blog.starshadow.cc/_astro/SingleQuotePanel.js'",
+			);
+			expect(html).toContain(
 				'srcset="https://blog.starshadow.cc/_astro/small.webp 640w, https://blog.starshadow.cc/_astro/large.webp 1280w"',
 			);
+			expect(html).toContain(
+				"href='https://blog.starshadow.cc/_astro/preload.js'",
+			);
+			expect(html).toContain(
+				'content="https://blog.starshadow.cc/sakana/starshadow.webp"',
+			);
 			expect(html).toContain('href="https://blog.starshadow.cc/"');
+			expect(html).toContain('href="//cdn.example.com/app.js"');
 			expect(html).toContain('href="https://blog.starshadow.cc/archive/"');
 			expect(html).toContain(
 				'const pagefind = "https://blog.starshadow.cc/pagefind/pagefind.js"',
@@ -206,7 +221,37 @@ describe("Route dispatch", () => {
 				'const image = "https://blog.starshadow.cc/sakana/starshadow.webp"',
 			);
 			expect(html).toContain('fetch("/api/admin/friends")');
+			expect(warnSpy).not.toHaveBeenCalled();
 		} finally {
+			warnSpy.mockRestore();
+			vi.stubGlobal("fetch", originalFetch);
+		}
+	});
+
+	it("warns when the admin shell still contains relative asset references", async () => {
+		const upstreamFetch = vi.fn().mockResolvedValue(
+			new Response("<script type=module src=/_astro/admin.js></script>", {
+				headers: { "content-type": "text/html; charset=utf-8" },
+			}),
+		);
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const originalFetch = globalThis.fetch;
+		vi.stubGlobal("fetch", upstreamFetch);
+		const env = mockEnv();
+		try {
+			const res = await worker.default.fetch(
+				new Request("https://api.example.com/friends/admin/"),
+				env,
+				mockCtx(),
+			);
+			expect(res.status).toBe(200);
+			expect(await res.text()).toContain("src=/_astro/admin.js");
+			expect(warnSpy).toHaveBeenCalledWith(
+				"Admin shell contains unrewritten relative asset reference",
+				expect.objectContaining({ reference: "src=/_astro/admin.js" }),
+			);
+		} finally {
+			warnSpy.mockRestore();
 			vi.stubGlobal("fetch", originalFetch);
 		}
 	});
@@ -299,6 +344,33 @@ tags: [Astro, R2]
 		expect(parsed.files).toHaveLength(2);
 	});
 
+	it("parses standard YAML frontmatter shapes", async () => {
+		const parsed = await content.parsePostZip(
+			articleZip({
+				"hello/index.md": `---
+title: "Hello: With Colon"
+published: 2026-01-01
+description: |
+  First line
+  Second line
+tags:
+  - Astro
+  - R2:Storage
+category: Notes
+lang: zh-CN
+---
+# Hello`,
+			}),
+		);
+		expect(parsed).not.toBeInstanceOf(Response);
+		if (parsed instanceof Response) return;
+		expect(parsed.frontmatter.title).toBe("Hello: With Colon");
+		expect(parsed.frontmatter.description).toBe("First line\nSecond line");
+		expect(parsed.frontmatter.tags).toEqual(["Astro", "R2:Storage"]);
+		expect(parsed.frontmatter.category).toBe("Notes");
+		expect(parsed.frontmatter.lang).toBe("zh-CN");
+	});
+
 	it("accepts a full posts archive and ignores .gitkeep", async () => {
 		const parsed = await content.parsePostArchive(
 			articleZip({
@@ -355,6 +427,36 @@ published: 2026-01-02
 		if (parsed instanceof Response) expect(parsed.status).toBe(400);
 	});
 
+	it("rejects malformed YAML frontmatter", async () => {
+		const parsed = await content.parsePostZip(
+			articleZip({
+				"hello/index.md": `---
+title: [unterminated
+published: 2026-01-01
+---
+# Hello`,
+			}),
+		);
+		expect(parsed).toBeInstanceOf(Response);
+		if (parsed instanceof Response) {
+			expect(parsed.status).toBe(400);
+			expect(await parsed.json()).toEqual({
+				error: "文章 frontmatter YAML 语法无效。",
+			});
+		}
+	});
+
+	it("rejects SVG article assets", async () => {
+		const parsed = await content.parsePostZip(
+			articleZip({
+				"hello/index.md": "---\ntitle: Hello\npublished: 2026-01-01\n---",
+				"hello/icon.svg": "<svg><script>alert(1)</script></svg>",
+			}),
+		);
+		expect(parsed).toBeInstanceOf(Response);
+		if (parsed instanceof Response) expect(parsed.status).toBe(400);
+	});
+
 	it("rejects ZIPs with more than one index document", async () => {
 		const parsed = await content.parsePostZip(
 			articleZip({
@@ -377,8 +479,8 @@ describe("Content sync API", () => {
 		worker = await import("../index");
 	});
 
-	function mockContentDb(): D1Database {
-		const rows = [
+	function mockContentDb(
+		rows = [
 			{
 				id: 1,
 				slug: "published-post",
@@ -408,7 +510,8 @@ describe("Content sync API", () => {
 				createdAt: "2026-01-01T00:00:00.000Z",
 				updatedAt: "2026-01-01T00:00:00.000Z",
 			},
-		];
+		],
+	): D1Database {
 		const stmt = {
 			bind: vi.fn().mockReturnThis(),
 			first: vi.fn().mockResolvedValue(rows[0]),
@@ -483,6 +586,36 @@ describe("Content sync API", () => {
 		expect(vi.mocked(bucket.get)).toHaveBeenCalledWith(
 			"posts/published-post/index.md",
 		);
+	});
+
+	it("rejects invalid content object keys before R2 lookup", async () => {
+		const bucket = mockContentBucket();
+		const env = mockEnv({ DB: mockContentDb(), MEDIA_BUCKET: bucket });
+		const res = await worker.default.fetch(
+			new Request(
+				"https://blog.example.com/api/content/object?key=media%2Favatars%2Favatar.png",
+				{ headers: { authorization: "Bearer test-sync-token" } },
+			),
+			env,
+			mockCtx(),
+		);
+		expect(res.status).toBe(400);
+		expect(bucket.get).not.toHaveBeenCalled();
+	});
+
+	it("rejects content objects that are not in the published manifest", async () => {
+		const bucket = mockContentBucket();
+		const env = mockEnv({ DB: mockContentDb(), MEDIA_BUCKET: bucket });
+		const res = await worker.default.fetch(
+			new Request(
+				"https://blog.example.com/api/content/object?key=posts%2Fpublished-post%2Funlisted.png",
+				{ headers: { authorization: "Bearer test-sync-token" } },
+			),
+			env,
+			mockCtx(),
+		);
+		expect(res.status).toBe(404);
+		expect(bucket.get).not.toHaveBeenCalled();
 	});
 });
 
@@ -941,6 +1074,158 @@ describe("Database initialization", () => {
 		expect(preparedSql.some((sql) => sql.startsWith("ALTER TABLE"))).toBe(
 			false,
 		);
+	});
+
+	it("applies migration 0010 when audit log already contains content resources", async () => {
+		const preparedSql: string[] = [];
+		const versionWrites: unknown[][] = [];
+		const tables = new Set([
+			"app_settings",
+			"friend_links",
+			"music_tracks",
+			"stats_visitors",
+			"stats_page_daily",
+			"rate_limits",
+			"comment",
+			"config",
+			"counter",
+			"admin_audit_log",
+		]);
+		const indexes = new Set([
+			"idx_friend_links_normalized_host_pending_approved_unique",
+			"idx_friend_links_submitter_pending_created",
+			"idx_music_tracks_object_key_unique",
+			"idx_music_tracks_content_hash_unique",
+		]);
+		const tableStmt = {
+			table: "",
+			bind: vi.fn((table: string) => {
+				tableStmt.table = table;
+				return tableStmt;
+			}),
+			first: vi.fn(async () =>
+				tables.has(tableStmt.table) ? { name: tableStmt.table } : null,
+			),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		const indexStmt = {
+			index: "",
+			bind: vi.fn((index: string) => {
+				indexStmt.index = index;
+				return indexStmt;
+			}),
+			first: vi.fn(async () =>
+				indexes.has(indexStmt.index) ? { name: indexStmt.index } : null,
+			),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		const appSettingSelectStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue({ value: "0009" }),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		const appSettingWriteStmt = {
+			bind: vi.fn((...values: unknown[]) => {
+				versionWrites.push(values);
+				return appSettingWriteStmt;
+			}),
+			first: vi.fn().mockResolvedValue(null),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		const friendColumnsStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+			all: vi.fn().mockResolvedValue({
+				results: [
+					{ name: "id" },
+					{ name: "normalized_host" },
+					{ name: "submitter_hash" },
+				],
+			}),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		const musicColumnsStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+			all: vi.fn().mockResolvedValue({
+				results: [{ name: "id" }, { name: "content_hash" }],
+			}),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		const commentColumnsStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+			all: vi.fn().mockResolvedValue({ results: [{ name: "_id", pk: 1 }] }),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		const genericStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue({ count: 1 }),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		const db = {
+			prepare: vi.fn((sql: string) => {
+				preparedSql.push(sql);
+				if (sql.includes("SELECT value FROM app_settings")) {
+					return appSettingSelectStmt;
+				}
+				if (sql.includes("INSERT INTO app_settings")) {
+					return appSettingWriteStmt;
+				}
+				if (sql.includes("sqlite_master") && sql.includes("type = 'index'")) {
+					return indexStmt;
+				}
+				if (sql.includes("sqlite_master")) return tableStmt;
+				if (sql.includes("PRAGMA table_info(comment)"))
+					return commentColumnsStmt;
+				if (sql.includes("PRAGMA table_info(friend_links)")) {
+					return friendColumnsStmt;
+				}
+				if (sql.includes("PRAGMA table_info(music_tracks)")) {
+					return musicColumnsStmt;
+				}
+				return genericStmt;
+			}),
+			batch: vi.fn().mockResolvedValue([]),
+			exec: vi.fn().mockResolvedValue({ count: 0, duration: 0 }),
+			dump: vi.fn().mockResolvedValue([]),
+		} as unknown as D1Database;
+
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/setup/init-db", {
+				method: "POST",
+				headers: {
+					authorization: "Bearer test-admin-token",
+					"content-type": "application/json",
+				},
+				body: JSON.stringify({ versions: ["0010"] }),
+			}),
+			mockEnv({ DB: db }),
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(200);
+		await expect(res.json()).resolves.toMatchObject({
+			ok: true,
+			applied: ["0010"],
+			version: "0010",
+		});
+		expect(preparedSql).toContain(
+			"ALTER TABLE admin_audit_log_new RENAME TO admin_audit_log",
+		);
+		expect(preparedSql).toContain(
+			`INSERT INTO admin_audit_log_new (
+				id, actor_hash, action, resource, resource_id, details, ip, created_at
+			)
+			SELECT id, actor_hash, action, resource, resource_id, details, ip, created_at
+			FROM admin_audit_log`,
+		);
+		expect(versionWrites).toContainEqual(["db_migration_version", "0010"]);
 	});
 });
 
@@ -2464,6 +2749,20 @@ describe("Twikoo security", () => {
 		const env = mockEnv({ DB: db, TWIKOO_ADMIN_PASSWORD: plaintext });
 		const res = await worker.default.fetch(
 			twikooRequest("LOGIN", { password: md5(plaintext) }),
+			env,
+			mockCtx(),
+		);
+		expect(res.status).toBe(403);
+		const body = (await res.json()) as { code?: number; message?: string };
+		expect(body.code).toBe(1024);
+		expect(body.message).toContain("protected admin endpoint");
+	});
+
+	it("rejects Twikoo admin config writes on the public comments endpoint", async () => {
+		const { db } = mockD1Result("{}");
+		const env = mockEnv({ DB: db });
+		const res = await worker.default.fetch(
+			twikooRequest("SET_CONFIG", { config: { private: true } }),
 			env,
 			mockCtx(),
 		);

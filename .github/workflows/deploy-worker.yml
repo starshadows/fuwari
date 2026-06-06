@@ -9,12 +9,15 @@ on:
       - "package.json"
       - "pnpm-lock.yaml"
       - "src/**"
-      - "src/worker/**"
       - "!src/worker/__tests__/**"
       - "wrangler.jsonc"
 
 permissions:
   contents: read
+
+env:
+  NODE_VERSION: 22.22.3
+  PNPM_VERSION: 9.14.4
 
 jobs:
   deploy:
@@ -29,12 +32,13 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
         with:
+          version: ${{ env.PNPM_VERSION }}
           run_install: false
 
       - name: Setup Node.js
         uses: actions/setup-node@cdca7365b2dadb8aad0a33bc7601856ffabcc48e # v4.3.0
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -51,7 +55,6 @@ jobs:
 
       - name: Apply D1 migrations
         if: steps.cloudflare-credentials.outputs.configured == 'true'
-        continue-on-error: true
         run: pnpm wrangler d1 migrations apply fuwari-data --remote --yes
 
       - name: Deploy Worker

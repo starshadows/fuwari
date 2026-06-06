@@ -13,6 +13,10 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  NODE_VERSION: 22.22.3
+  PNPM_VERSION: 9.14.4
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -24,12 +28,13 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
         with:
+          version: ${{ env.PNPM_VERSION }}
           run_install: false
 
       - name: Setup Node.js
         uses: actions/setup-node@cdca7365b2dadb8aad0a33bc7601856ffabcc48e # v4.3.0
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -50,7 +55,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@cdca7365b2dadb8aad0a33bc7601856ffabcc48e # v4.3.0
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -58,6 +63,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
         with:
+          version: ${{ env.PNPM_VERSION }}
           run_install: false # Disable auto-install
 
       - name: Install dependencies
@@ -73,7 +79,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@cdca7365b2dadb8aad0a33bc7601856ffabcc48e # v4.3.0
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -81,6 +87,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
         with:
+          version: ${{ env.PNPM_VERSION }}
           run_install: false # Disable auto-install
 
       - name: Install dependencies
@@ -96,7 +103,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@cdca7365b2dadb8aad0a33bc7601856ffabcc48e # v4.3.0
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -104,6 +111,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
         with:
+          version: ${{ env.PNPM_VERSION }}
           run_install: false
 
       - name: Install dependencies
@@ -122,7 +130,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@cdca7365b2dadb8aad0a33bc7601856ffabcc48e # v4.3.0
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -130,6 +138,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
         with:
+          version: ${{ env.PNPM_VERSION }}
           run_install: false
 
       - name: Install dependencies

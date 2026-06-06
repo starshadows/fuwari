@@ -1,3 +1,4 @@
+import { unified } from "@astrojs/markdown-remark";
 import sitemap from "@astrojs/sitemap";
 import svelte from "@astrojs/svelte";
 import { pluginCollapsibleSections } from "@expressive-code/plugin-collapsible-sections";
@@ -22,6 +23,21 @@ import { GithubCardComponent } from "./src/plugins/rehype-component-github-card.
 import { parseDirectiveNode } from "./src/plugins/remark-directive-rehype.js";
 import { remarkExcerpt } from "./src/plugins/remark-excerpt.js";
 import { remarkReadingTime } from "./src/plugins/remark-reading-time.mjs";
+
+const KNOWN_ASTRO_EXPRESSIVE_CODE_MARKDOWN_WARNING =
+	"`markdown.remarkPlugins`, `markdown.rehypePlugins`, and `markdown.remarkRehype` are deprecated";
+const KNOWN_TWIKOO_CHUNK_WARNING =
+	/chunks\/twikoo\.[^\s]+\.js is larger than 500 kB after minification/;
+
+const originalProcessStderrWrite = process.stderr.write.bind(process.stderr);
+process.stderr.write = (chunk, ...args) => {
+	const message =
+		chunk instanceof Uint8Array ? chunk.toString() : String(chunk);
+	if (message.includes(KNOWN_ASTRO_EXPRESSIVE_CODE_MARKDOWN_WARNING)) {
+		return true;
+	}
+	return originalProcessStderrWrite(chunk, ...args);
+};
 
 // https://astro.build/config
 export default defineConfig({
@@ -100,64 +116,92 @@ export default defineConfig({
 		sitemap(),
 	],
 	markdown: {
-		remarkPlugins: [
-			remarkMath,
-			remarkReadingTime,
-			remarkExcerpt,
-			remarkGithubAdmonitionsToDirectives,
-			remarkDirective,
-			remarkSectionize,
-			parseDirectiveNode,
-		],
-		rehypePlugins: [
-			rehypeKatex,
-			rehypeSlug,
-			[
-				rehypeComponents,
-				{
-					components: {
-						github: GithubCardComponent,
-						note: (x, y) => AdmonitionComponent(x, y, "note"),
-						tip: (x, y) => AdmonitionComponent(x, y, "tip"),
-						important: (x, y) => AdmonitionComponent(x, y, "important"),
-						caution: (x, y) => AdmonitionComponent(x, y, "caution"),
-						warning: (x, y) => AdmonitionComponent(x, y, "warning"),
-					},
-				},
+		processor: unified({
+			remarkPlugins: [
+				remarkMath,
+				remarkReadingTime,
+				remarkExcerpt,
+				remarkGithubAdmonitionsToDirectives,
+				remarkDirective,
+				remarkSectionize,
+				parseDirectiveNode,
 			],
-			[
-				rehypeAutolinkHeadings,
-				{
-					behavior: "append",
-					properties: {
-						className: ["anchor"],
-					},
-					content: {
-						type: "element",
-						tagName: "span",
-						properties: {
-							className: ["anchor-icon"],
-							"data-pagefind-ignore": true,
+			rehypePlugins: [
+				rehypeKatex,
+				rehypeSlug,
+				[
+					rehypeComponents,
+					{
+						components: {
+							github: GithubCardComponent,
+							note: (x, y) => AdmonitionComponent(x, y, "note"),
+							tip: (x, y) => AdmonitionComponent(x, y, "tip"),
+							important: (x, y) => AdmonitionComponent(x, y, "important"),
+							caution: (x, y) => AdmonitionComponent(x, y, "caution"),
+							warning: (x, y) => AdmonitionComponent(x, y, "warning"),
 						},
-						children: [
-							{
-								type: "text",
-								value: "#",
-							},
-						],
 					},
-				},
+				],
+				[
+					rehypeAutolinkHeadings,
+					{
+						behavior: "append",
+						properties: {
+							className: ["anchor"],
+						},
+						content: {
+							type: "element",
+							tagName: "span",
+							properties: {
+								className: ["anchor-icon"],
+								"data-pagefind-ignore": true,
+							},
+							children: [
+								{
+									type: "text",
+									value: "#",
+								},
+							],
+						},
+					},
+				],
 			],
-		],
+		}),
 	},
 	vite: {
 		build: {
+			chunkSizeWarningLimit: 1000,
 			rollupOptions: {
+				output: {
+					manualChunks(id) {
+						if (id.includes("/node_modules/photoswipe/")) return "photoswipe";
+						if (id.includes("/node_modules/twikoo/")) return "twikoo";
+					},
+				},
 				onwarn(warning, warn) {
-					// temporarily suppress this warning
+					if (KNOWN_TWIKOO_CHUNK_WARNING.test(warning.message)) {
+						return;
+					}
 					if (
 						warning.message.includes("is dynamically imported by") &&
 						warning.message.includes("but also statically imported by")
+					) {
+						return;
+					}
+					if (
+						warning.code === "INVALID_ANNOTATION" &&
+						warning.message.includes('"/* @__PURE__ */"') &&
+						warning.message.includes("Rollup cannot interpret") &&
+						warning.id?.endsWith(".svelte")
+					) {
+						return;
+					}
+					if (
+						warning.message.includes(
+							"Error when using sourcemap for reporting an error",
+						) &&
+						warning.message.includes("Can't resolve original location") &&
+						warning.id?.endsWith(".svelte")
 					) {
 						return;
 					}

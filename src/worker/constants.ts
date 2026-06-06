@@ -169,6 +169,7 @@ export const API_ERROR = {
 		"请使用 multipart/form-data 格式上传文章 ZIP 文件。",
 	CONTENT_ZIP_EMPTY: "请选择一个文章 ZIP 文件。",
 	CONTENT_ZIP_INVALID: "文章 ZIP 文件无效。",
+	CONTENT_FRONTMATTER_INVALID: "文章 frontmatter YAML 语法无效。",
 	CONTENT_ZIP_TOO_MANY_FILES: "文章 ZIP 文件包含过多文件。",
 	CONTENT_ZIP_TOO_LARGE: "解压后的文章 ZIP 文件过大。",
 	CONTENT_SLUG_INVALID: "文章别名无效。",

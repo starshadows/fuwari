@@ -1,4 +1,5 @@
 import { unzipSync } from "fflate";
+import { parse as parseYaml } from "yaml";
 import {
 	apiError,
 	CONTENT_POSTS_PREFIX,
@@ -88,7 +89,6 @@ const ALLOWED_ASSET_EXTENSIONS = new Set([
 	"jpeg",
 	"jpg",
 	"png",
-	"svg",
 	"webp",
 ]);
 
@@ -718,6 +718,7 @@ async function parseArticleEntries(
 	const markdown = decoder.decode(index.bytes);
 	const format = extensionOf(index.path) as "md" | "mdx";
 	const frontmatter = parseFrontmatter(markdown);
+	if (frontmatter instanceof Response) return frontmatter;
 	if (!frontmatter.title || !frontmatter.published) {
 		return json({ error: apiError("CONTENT_ZIP_INVALID") }, 400);
 	}
@@ -794,8 +795,6 @@ function contentTypeForPath(value: string): string {
 			return "text/markdown; charset=utf-8";
 		case "png":
 			return "image/png";
-		case "svg":
-			return "image/svg+xml";
 		case "webp":
 			return "image/webp";
 		default:
@@ -803,50 +802,48 @@ function contentTypeForPath(value: string): string {
 	}
 }
 
-function parseFrontmatter(markdown: string): ContentFrontmatter {
+function parseFrontmatter(markdown: string): ContentFrontmatter | Response {
 	const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(markdown);
 	const raw = match?.[1] ?? "";
-	const data: Record<string, string> = {};
-	for (const line of raw.split(/\r?\n/)) {
-		const trimmed = line.trim();
-		if (!trimmed || trimmed.startsWith("#")) continue;
-		const separator = trimmed.indexOf(":");
-		if (separator <= 0) continue;
-		const key = trimmed.slice(0, separator).trim();
-		const value = trimmed.slice(separator + 1).trim();
-		data[key] = value;
+	let data: unknown;
+	try {
+		data = parseYaml(raw) ?? {};
+	} catch {
+		return json({ error: apiError("CONTENT_FRONTMATTER_INVALID") }, 400);
 	}
+	const frontmatter =
+		data && typeof data === "object" && !Array.isArray(data)
+			? (data as Record<string, unknown>)
+			: {};
 
 	return {
-		title: yamlScalar(data.title, 200),
-		description: yamlScalar(data.description, 500),
-		image: yamlScalar(data.image, 500),
-		tags: yamlArray(data.tags),
-		category: yamlScalar(data.category, 120),
-		lang: yamlScalar(data.lang, 40),
-		published: yamlScalar(data.published, 40),
-		updated: yamlScalar(data.updated, 40),
+		title: yamlScalar(frontmatter.title, 200),
+		description: yamlScalar(frontmatter.description, 500),
+		image: yamlScalar(frontmatter.image, 500),
+		tags: yamlArray(frontmatter.tags),
+		category: yamlScalar(frontmatter.category, 120),
+		lang: yamlScalar(frontmatter.lang, 40),
+		published: yamlScalar(frontmatter.published, 40),
+		updated: yamlScalar(frontmatter.updated, 40),
 	};
 }
 
-function yamlScalar(value: string | undefined, maxLength: number): string {
-	if (!value) return "";
-	const clean = value
-		.replace(/^['"]|['"]$/g, "")
-		.replace(/^null$/i, "")
-		.trim();
+function yamlScalar(value: unknown, maxLength: number): string {
+	if (value === null || value === undefined) return "";
+	const clean =
+		value instanceof Date
+			? value.toISOString().slice(0, 10)
+			: typeof value === "string" ||
+					typeof value === "number" ||
+					typeof value === "boolean"
+				? String(value).trim()
+				: "";
 	return clean.slice(0, maxLength);
 }
 
-function yamlArray(value: string | undefined): string[] {
-	if (!value) return [];
-	const clean = value.trim();
-	if (!clean.startsWith("[") || !clean.endsWith("]")) return [];
-	return clean
-		.slice(1, -1)
-		.split(",")
-		.map((item) => yamlScalar(item.trim(), 80))
-		.filter(Boolean);
+function yamlArray(value: unknown): string[] {
+	if (!Array.isArray(value)) return [];
+	return value.map((item) => yamlScalar(item, 80)).filter(Boolean);
 }
 
 async function hashParsedFiles(files: ParsedZipFile[]): Promise<string> {

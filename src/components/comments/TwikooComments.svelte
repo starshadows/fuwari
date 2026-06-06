@@ -225,19 +225,33 @@ const installAdminRequestBridge = () => {
 	};
 };
 
-// 先加载 Twikoo 展示已有评论区，再决定是否展示验证
+const shouldAutoLoadPublicComments = () =>
+	["#comments", "#comments-anchor", "#twikoo-comments"].includes(
+		window.location.hash,
+	);
+
+const initializeTwikooComments = async (forceReload = false) => {
+	try {
+		await loadTwikoo(forceReload);
+		if (!adminMode) showVerification = true;
+	} catch (err) {
+		message = "";
+		error = err instanceof Error ? err.message : "评论加载失败。";
+	}
+};
+
+// 公开文章页只先加载配置，等用户明确请求评论后再下载 Twikoo。
 const initComments = async () => {
 	await loadConfig();
 	if (!enabled && !adminMode) return;
+	if (adminMode || shouldAutoLoadPublicComments()) {
+		await initializeTwikooComments();
+	}
+};
 
-	// 先加载 Twikoo 展示评论列表（不验证）
-	await loadTwikoo();
-
-	if (adminMode) return;
-
-	// 对比 envId 是否包含 /api/twikoo，如果是则 Twikoo 走的是 worker 代理，
-	// 那么发帖需要验证。展示评论区区域后，再把验证框放出来
-	showVerification = true;
+const requestComments = async () => {
+	if (isTwikooLoaded || message) return;
+	await initializeTwikooComments();
 };
 
 const createSession = async (humanProof: HumanProofDetail) => {
@@ -293,7 +307,16 @@ onDestroy(() => {
 			评论区已关闭。
 		</div>
 	{:else}
-		<!-- 评论区容器 — 始终展示 Twikoo 已有评论列表 -->
+		{#if !adminMode && !isTwikooLoaded && !message}
+			<button
+				type="button"
+				class="btn-regular h-11 rounded-xl px-5 font-bold active:scale-95"
+				on:click={requestComments}
+			>
+				查看评论
+			</button>
+		{/if}
+
 		<div id="twikoo-comments">
 			<div id="twikoo-comments-mount"></div>
 		</div>

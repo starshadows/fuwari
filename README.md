@@ -1,7 +1,7 @@
 # 星影的博客
 
-![Node.js >= 22](https://img.shields.io/badge/node.js-%3E%3D22-brightgreen)
-![pnpm >= 9](https://img.shields.io/badge/pnpm-%3E%3D9-blue)
+![Node.js 22.22.3](https://img.shields.io/badge/node.js-22.22.3-brightgreen)
+![pnpm 9.14.4](https://img.shields.io/badge/pnpm-9.14.4-blue)
 ![Astro 6](https://img.shields.io/badge/Astro-6-orange)
 ![Cloudflare Worker](https://img.shields.io/badge/Cloudflare-Worker-f38020)
 
@@ -29,7 +29,7 @@
 - **Database**: Cloudflare D1
 - **Object Storage**: Cloudflare R2
 - **Quality**: Biome, Vitest, TypeScript
-- **Package Manager**: pnpm 9
+- **Package Manager**: pnpm 9.14.4
 
 ## 📁 项目结构
 
@@ -60,8 +60,8 @@ wrangler.jsonc         # Cloudflare Worker 配置
 
 环境要求：
 
-- Node.js `>=22.22.0`
-- pnpm `>=9`
+- Node.js `22.22.3`
+- pnpm `9.14.4`
 
 安装依赖：
 

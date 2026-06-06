@@ -147,7 +147,7 @@ async function handleAccessProtectedAdminPage(
 }
 
 function rewriteAdminPageHtml(html: string): string {
-	return html
+	const rewritten = html
 		.replace(
 			/\bsrcset=("|')([^"']+)\1/g,
 			(_, quote: string, value: string) =>
@@ -162,6 +162,13 @@ function rewriteAdminPageHtml(html: string): string {
 			staticAssetStringPattern(),
 			(_, quote: string, prefix: string) => `${quote}${BLOG_ORIGIN}/${prefix}/`,
 		);
+	const unreplacedAsset = findUnrewrittenAdminAssetReference(rewritten);
+	if (unreplacedAsset) {
+		console.warn("Admin shell contains unrewritten relative asset reference", {
+			reference: unreplacedAsset,
+		});
+	}
+	return rewritten;
 }
 
 function rewriteSrcsetUrls(value: string): string {
@@ -173,6 +180,31 @@ function staticAssetStringPattern(): RegExp {
 		`(["'\`])/(?!/)(${STATIC_ASSET_PATH_PREFIXES.join("|")})/`,
 		"g",
 	);
+}
+
+function findUnrewrittenAdminAssetReference(html: string): string | null {
+	const prefixPattern = STATIC_ASSET_PATH_PREFIXES.join("|");
+	const patterns = [
+		new RegExp(
+			`\\b(?:href|src|content|poster|component-url|renderer-url)=(?:"|')/(?!/)(${prefixPattern})/[^"']*`,
+			"i",
+		),
+		new RegExp(
+			`\\b(?:href|src|content|poster|component-url|renderer-url)=/(?!/)(${prefixPattern})/[^\\s>]*`,
+			"i",
+		),
+		new RegExp(
+			`\\bsrcset=(?:"|')[^"']*(?:^|,\\s*)/(?!/)(${prefixPattern})/`,
+			"i",
+		),
+		new RegExp(`(?:"|'|\`)/(?!/)(${prefixPattern})/`, "i"),
+	];
+
+	for (const pattern of patterns) {
+		const match = html.match(pattern);
+		if (match?.[0]) return match[0];
+	}
+	return null;
 }
 
 function toBlogUrl(path: string): string {
