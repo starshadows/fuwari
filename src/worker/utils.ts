@@ -632,9 +632,26 @@ export function normalizeHumanProofContext(
 // URL / origin / validation
 // ================================================================
 
+const TRUSTED_FRONTEND_ORIGINS = new Set(["https://blog.starshadow.cc"]);
+const API_WORKER_ORIGIN = "https://api.starshadow.cc";
+
 export function isSameOrigin(value: string, requestUrl: string): boolean {
 	try {
 		return new URL(value).origin === new URL(requestUrl).origin;
+	} catch {
+		return false;
+	}
+}
+
+function isTrustedWriteSource(value: string, requestUrl: string): boolean {
+	try {
+		const sourceOrigin = new URL(value).origin;
+		const targetOrigin = new URL(requestUrl).origin;
+		return (
+			sourceOrigin === targetOrigin ||
+			(targetOrigin === API_WORKER_ORIGIN &&
+				TRUSTED_FRONTEND_ORIGINS.has(sourceOrigin))
+		);
 	} catch {
 		return false;
 	}
@@ -758,14 +775,14 @@ export function isValidDescription(value: string): boolean {
 
 export function rejectCrossSiteWrite(request: Request): Response | null {
 	const origin = request.headers.get("origin");
-	if (origin && !isSameOrigin(origin, request.url)) {
+	if (origin && !isTrustedWriteSource(origin, request.url)) {
 		return json({ error: apiError("CROSS_SITE") }, 403);
 	}
 	const referer = request.headers.get("referer");
 	if (!origin && !referer) {
 		return json({ error: apiError("CROSS_SITE") }, 403);
 	}
-	if (!origin && referer && !isSameOrigin(referer, request.url)) {
+	if (!origin && referer && !isTrustedWriteSource(referer, request.url)) {
 		return json({ error: apiError("CROSS_SITE") }, 403);
 	}
 	return null;

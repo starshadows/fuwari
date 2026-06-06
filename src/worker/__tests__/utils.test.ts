@@ -363,6 +363,22 @@ describe("rejectCrossSiteWrite", () => {
 		});
 		expect(rejectCrossSiteWrite(request)).toBeNull();
 	});
+
+	it("allows blog frontend writes to the API worker origin", async () => {
+		const request = new Request("https://api.starshadow.cc/api/comments/session", {
+			method: "POST",
+			headers: { origin: "https://blog.starshadow.cc" },
+		});
+		expect(rejectCrossSiteWrite(request)).toBeNull();
+	});
+
+	it("allows blog frontend referer writes to the API worker origin", async () => {
+		const request = new Request("https://api.starshadow.cc/api/comments/session", {
+			method: "POST",
+			headers: { referer: "https://blog.starshadow.cc/posts/example/" },
+		});
+		expect(rejectCrossSiteWrite(request)).toBeNull();
+	});
 });
 
 // ================================================================
