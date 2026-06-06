@@ -60,6 +60,7 @@ export const navBarConfig: NavBarConfig = {
 					name: "管理后台",
 					url: "https://api.starshadow.cc/friends/admin/",
 					external: true,
+					openInCurrentTab: true,
 				},
 			],
 		},

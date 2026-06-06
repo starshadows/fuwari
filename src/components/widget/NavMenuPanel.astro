@@ -10,13 +10,16 @@ interface Props {
 const links = Astro.props.links;
 ---
 <div id="nav-menu-panel" class:list={["float-panel float-panel-closed absolute transition-all fixed right-4 px-2 py-2"]}>
-    {links.map((link) => (
+    {links.map((link) => {
+        const linkTarget = link.external && !link.openInCurrentTab ? "_blank" : null;
+        const linkRel = link.external && !link.openInCurrentTab ? "noopener noreferrer" : null;
+        return (
         <>
             <a href={link.external ? link.url : url(link.url)} class="group flex justify-between items-center py-2 pl-3 pr-1 rounded-lg gap-8
                 hover:bg-[var(--btn-plain-bg-hover)] active:bg-[var(--btn-plain-bg-active)] transition
             "
-               target={link.external ? "_blank" : null}
-               rel={link.external ? "noopener noreferrer" : null}
+               target={linkTarget}
+               rel={linkRel}
             >
                 <div class="transition text-black/75 dark:text-white/75 font-bold group-hover:text-[var(--primary)] group-active:text-[var(--primary)]">
                     {link.name}
@@ -51,12 +54,15 @@ const links = Astro.props.links;
                     </div>
                 </button>
             )}
-            {link.children?.map((child) => (
+            {link.children?.map((child) => {
+                const childTarget = child.external && !child.openInCurrentTab ? "_blank" : null;
+                const childRel = child.external && !child.openInCurrentTab ? "noopener noreferrer" : null;
+                return (
                 <a href={child.external ? child.url : url(child.url)} class="group ml-3 flex justify-between items-center py-2 pl-3 pr-1 rounded-lg gap-8
                     hover:bg-[var(--btn-plain-bg-hover)] active:bg-[var(--btn-plain-bg-active)] transition
                 "
-                   target={child.external ? "_blank" : null}
-                   rel={child.external ? "noopener noreferrer" : null}
+                   target={childTarget}
+                   rel={childRel}
                 >
                     <div class="transition text-black/60 dark:text-white/60 font-bold group-hover:text-[var(--primary)] group-active:text-[var(--primary)]">
                         {child.name}
@@ -70,9 +76,11 @@ const links = Astro.props.links;
                     >
                     </Icon>}
                 </a>
-            ))}
+                );
+            })}
         </>
-    ))}
+        );
+    })}
 </div>
 
 <style>
