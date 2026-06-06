@@ -100,31 +100,46 @@ function isSafeSlug(value) {
 }
 
 async function validateSyncedMarkdownAssets(rootDir) {
-	for (const postDirName of await fs.readdir(rootDir)) {
-		if (postDirName.startsWith(".")) continue;
-		const postDir = path.join(rootDir, postDirName);
-		const stat = await fs.stat(postDir).catch(() => null);
-		if (!stat?.isDirectory()) continue;
-
-		for (const entry of await fs.readdir(postDir)) {
-			if (!/^index\.(md|mdx)$/i.test(entry)) continue;
-			const markdownPath = path.join(postDir, entry);
-			const markdown = await fs.readFile(markdownPath, "utf8");
-			for (const reference of markdownRelativeReferences(markdown)) {
-				const target = path.normalize(path.join(postDir, reference));
-				if (!target.startsWith(postDir + path.sep)) {
-					throw new Error(
-						`Synced post ${postDirName} references an unsafe asset path: ${reference}`,
-					);
-				}
-				const asset = await fs.stat(target).catch(() => null);
-				if (!asset?.isFile()) {
-					throw new Error(
-						`Synced post ${postDirName} references a missing asset: ${reference}`,
-					);
-				}
+	for (const markdownPath of await listMarkdownFiles(rootDir)) {
+		const postDir = path.dirname(markdownPath);
+		const postDirName =
+			path.relative(rootDir, postDir).split(path.sep)[0] ?? "post";
+		const markdown = await fs.readFile(markdownPath, "utf8");
+		for (const reference of markdownRelativeReferences(markdown)) {
+			const target = path.normalize(path.join(postDir, reference));
+			if (!target.startsWith(postDir + path.sep)) {
+				throw new Error(
+					`Synced post ${postDirName} references an unsafe asset path: ${reference}`,
+				);
+			}
+			const asset = await fs.stat(target).catch(() => null);
+			if (!asset?.isFile()) {
+				throw new Error(
+					`Synced post ${postDirName} references a missing asset: ${reference}`,
+				);
 			}
 		}
+	}
+}
+
+async function listMarkdownFiles(rootDir) {
+	const files = [];
+	await collectMarkdownFiles(rootDir, files);
+	return files;
+}
+
+async function collectMarkdownFiles(dir, files) {
+	for (const entry of await fs.readdir(dir)) {
+		if (entry.startsWith(".")) continue;
+		const entryPath = path.join(dir, entry);
+		const stat = await fs.stat(entryPath).catch(() => null);
+		if (!stat) continue;
+		if (stat.isDirectory()) {
+			await collectMarkdownFiles(entryPath, files);
+			continue;
+		}
+
+		if (stat.isFile() && /\.(md|mdx)$/i.test(entry)) files.push(entryPath);
 	}
 }
 
@@ -132,6 +147,8 @@ function markdownRelativeReferences(markdown) {
 	const references = new Set();
 	const markdownImagePattern = /!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
 	const htmlSourcePattern = /\b(?:src|href)=["'](\.\.?\/[^"']+)["']/g;
+	const relativeImagePattern =
+		/(?:^|[\s"'(:])((?:\.\.?\/)[^\s"'<>)]*\.(?:avif|gif|jpe?g|png|svg|webp)(?:[?#][^\s"'<>)]*)?)/gim;
 
 	for (const match of markdown.matchAll(markdownImagePattern)) {
 		const value = normalizeMarkdownUrl(match[1]);
@@ -139,6 +156,11 @@ function markdownRelativeReferences(markdown) {
 	}
 
 	for (const match of markdown.matchAll(htmlSourcePattern)) {
+		const value = normalizeMarkdownUrl(match[1]);
+		if (isLocalRelativeReference(value)) references.add(value);
+	}
+
+	for (const match of markdown.matchAll(relativeImagePattern)) {
 		const value = normalizeMarkdownUrl(match[1]);
 		if (isLocalRelativeReference(value)) references.add(value);
 	}
