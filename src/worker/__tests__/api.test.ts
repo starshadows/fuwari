@@ -161,7 +161,9 @@ describe("Route dispatch", () => {
 						'<link rel="stylesheet" href="/_astro/admin.css">',
 						'<script type="module" src="/_astro/admin.js"></script>',
 						'<astro-island component-url="/_astro/FriendAdminPanel.js" renderer-url="/_astro/client.svelte.js">',
+						'<img srcset="/_astro/small.webp 640w, /_astro/large.webp 1280w">',
 						'<a href="/archive/">Archive</a>',
+						'<script>const pagefind = "/pagefind/pagefind.js"</script>',
 						'<script>const image = "/sakana/starshadow.webp"</script>',
 						'<script>fetch("/api/admin/friends")</script>',
 					].join(""),
@@ -185,13 +187,21 @@ describe("Route dispatch", () => {
 				"https://blog.starshadow.cc/friends/admin/",
 			);
 			const html = await res.text();
-			expect(html).toContain('src="/friends/admin/_asset/_astro/admin.js"');
 			expect(html).toContain(
-				'component-url="/friends/admin/_asset/_astro/FriendAdminPanel.js"',
+				'src="https://blog.starshadow.cc/_astro/admin.js"',
+			);
+			expect(html).toContain(
+				'component-url="https://blog.starshadow.cc/_astro/FriendAdminPanel.js"',
+			);
+			expect(html).toContain(
+				'srcset="https://blog.starshadow.cc/_astro/small.webp 640w, https://blog.starshadow.cc/_astro/large.webp 1280w"',
 			);
 			expect(html).toContain('href="https://blog.starshadow.cc/archive/"');
 			expect(html).toContain(
-				'const image = "/friends/admin/_asset/sakana/starshadow.webp"',
+				'const pagefind = "https://blog.starshadow.cc/pagefind/pagefind.js"',
+			);
+			expect(html).toContain(
+				'const image = "https://blog.starshadow.cc/sakana/starshadow.webp"',
 			);
 			expect(html).toContain('fetch("/api/admin/friends")');
 		} finally {
@@ -222,41 +232,11 @@ describe("Route dispatch", () => {
 		expect(res.status).toBe(404);
 	});
 
-	it("proxies admin shell assets only under the Access-protected path", async () => {
-		const upstreamFetch = vi.fn().mockResolvedValue(
-			new Response("console.log('admin')", {
-				headers: { "content-type": "text/javascript; charset=utf-8" },
-			}),
-		);
-		const originalFetch = globalThis.fetch;
-		vi.stubGlobal("fetch", upstreamFetch);
-		const env = mockEnv();
-		try {
-			const res = await worker.default.fetch(
-				new Request(
-					"https://api.example.com/friends/admin/_asset/_astro/admin.js",
-				),
-				env,
-				mockCtx(),
-			);
-			expect(res.status).toBe(200);
-			expect(res.headers.get("content-type")).toBe(
-				"text/javascript; charset=utf-8",
-			);
-			expect(String(upstreamFetch.mock.calls[0]?.[0])).toBe(
-				"https://blog.starshadow.cc/_astro/admin.js",
-			);
-			await expect(res.text()).resolves.toBe("console.log('admin')");
-		} finally {
-			vi.stubGlobal("fetch", originalFetch);
-		}
-	});
-
-	it("rejects non-admin asset paths under the protected admin shell", async () => {
+	it("does not serve frontend asset proxy paths from the API Worker", async () => {
 		const env = mockEnv();
 		const res = await worker.default.fetch(
 			new Request(
-				"https://api.example.com/friends/admin/_asset/posts/example/",
+				"https://api.example.com/friends/admin/_asset/_astro/admin.js",
 			),
 			env,
 			mockCtx(),

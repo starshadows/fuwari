@@ -24,12 +24,12 @@ import {
 
 const BLOG_ORIGIN = "https://blog.starshadow.cc";
 const ADMIN_PAGE_PATH = "/friends/admin/";
-const ADMIN_ASSET_PREFIX = "/friends/admin/_asset/";
-const ADMIN_ASSET_PATH_PREFIXES = [
-	"/_astro/",
-	"/favicon/",
-	"/sakana/",
-	"/vendor/",
+const STATIC_ASSET_PATH_PREFIXES = [
+	"_astro",
+	"favicon",
+	"pagefind",
+	"sakana",
+	"vendor",
 ];
 
 export default {
@@ -103,9 +103,6 @@ async function handleAccessProtectedAdminPage(
 		redirectUrl.pathname = ADMIN_PAGE_PATH;
 		return Response.redirect(redirectUrl.toString(), 308);
 	}
-	if (requestUrl.pathname.startsWith(ADMIN_ASSET_PREFIX)) {
-		return handleAccessProtectedAdminAsset(request, requestUrl);
-	}
 	if (requestUrl.pathname !== ADMIN_PAGE_PATH) {
 		return json({ error: apiError("NOT_FOUND") }, 404);
 	}
@@ -152,86 +149,34 @@ async function handleAccessProtectedAdminPage(
 function rewriteAdminPageHtml(html: string): string {
 	return html
 		.replace(
-			/\b(src|component-url|renderer-url)=("|')\/(?!\/)([^"']+)/g,
+			/\bsrcset=("|')([^"']+)\1/g,
+			(_, quote: string, value: string) =>
+				`srcset=${quote}${rewriteSrcsetUrls(value)}${quote}`,
+		)
+		.replace(
+			/\b(href|src|content|poster|component-url|renderer-url)=("|')\/(?!\/)([^"']+)/g,
 			(_, attr: string, quote: string, path: string) =>
-				`${attr}=${quote}${toAdminAssetUrl(path)}`,
+				`${attr}=${quote}${toBlogUrl(path)}`,
 		)
 		.replace(
-			/\bhref=("|')\/(?!\/)(_astro|favicon|sakana|vendor)\/([^"']+)/g,
-			(_, quote: string, prefix: string, rest: string) =>
-				`href=${quote}${toAdminAssetUrl(`/${prefix}/${rest}`)}`,
-		)
-		.replace(
-			/\bhref=("|')\/(?!\/)([^"']+)/g,
-			(_, quote: string, path: string) => `href=${quote}${BLOG_ORIGIN}/${path}`,
-		)
-		.replace(
-			/(["'`])\/(?!\/)(_astro|favicon|sakana|vendor)\//g,
-			(_, quote: string, prefix: string) =>
-				`${quote}${ADMIN_ASSET_PREFIX}${prefix}/`,
+			staticAssetStringPattern(),
+			(_, quote: string, prefix: string) => `${quote}${BLOG_ORIGIN}/${prefix}/`,
 		);
 }
 
-async function handleAccessProtectedAdminAsset(
-	request: Request,
-	requestUrl: URL,
-): Promise<Response> {
-	if (request.method !== "GET" && request.method !== "HEAD") {
-		return json({ error: apiError("METHOD_NOT_ALLOWED") }, 405);
-	}
-
-	const assetPath = getAdminAssetPath(requestUrl.pathname);
-	if (!assetPath) {
-		return json({ error: apiError("NOT_FOUND") }, 404);
-	}
-
-	const upstreamUrl = new URL(assetPath, BLOG_ORIGIN);
-	upstreamUrl.search = requestUrl.search;
-	const upstream = await fetch(upstreamUrl, {
-		method: request.method === "HEAD" ? "HEAD" : "GET",
-		headers: {
-			accept: request.headers.get("accept") ?? "*/*",
-			"user-agent": request.headers.get("user-agent") ?? "fuwari-worker",
-		},
-	});
-
-	const headers = new Headers({
-		"cache-control":
-			upstream.headers.get("cache-control") ?? "public, max-age=3600",
-		"x-robots-tag": "noindex,nofollow",
-	});
-	for (const headerName of ["content-type", "etag", "last-modified"]) {
-		const value = upstream.headers.get(headerName);
-		if (value) headers.set(headerName, value);
-	}
-
-	return new Response(request.method === "HEAD" ? null : upstream.body, {
-		status: upstream.status,
-		headers,
-	});
+function rewriteSrcsetUrls(value: string): string {
+	return value.replace(/(^|,\s*)\/(?!\/)/g, `$1${BLOG_ORIGIN}/`);
 }
 
-function getAdminAssetPath(pathname: string): string | null {
-	const assetPath = `/${pathname.slice(ADMIN_ASSET_PREFIX.length)}`;
-	let decodedPath: string;
-	try {
-		decodedPath = decodeURIComponent(assetPath);
-	} catch {
-		return null;
-	}
-	if (decodedPath.includes("..") || decodedPath.includes("\\")) {
-		return null;
-	}
-	if (
-		!ADMIN_ASSET_PATH_PREFIXES.some((prefix) => assetPath.startsWith(prefix))
-	) {
-		return null;
-	}
-	return assetPath;
+function staticAssetStringPattern(): RegExp {
+	return new RegExp(
+		`(["'\`])/(?!/)(${STATIC_ASSET_PATH_PREFIXES.join("|")})/`,
+		"g",
+	);
 }
 
-function toAdminAssetUrl(path: string): string {
-	return `${ADMIN_ASSET_PREFIX}${path.replace(/^\/+/, "")}`;
+function toBlogUrl(path: string): string {
+	return `${BLOG_ORIGIN}/${path.replace(/^\/+/, "")}`;
 }
 
 async function handleApi(
