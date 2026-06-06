@@ -6,6 +6,7 @@ import {
 	MAX_POST_FILE_COUNT,
 	MAX_POST_ZIP_UPLOAD_BYTES,
 } from "./constants";
+import { CONTENT_POSTS_STATEMENTS } from "./db-schema";
 import type { Env } from "./types";
 import type {
 	ContentFileInfo,
@@ -187,6 +188,9 @@ export async function handleAdminContentApi(
 	requestUrl: URL,
 	ctx: ExecutionContext,
 ): Promise<Response> {
+	const schema = await ensureContentPostsSchema(env);
+	if (schema) return schema;
+
 	const segments = requestUrl.pathname.split("/").filter(Boolean);
 	const slug = segments[3] ? safeDecodePathSegment(segments[3]) : "";
 
@@ -217,6 +221,31 @@ export async function handleAdminContentApi(
 	}
 
 	return json({ error: apiError("NOT_FOUND") }, 404);
+}
+
+async function ensureContentPostsSchema(env: Env): Promise<Response | null> {
+	if (!env.DB) return json({ error: apiError("MISSING_D1") }, 503);
+	try {
+		const row = await env.DB.prepare(
+			"SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+		)
+			.bind("content_posts")
+			.first<{ name: string }>();
+		if (row?.name) return null;
+
+		for (const statement of CONTENT_POSTS_STATEMENTS) {
+			await env.DB.prepare(statement).run();
+		}
+		return null;
+	} catch (error) {
+		if (isMissingD1SchemaError(error)) {
+			for (const statement of CONTENT_POSTS_STATEMENTS) {
+				await env.DB.prepare(statement).run();
+			}
+			return null;
+		}
+		throw error;
+	}
 }
 
 async function listAdminContentPosts(env: Env): Promise<Response> {
