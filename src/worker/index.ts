@@ -154,7 +154,7 @@ function rewriteAdminPageHtml(html: string): string {
 				`srcset=${quote}${rewriteSrcsetUrls(value)}${quote}`,
 		)
 		.replace(
-			/\b(href|src|content|poster|component-url|renderer-url)=("|')\/(?!\/)([^"']+)/g,
+			/\b(href|src|content|poster|component-url|renderer-url)=("|')\/(?!\/)([^"']*)/g,
 			(_, attr: string, quote: string, path: string) =>
 				`${attr}=${quote}${toBlogUrl(path)}`,
 		)

@@ -162,6 +162,7 @@ describe("Route dispatch", () => {
 						'<script type="module" src="/_astro/admin.js"></script>',
 						'<astro-island component-url="/_astro/FriendAdminPanel.js" renderer-url="/_astro/client.svelte.js">',
 						'<img srcset="/_astro/small.webp 640w, /_astro/large.webp 1280w">',
+						'<a href="/">Home</a>',
 						'<a href="/archive/">Archive</a>',
 						'<script>const pagefind = "/pagefind/pagefind.js"</script>',
 						'<script>const image = "/sakana/starshadow.webp"</script>',
@@ -196,6 +197,7 @@ describe("Route dispatch", () => {
 			expect(html).toContain(
 				'srcset="https://blog.starshadow.cc/_astro/small.webp 640w, https://blog.starshadow.cc/_astro/large.webp 1280w"',
 			);
+			expect(html).toContain('href="https://blog.starshadow.cc/"');
 			expect(html).toContain('href="https://blog.starshadow.cc/archive/"');
 			expect(html).toContain(
 				'const pagefind = "https://blog.starshadow.cc/pagefind/pagefind.js"',
