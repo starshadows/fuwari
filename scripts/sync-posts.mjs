@@ -11,6 +11,14 @@ const baseUrl = stripTrailingSlash(
 );
 const token = process.env.CONTENT_SYNC_TOKEN || "";
 const strict = process.env.CONTENT_SYNC_STRICT === "true";
+const enabled = process.env.CONTENT_SYNC_ENABLED === "true";
+
+if (!enabled) {
+	console.log(
+		"[sync-posts] CONTENT_SYNC_ENABLED is not true; keeping local posts unchanged.",
+	);
+	process.exit(0);
+}
 
 if (!baseUrl || !token) {
 	await fs.mkdir(postsDir, { recursive: true });
