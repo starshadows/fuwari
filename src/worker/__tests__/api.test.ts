@@ -45,12 +45,6 @@ function mockR2Bucket(): R2Bucket {
 	return bucket;
 }
 
-function mockAssets(): Fetcher {
-	return {
-		fetch: vi.fn().mockResolvedValue(new Response("admin html")),
-	} as unknown as Fetcher;
-}
-
 function mockEnv(overrides: Partial<Env> = {}): Env {
 	return {
 		DB: mockD1Result().db,
@@ -158,61 +152,44 @@ describe("Route dispatch", () => {
 		expect(res.status).toBe(404);
 	});
 
-	it("serves admin page from Worker assets", async () => {
-		const assets = mockAssets();
-		const env = mockEnv({ ASSETS: assets });
+	it("does not serve the frontend admin page from the API Worker", async () => {
+		const env = mockEnv();
 		const res = await worker.default.fetch(
 			new Request("https://api.example.com/friends/admin/"),
 			env,
 			mockCtx(),
 		);
-		expect(res.status).toBe(200);
-		expect(res.headers.get("cache-control")).toBe("no-store");
-		expect(res.headers.get("x-robots-tag")).toBe("noindex,nofollow");
-		expect(await res.text()).toBe("admin html");
-		expect(assets.fetch).toHaveBeenCalledOnce();
-		const assetRequest = vi.mocked(assets.fetch).mock.calls[0]?.[0] as Request;
-		expect(new URL(assetRequest.url).pathname).toBe(
-			"/worker-admin/friends/admin/",
-		);
+		expect(res.status).toBe(404);
 	});
 
-	it("redirects admin page to trailing slash", async () => {
-		const env = mockEnv({ ASSETS: mockAssets() });
+	it("does not redirect frontend admin paths on the API Worker", async () => {
+		const env = mockEnv();
 		const res = await worker.default.fetch(
 			new Request("https://api.example.com/friends/admin"),
 			env,
 			mockCtx(),
 		);
-		expect(res.status).toBe(308);
-		expect(res.headers.get("location")).toBe(
-			"https://api.example.com/friends/admin/",
-		);
+		expect(res.status).toBe(404);
 	});
 
-	it("blocks direct access to internal admin assets", async () => {
-		const assets = mockAssets();
-		const env = mockEnv({ ASSETS: assets });
+	it("does not serve hidden frontend build paths on the API Worker", async () => {
+		const env = mockEnv();
 		const res = await worker.default.fetch(
 			new Request("https://api.example.com/worker-admin/friends/admin/"),
 			env,
 			mockCtx(),
 		);
 		expect(res.status).toBe(404);
-		expect(assets.fetch).not.toHaveBeenCalled();
 	});
 
-	it("serves Astro assets from Worker assets", async () => {
-		const assets = mockAssets();
-		const env = mockEnv({ ASSETS: assets });
+	it("does not serve Astro static assets on the API Worker", async () => {
+		const env = mockEnv();
 		const res = await worker.default.fetch(
 			new Request("https://api.example.com/_astro/admin.js"),
 			env,
 			mockCtx(),
 		);
-		expect(res.status).toBe(200);
-		expect(await res.text()).toBe("admin html");
-		expect(assets.fetch).toHaveBeenCalledOnce();
+		expect(res.status).toBe(404);
 	});
 });
 

@@ -4,5 +4,8 @@ import MainGridLayout from "@layouts/MainGridLayout.astro";
 ---
 
 <MainGridLayout title="友链后台" description="友链和音乐管理后台">
+	<Fragment slot="head">
+		<meta name="robots" content="noindex,nofollow" />
+	</Fragment>
 	<FriendAdminPanel client:load />
 </MainGridLayout>
