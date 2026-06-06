@@ -5,6 +5,8 @@
  * by calling handler functions directly with mocked Env bindings.
  * vitest transpiles TypeScript automatically so worker imports work.
  */
+
+import { strToU8, zipSync } from "fflate";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Env } from "../types";
 
@@ -47,12 +49,9 @@ function mockEnv(overrides: Partial<Env> = {}): Env {
 	return {
 		DB: mockD1Result().db,
 		MEDIA_BUCKET: mockR2Bucket(),
-		ASSETS: {
-			fetch: vi
-				.fn()
-				.mockResolvedValue(new Response("static asset", { status: 200 })),
-		} as unknown as Fetcher,
 		ADMIN_TOKEN: "test-admin-token",
+		CONTENT_SYNC_TOKEN: "test-sync-token",
+		VERCEL_DEPLOY_HOOK_URL: "https://vercel.example.com/deploy",
 		...overrides,
 	} as Env;
 }
@@ -143,14 +142,209 @@ describe("Route dispatch", () => {
 		expect(res.status).toBe(410);
 	});
 
-	it("non-API paths fall through to static assets", async () => {
+	it("non-API paths return 404 after static assets move to Vercel", async () => {
 		const env = mockEnv();
 		const res = await worker.default.fetch(
 			new Request("https://blog.example.com/"),
 			env,
 			mockCtx(),
 		);
+		expect(res.status).toBe(404);
+	});
+});
+
+// ================================================================
+// Content ZIP validation
+// ================================================================
+describe("Content ZIP validation", () => {
+	let content: Awaited<typeof import("../content")>;
+
+	beforeAll(async () => {
+		content = await import("../content");
+	});
+
+	function articleZip(entries: Record<string, string>): ArrayBuffer {
+		const zipped = zipSync(
+			Object.fromEntries(
+				Object.entries(entries).map(([name, value]) => [name, strToU8(value)]),
+			),
+		);
+		return zipped.buffer.slice(
+			zipped.byteOffset,
+			zipped.byteOffset + zipped.byteLength,
+		);
+	}
+
+	it("accepts a directory article with one index.md and assets", async () => {
+		const parsed = await content.parsePostZip(
+			articleZip({
+				"hello/index.md": `---
+title: Hello
+published: 2026-01-01
+tags: [Astro, R2]
+---
+# Hello`,
+				"hello/cover.webp": "fake-image",
+			}),
+		);
+		expect(parsed).not.toBeInstanceOf(Response);
+		if (parsed instanceof Response) return;
+		expect(parsed.slug).toBe("hello");
+		expect(parsed.sourceKey).toBe("posts/hello/index.md");
+		expect(parsed.frontmatter.tags).toEqual(["Astro", "R2"]);
+		expect(parsed.files).toHaveLength(2);
+	});
+
+	it("rejects path traversal entries", async () => {
+		const parsed = await content.parsePostZip(
+			articleZip({
+				"hello/index.md": "---\ntitle: Hello\npublished: 2026-01-01\n---",
+				"hello/../evil.png": "x",
+			}),
+		);
+		expect(parsed).toBeInstanceOf(Response);
+		if (parsed instanceof Response) expect(parsed.status).toBe(400);
+	});
+
+	it("rejects unsupported asset extensions", async () => {
+		const parsed = await content.parsePostZip(
+			articleZip({
+				"hello/index.md": "---\ntitle: Hello\npublished: 2026-01-01\n---",
+				"hello/script.html": "<script></script>",
+			}),
+		);
+		expect(parsed).toBeInstanceOf(Response);
+		if (parsed instanceof Response) expect(parsed.status).toBe(400);
+	});
+
+	it("rejects ZIPs with more than one index document", async () => {
+		const parsed = await content.parsePostZip(
+			articleZip({
+				"hello/index.md": "---\ntitle: Hello\npublished: 2026-01-01\n---",
+				"other/index.md": "---\ntitle: Other\npublished: 2026-01-02\n---",
+			}),
+		);
+		expect(parsed).toBeInstanceOf(Response);
+		if (parsed instanceof Response) expect(parsed.status).toBe(400);
+	});
+});
+
+// ================================================================
+// Content sync API
+// ================================================================
+describe("Content sync API", () => {
+	let worker: Awaited<typeof import("../index")>;
+
+	beforeAll(async () => {
+		worker = await import("../index");
+	});
+
+	function mockContentDb(): D1Database {
+		const rows = [
+			{
+				id: 1,
+				slug: "published-post",
+				sourceKey: "posts/published-post/index.md",
+				format: "md",
+				title: "Published",
+				description: "",
+				image: "",
+				tagsJson: "[]",
+				category: "",
+				lang: "",
+				published: "2026-01-01",
+				updated: "",
+				status: "published",
+				contentHash: "abc",
+				assetsManifest: JSON.stringify([
+					{
+						path: "index.md",
+						key: "posts/published-post/index.md",
+						size: 42,
+						contentType: "text/markdown; charset=utf-8",
+					},
+				]),
+				deployStatus: "triggered",
+				deploymentError: "",
+				lastDeployTriggeredAt: "",
+				createdAt: "2026-01-01T00:00:00.000Z",
+				updatedAt: "2026-01-01T00:00:00.000Z",
+			},
+		];
+		const stmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(rows[0]),
+			all: vi.fn().mockResolvedValue({ results: rows }),
+			run: vi
+				.fn()
+				.mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
+		};
+		return {
+			prepare: vi.fn().mockReturnValue(stmt),
+			batch: vi.fn().mockResolvedValue([]),
+			exec: vi.fn().mockResolvedValue({ count: 0, duration: 0 }),
+			dump: vi.fn().mockResolvedValue([]),
+		} as unknown as D1Database;
+	}
+
+	function mockContentBucket(): R2Bucket {
+		return {
+			get: vi.fn().mockResolvedValue({
+				body: new Response("body").body,
+				httpEtag: '"etag"',
+				writeHttpMetadata(headers: Headers) {
+					headers.set("content-type", "text/markdown; charset=utf-8");
+				},
+			}),
+			put: vi.fn(),
+			delete: vi.fn(),
+			head: vi.fn(),
+			list: vi.fn(),
+			createMultipartUpload: vi.fn(),
+			resumeMultipartUpload: vi.fn(),
+		} as unknown as R2Bucket;
+	}
+
+	it("rejects manifest requests without the content sync token", async () => {
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/content/manifest"),
+			mockEnv(),
+			mockCtx(),
+		);
+		expect(res.status).toBe(401);
+	});
+
+	it("returns the published manifest with a valid token", async () => {
+		const env = mockEnv({ DB: mockContentDb() });
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/content/manifest", {
+				headers: { authorization: "Bearer test-sync-token" },
+			}),
+			env,
+			mockCtx(),
+		);
 		expect(res.status).toBe(200);
+		const body = (await res.json()) as { posts: Array<{ slug: string }> };
+		expect(body.posts).toHaveLength(1);
+		expect(body.posts[0].slug).toBe("published-post");
+	});
+
+	it("downloads only published content objects with a valid token", async () => {
+		const bucket = mockContentBucket();
+		const env = mockEnv({ DB: mockContentDb(), MEDIA_BUCKET: bucket });
+		const res = await worker.default.fetch(
+			new Request(
+				"https://blog.example.com/api/content/object?key=posts%2Fpublished-post%2Findex.md",
+				{ headers: { authorization: "Bearer test-sync-token" } },
+			),
+			env,
+			mockCtx(),
+		);
+		expect(res.status).toBe(200);
+		expect(await res.text()).toBe("body");
+		expect(vi.mocked(bucket.get)).toHaveBeenCalledWith(
+			"posts/published-post/index.md",
+		);
 	});
 });
 
@@ -448,6 +642,7 @@ describe("Database initialization", () => {
 			"config",
 			"counter",
 			"admin_audit_log",
+			"content_posts",
 		]);
 		const preparedSql: string[] = [];
 		const versionWrites: unknown[][] = [];
@@ -498,6 +693,7 @@ describe("Database initialization", () => {
 			"idx_friend_links_submitter_pending_created",
 			"idx_music_tracks_object_key_unique",
 			"idx_music_tracks_content_hash_unique",
+			"idx_content_posts_status_published",
 		]);
 		const indexStmt = {
 			index: "",
@@ -601,9 +797,9 @@ describe("Database initialization", () => {
 		await expect(res.json()).resolves.toMatchObject({
 			ok: true,
 			applied: [],
-			version: "0009",
+			version: "0010",
 		});
-		expect(versionWrites).toContainEqual(["db_migration_version", "0009"]);
+		expect(versionWrites).toContainEqual(["db_migration_version", "0010"]);
 		expect(preparedSql.some((sql) => sql.startsWith("ALTER TABLE"))).toBe(
 			false,
 		);

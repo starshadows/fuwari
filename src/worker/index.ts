@@ -8,6 +8,7 @@ import {
 	handleTwikooRequest,
 } from "./comments";
 import { apiError } from "./constants";
+import { handleContentSyncApi } from "./content";
 import { initializeDatabase } from "./db";
 import { getApprovedFriends, submitFriendLink } from "./friends";
 import { handleMedia } from "./media";
@@ -53,8 +54,8 @@ export default {
 				return withServerTiming(withSecurityHeaders(response), startedAt);
 			}
 
-			response = await env.ASSETS.fetch(request);
-			return withSecurityHeaders(response);
+			response = json({ error: apiError("NOT_FOUND") }, 404);
+			return withServerTiming(withSecurityHeaders(response), startedAt);
 		} catch (error) {
 			const ip =
 				request.headers.get("cf-connecting-ip") ??
@@ -137,6 +138,11 @@ async function handleApi(
 	}
 	if (pathname === "/api/stats/heartbeat" && request.method === "POST") {
 		return recordStatsVisit(request, env, true, ctx);
+	}
+
+	// Build-time content sync
+	if (pathname.startsWith("/api/content/")) {
+		return handleContentSyncApi(request, env, requestUrl);
 	}
 
 	// Admin API

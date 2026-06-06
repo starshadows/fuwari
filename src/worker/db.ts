@@ -1,6 +1,7 @@
 import { apiError, MAX_JSON_BODY_BYTES, RATE_LIMITS } from "./constants";
 import {
 	APP_SETTINGS_TABLE,
+	CONTENT_POSTS_STATEMENTS,
 	FRIEND_LINKS_STATEMENTS,
 	RATE_LIMIT_STATEMENTS,
 	STATS_INIT_STATEMENTS,
@@ -193,6 +194,37 @@ const MIGRATIONS: Migration[] = [
 		isApplied: async (env) =>
 			(await hasColumn(env, "friend_links", "submitter_hash")) &&
 			(await hasIndex(env, "idx_friend_links_submitter_pending_created")),
+	},
+	{
+		version: "0010",
+		description: "Create content posts table",
+		statements: [
+			...CONTENT_POSTS_STATEMENTS,
+			`CREATE TABLE IF NOT EXISTS admin_audit_log_new (
+		    id INTEGER PRIMARY KEY AUTOINCREMENT,
+		    actor_hash TEXT NOT NULL,
+		    action TEXT NOT NULL CHECK (action IN ('create', 'update', 'delete', 'import', 'toggle')),
+		    resource TEXT NOT NULL CHECK (resource IN ('friend', 'music', 'comment', 'telegram', 'init-db', 'content')),
+		    resource_id TEXT NOT NULL DEFAULT '',
+		    details TEXT NOT NULL DEFAULT '',
+		    ip TEXT NOT NULL DEFAULT '',
+		    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+		  )`,
+			`INSERT INTO admin_audit_log_new (
+				id, actor_hash, action, resource, resource_id, details, ip, created_at
+			)
+			SELECT id, actor_hash, action, resource, resource_id, details, ip, created_at
+			FROM admin_audit_log`,
+			"DROP TABLE admin_audit_log",
+			"ALTER TABLE admin_audit_log_new RENAME TO admin_audit_log",
+			`CREATE INDEX IF NOT EXISTS idx_audit_log_actor
+		   ON admin_audit_log (actor_hash, created_at)`,
+			`CREATE INDEX IF NOT EXISTS idx_audit_log_resource
+		   ON admin_audit_log (resource, created_at)`,
+		],
+		isApplied: async (env) =>
+			(await hasTable(env, "content_posts")) &&
+			(await hasIndex(env, "idx_content_posts_status_published")),
 	},
 ];
 

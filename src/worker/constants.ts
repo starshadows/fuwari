@@ -25,11 +25,15 @@ export const MAX_MUSIC_UPLOAD_BYTES: number = 25 * 1024 * 1024; // 25 MB — per
 export const MAX_MUSIC_UPLOAD_REQUEST_BYTES: number =
 	MAX_MUSIC_UPLOAD_BYTES * 2 + 1024 * 1024;
 export const MUSIC_UPLOAD_R2_BATCH_SIZE: number = 10;
+export const MAX_POST_ZIP_UPLOAD_BYTES: number = 25 * 1024 * 1024;
+export const MAX_POST_EXPANDED_BYTES: number = 60 * 1024 * 1024;
+export const MAX_POST_FILE_COUNT: number = 200;
 
 // ----------------------------------------------------------------
 // Music constants
 // ----------------------------------------------------------------
 export const MUSIC_PREFIX = "music/";
+export const CONTENT_POSTS_PREFIX = "posts/";
 export const MUSIC_OBJECT_SCAN_LIMIT = 200;
 export const DEFAULT_MUSIC_COVER_URL = "/favicon/favicon-light-192.png";
 export const MUSIC_METADATA_READ_BYTES: number = 256 * 1024; // 256 KB — ID3v2 tags live at the start of MP3 files
@@ -164,6 +168,20 @@ export const API_ERROR = {
 	MUSIC_UPLOAD_TYPE_INVALID:
 		"Please upload audio files using multipart/form-data.",
 	MUSIC_UPLOAD_TOO_MANY: "Aggregate upload size exceeds the limit.",
+	CONTENT_SYNC_TOKEN_MISSING: "Missing content sync token.",
+	CONTENT_SYNC_TOKEN_INVALID: "Invalid content sync token.",
+	CONTENT_ZIP_TYPE_INVALID:
+		"Please upload an article ZIP using multipart/form-data.",
+	CONTENT_ZIP_EMPTY: "Please select one article ZIP file.",
+	CONTENT_ZIP_INVALID: "Article ZIP is invalid.",
+	CONTENT_ZIP_TOO_MANY_FILES: "Article ZIP contains too many files.",
+	CONTENT_ZIP_TOO_LARGE: "Expanded article ZIP is too large.",
+	CONTENT_SLUG_INVALID: "Article slug is invalid.",
+	CONTENT_DUPLICATE: "Article slug already exists.",
+	CONTENT_NOT_FOUND: "Article not found.",
+	CONTENT_OBJECT_NOT_FOUND: "Article object not found.",
+	CONTENT_DEPLOY_HOOK_MISSING: "Vercel Deploy Hook is not configured.",
+	CONTENT_DEPLOY_FAILED: "Vercel Deploy Hook failed.",
 	TELEGRAM_INCOMPLETE: "Telegram notifications are not fully configured.",
 	TELEGRAM_FAILED: "Telegram API returned an error.",
 	TWIKOO_SESSION_REQUIRED:

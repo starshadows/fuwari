@@ -4,6 +4,10 @@ dist/
 # generated types
 .astro/
 
+# generated from R2 during Vercel builds
+src/content/posts/**
+!src/content/posts/.gitkeep
+
 # dependencies
 node_modules/
 

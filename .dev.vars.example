@@ -1,3 +1,6 @@
 # WARNING: Replace this with a strong random token before deploying!
 # Generate a secure token: openssl rand -hex 32
 ADMIN_TOKEN=REPLACE_ME_WITH_A_RANDOM_64_CHAR_HEX_STRING
+TWIKOO_ADMIN_PASSWORD=REPLACE_ME_WITH_A_STRONG_PASSWORD
+CONTENT_SYNC_TOKEN=REPLACE_ME_WITH_A_RANDOM_64_CHAR_HEX_STRING
+VERCEL_DEPLOY_HOOK_URL=https://api.vercel.com/v1/integrations/deploy/prj_xxx/xxx

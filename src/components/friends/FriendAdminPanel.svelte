@@ -3,7 +3,7 @@ import TwikooComments from "@components/comments/TwikooComments.svelte";
 import { onDestroy, onMount } from "svelte";
 
 type FriendStatus = "pending" | "approved" | "rejected" | "all";
-type AdminTab = "friends" | "music" | "comments" | "notifications";
+type AdminTab = "content" | "friends" | "music" | "comments" | "notifications";
 
 type Friend = {
 	id: number;
@@ -55,6 +55,37 @@ type MusicUploadFailure = {
 	reason: string;
 };
 
+type ContentStatus = "draft" | "published";
+type ContentDeployStatus = "idle" | "pending" | "triggered" | "failed";
+
+type ContentPost = {
+	id: number;
+	slug: string;
+	sourceKey: string;
+	format: "md" | "mdx";
+	title: string;
+	description: string;
+	image: string;
+	tags: string[];
+	category: string;
+	lang: string;
+	published: string;
+	updated: string;
+	status: ContentStatus;
+	contentHash: string;
+	files: Array<{
+		path: string;
+		key: string;
+		size: number;
+		contentType: string;
+	}>;
+	deployStatus: ContentDeployStatus;
+	deploymentError: string;
+	lastDeployTriggeredAt: string;
+	createdAt: string;
+	updatedAt: string;
+};
+
 type CommentSettings = {
 	enabled: boolean;
 };
@@ -87,6 +118,7 @@ let token = "";
 let isAuthed = false;
 let activeTab: AdminTab = "music";
 let friendStatus: FriendStatus = "pending";
+let contentPosts: ContentPost[] = [];
 let friends: Friend[] = [];
 let tracks: Track[] = [];
 let musicObjects: MusicObject[] = [];
@@ -97,6 +129,13 @@ let isScanningMusic = false;
 let isImportingMusic = false;
 let isUploadingMusic = false;
 let isNormalizingMusicSort = false;
+let isLoadingContent = false;
+let isUploadingContent = false;
+let isDeployingContent = false;
+let selectedContentZip: File | null = null;
+let contentFileInput: HTMLInputElement | null = null;
+let contentPreviewSlug = "";
+let contentPreviewMarkdown = "";
 let selectedMusicFiles: File[] = [];
 let uploadResults: {
 	uploaded: MusicUploadResult[];
@@ -154,7 +193,15 @@ const statusLabels: Record<FriendStatus, string> = {
 	all: "全部",
 };
 
+const formatFileSize = (size: number) => {
+	if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+	return `${(size / 1024 / 1024).toFixed(2)} MB`;
+};
+
 $: unimportedMusicObjects = musicObjects.filter((object) => !object.imported);
+$: selectedContentZipSummary = selectedContentZip
+	? `${selectedContentZip.name} (${formatFileSize(selectedContentZip.size)})`
+	: "No article ZIP selected";
 $: selectedMusicFileSummary =
 	selectedMusicFiles.length === 0
 		? "未选择任何文件"
@@ -234,6 +281,137 @@ const logout = () => {
 const loadFriends = async () => {
 	const data = await adminFetch(`/api/admin/friends?status=${friendStatus}`);
 	friends = data.friends ?? [];
+};
+
+const loadContentPosts = async () => {
+	isLoadingContent = true;
+	try {
+		const data = await adminFetch("/api/admin/content");
+		contentPosts = data.posts ?? [];
+	} catch (err) {
+		setError(err instanceof Error ? err.message : "Failed to load articles.");
+	} finally {
+		isLoadingContent = false;
+	}
+};
+
+const selectContentZip = (event: Event) => {
+	const input = event.currentTarget as HTMLInputElement;
+	selectedContentZip = input.files?.[0] ?? null;
+};
+
+const openContentFilePicker = () => {
+	contentFileInput?.click();
+};
+
+const uploadContentZip = async () => {
+	if (!selectedContentZip) {
+		setError("Please select an article ZIP.");
+		return;
+	}
+
+	const formData = new FormData();
+	formData.append("file", selectedContentZip);
+
+	isUploadingContent = true;
+	try {
+		const data = await adminFetch("/api/admin/content", {
+			method: "POST",
+			body: formData,
+		});
+		selectedContentZip = null;
+		if (contentFileInput) contentFileInput.value = "";
+		await loadContentPosts();
+		setMessage(`Article ${data.post?.slug ?? ""} uploaded as draft.`);
+	} catch (err) {
+		setError(err instanceof Error ? err.message : "Article upload failed.");
+	} finally {
+		isUploadingContent = false;
+	}
+};
+
+const previewContentPost = async (post: ContentPost) => {
+	try {
+		const data = await adminFetch(
+			`/api/admin/content/${encodeURIComponent(post.slug)}`,
+		);
+		contentPreviewSlug = post.slug;
+		contentPreviewMarkdown = data.markdown ?? "";
+	} catch (err) {
+		setError(
+			err instanceof Error ? err.message : "Failed to load article preview.",
+		);
+	}
+};
+
+const publishContentPost = async (post: ContentPost) => {
+	try {
+		await adminFetch(
+			`/api/admin/content/${encodeURIComponent(post.slug)}/publish`,
+			{
+				method: "POST",
+			},
+		);
+		await loadContentPosts();
+		setMessage(`Published ${post.slug} and triggered Vercel.`);
+	} catch (err) {
+		await loadContentPosts();
+		setError(err instanceof Error ? err.message : "Publish failed.");
+	}
+};
+
+const unpublishContentPost = async (post: ContentPost) => {
+	try {
+		await adminFetch(
+			`/api/admin/content/${encodeURIComponent(post.slug)}/unpublish`,
+			{
+				method: "POST",
+			},
+		);
+		await loadContentPosts();
+		setMessage(`Unpublished ${post.slug} and triggered Vercel.`);
+	} catch (err) {
+		await loadContentPosts();
+		setError(err instanceof Error ? err.message : "Unpublish failed.");
+	}
+};
+
+const retryContentDeploy = async (post?: ContentPost) => {
+	isDeployingContent = true;
+	try {
+		const path = post
+			? `/api/admin/content/${encodeURIComponent(post.slug)}/deploy`
+			: "/api/admin/content/deploy";
+		await adminFetch(path, { method: "POST" });
+		await loadContentPosts();
+		setMessage(
+			post ? `Deployment retried for ${post.slug}.` : "Deployment triggered.",
+		);
+	} catch (err) {
+		await loadContentPosts();
+		setError(err instanceof Error ? err.message : "Deployment trigger failed.");
+	} finally {
+		isDeployingContent = false;
+	}
+};
+
+const deleteContentPost = async (post: ContentPost) => {
+	if (!confirm(`Delete article ${post.slug}?`)) return;
+
+	try {
+		await adminFetch(`/api/admin/content/${encodeURIComponent(post.slug)}`, {
+			method: "DELETE",
+		});
+		if (contentPreviewSlug === post.slug) {
+			contentPreviewSlug = "";
+			contentPreviewMarkdown = "";
+		}
+		await loadContentPosts();
+		setMessage(`Deleted ${post.slug} and triggered Vercel.`);
+	} catch (err) {
+		await loadContentPosts();
+		setError(err instanceof Error ? err.message : "Delete failed.");
+	}
 };
 
 const loadMusic = async () => {
@@ -463,6 +641,11 @@ const toggleMusicSection = (section: keyof typeof musicSectionsOpen) => {
 	};
 };
 
+const openContentTab = async () => {
+	activeTab = "content";
+	await loadContentPosts();
+};
+
 const openFriendsTab = async () => {
 	activeTab = "friends";
 	await loadFriends();
@@ -482,11 +665,6 @@ const openNotificationsTab = async () => {
 	activeTab = "notifications";
 	await loadTelegramSettings();
 	await loadTelegramCommentSettings();
-};
-
-const formatFileSize = (size: number) => {
-	if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-	return `${(size / 1024 / 1024).toFixed(2)} MB`;
 };
 
 const changeFriendStatusFilter = async (status: FriendStatus) => {
@@ -640,6 +818,12 @@ onDestroy(() => {
             </div>
             <div class="flex flex-wrap gap-2">
                 <button
+                    class={`btn-regular h-10 rounded-xl px-4 font-bold ${activeTab === "content" ? "!bg-[var(--btn-regular-bg-active)]" : ""}`}
+                    on:click={openContentTab}
+                >
+                    Articles
+                </button>
+                <button
                     class={`btn-regular h-10 rounded-xl px-4 font-bold ${activeTab === "friends" ? "!bg-[var(--btn-regular-bg-active)]" : ""}`}
                     on:click={openFriendsTab}
                 >
@@ -677,7 +861,116 @@ onDestroy(() => {
             {/if}
         </div>
 
-        {#if activeTab === "friends"}
+        {#if activeTab === "content"}
+            <section class="mb-4 rounded-xl bg-[var(--btn-plain-bg-hover)] p-4">
+                <div class="mb-3 font-bold text-75">Upload Article ZIP</div>
+                <input
+                    bind:this={contentFileInput}
+                    type="file"
+                    accept=".zip,application/zip"
+                    class="sr-only"
+                    on:change={selectContentZip}
+                />
+                <button type="button" class="admin-file-picker" on:click={openContentFilePicker}>
+                    <span class="font-bold text-90">Choose ZIP</span>
+                    <span class="text-50">{selectedContentZipSummary}</span>
+                </button>
+                <div class="mt-3 flex flex-wrap items-center gap-2">
+                    <button
+                        type="button"
+                        class="btn-regular h-10 rounded-xl px-4 font-bold"
+                        disabled={isUploadingContent || !selectedContentZip}
+                        on:click={uploadContentZip}
+                    >
+                        {isUploadingContent ? "Uploading..." : "Upload as Draft"}
+                    </button>
+                    <button
+                        type="button"
+                        class="btn-plain h-10 rounded-xl px-4 font-bold"
+                        disabled={isDeployingContent}
+                        on:click={() => retryContentDeploy()}
+                    >
+                        {isDeployingContent ? "Triggering..." : "Trigger Vercel Deploy"}
+                    </button>
+                    <div class="text-sm text-50">ZIP must contain one top-level folder with index.md or index.mdx.</div>
+                </div>
+            </section>
+
+            <section class="rounded-xl bg-[var(--btn-plain-bg-hover)] p-4">
+                <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                        <div class="font-bold text-75">Articles</div>
+                        <div class="mt-1 text-sm text-50">{contentPosts.length} records in D1</div>
+                    </div>
+                    <button type="button" class="btn-plain h-10 rounded-xl px-4 font-bold" disabled={isLoadingContent} on:click={loadContentPosts}>
+                        {isLoadingContent ? "Loading..." : "Refresh"}
+                    </button>
+                </div>
+
+                {#if contentPosts.length === 0}
+                    <div class="rounded-lg bg-[var(--card-bg)] px-4 py-5 text-sm text-50">
+                        No articles uploaded yet.
+                    </div>
+                {:else}
+                    <div class="flex max-h-[44rem] flex-col gap-3 overflow-y-auto pr-1">
+                        {#each contentPosts as post}
+                            <div class="rounded-xl bg-[var(--card-bg)] p-4">
+                                <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                                    <div class="min-w-0">
+                                        <div class="truncate font-bold text-90">{post.title || post.slug}</div>
+                                        <div class="mt-1 break-all text-sm text-[var(--primary)]">/posts/{post.slug}/</div>
+                                        <div class="mt-1 text-sm text-50">
+                                            {post.status} · {post.format.toUpperCase()} · {post.files.length} files · deploy {post.deployStatus}
+                                        </div>
+                                        {#if post.deploymentError}
+                                            <div class="mt-1 break-all text-xs text-red-500">{post.deploymentError}</div>
+                                        {/if}
+                                        <div class="mt-1 truncate text-xs text-30">{post.sourceKey}</div>
+                                    </div>
+                                    <div class="flex shrink-0 flex-wrap gap-2">
+                                        <button type="button" class="btn-regular h-9 rounded-lg px-3 text-sm font-bold" on:click={() => previewContentPost(post)}>
+                                            Preview
+                                        </button>
+                                        {#if post.status !== "published"}
+                                            <button type="button" class="btn-regular h-9 rounded-lg px-3 text-sm font-bold" on:click={() => publishContentPost(post)}>
+                                                Publish
+                                            </button>
+                                        {:else}
+                                            <button type="button" class="btn-regular h-9 rounded-lg px-3 text-sm font-bold" on:click={() => unpublishContentPost(post)}>
+                                                Unpublish
+                                            </button>
+                                        {/if}
+                                        {#if post.deployStatus === "failed" || post.deployStatus === "pending"}
+                                            <button type="button" class="btn-plain h-9 rounded-lg px-3 text-sm font-bold" on:click={() => retryContentDeploy(post)}>
+                                                Retry Deploy
+                                            </button>
+                                        {/if}
+                                        <button type="button" class="btn-plain h-9 rounded-lg px-3 text-sm font-bold" on:click={() => deleteContentPost(post)}>
+                                            Delete
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        {/each}
+                    </div>
+                {/if}
+            </section>
+
+            {#if contentPreviewSlug}
+                <section class="mt-4 rounded-xl bg-[var(--btn-plain-bg-hover)] p-4">
+                    <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                            <div class="font-bold text-75">Markdown Preview</div>
+                            <div class="mt-1 text-sm text-50">{contentPreviewSlug}</div>
+                        </div>
+                        <button type="button" class="btn-plain h-9 rounded-lg px-3 text-sm font-bold" on:click={() => { contentPreviewSlug = ""; contentPreviewMarkdown = ""; }}>
+                            Close
+                        </button>
+                    </div>
+                    <pre class="max-h-[32rem] overflow-auto rounded-xl bg-[var(--card-bg)] p-4 text-sm text-75 whitespace-pre-wrap">{contentPreviewMarkdown}</pre>
+                </section>
+            {/if}
+        {:else if activeTab === "friends"}
             <div class="mb-4 flex flex-wrap gap-2">
                 {#each statusOptions as option}
                     <button

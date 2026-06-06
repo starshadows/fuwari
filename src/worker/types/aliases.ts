@@ -112,3 +112,37 @@ export type MusicObjectInfo = MusicMetadata & {
 	hasEmbeddedCover: boolean;
 	cover?: EmbeddedCover;
 };
+
+export type ContentPostStatus = "draft" | "published";
+
+export type ContentDeployStatus = "idle" | "pending" | "triggered" | "failed";
+
+export type ContentFileInfo = {
+	path: string;
+	key: string;
+	size: number;
+	contentType: string;
+};
+
+export type ContentPostDto = {
+	id: number;
+	slug: string;
+	sourceKey: string;
+	format: "md" | "mdx";
+	title: string;
+	description: string;
+	image: string;
+	tags: string[];
+	category: string;
+	lang: string;
+	published: string;
+	updated: string;
+	status: ContentPostStatus;
+	contentHash: string;
+	files: ContentFileInfo[];
+	deployStatus: ContentDeployStatus;
+	deploymentError: string;
+	lastDeployTriggeredAt: string;
+	createdAt: string;
+	updatedAt: string;
+};

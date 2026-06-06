@@ -6,6 +6,7 @@ import {
 	MAX_JSON_BODY_BYTES,
 	TELEGRAM_SETTINGS_KEY,
 } from "./constants";
+import { handleAdminContentApi } from "./content";
 import {
 	readTelegramCommentSettings,
 	resolveTelegramCommentSettings,
@@ -123,6 +124,11 @@ export async function handleAdminApi(
 			return updateMusicTrack(request, env, id, ctx);
 		if (request.method === "DELETE" && id)
 			return deleteMusicTrack(request, env, id, ctx);
+	}
+
+	// Content posts
+	if (segments[2] === "content") {
+		return handleAdminContentApi(request, env, requestUrl, ctx);
 	}
 	return json({ error: apiError("NOT_FOUND") }, 404);
 }

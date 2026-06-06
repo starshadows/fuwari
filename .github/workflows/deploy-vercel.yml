@@ -1,0 +1,38 @@
+name: Deploy Vercel Frontend
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "astro.config.mjs"
+      - "frontmatter.json"
+      - "package.json"
+      - "pagefind.yml"
+      - "pnpm-lock.yaml"
+      - "postcss.config.mjs"
+      - "public/**"
+      - "scripts/sync-posts.mjs"
+      - "src/**"
+      - "!src/worker/**"
+      - "!src/content/posts/**"
+      - "svelte.config.js"
+      - "tailwind.config.cjs"
+      - "tsconfig.json"
+      - "vercel.json"
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Vercel Deploy Hook
+        env:
+          VERCEL_DEPLOY_HOOK_URL: ${{ secrets.VERCEL_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$VERCEL_DEPLOY_HOOK_URL" ]; then
+            echo "VERCEL_DEPLOY_HOOK_URL secret is not configured."
+            exit 1
+          fi
+          curl --fail --request POST "$VERCEL_DEPLOY_HOOK_URL"
