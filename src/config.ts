@@ -58,7 +58,8 @@ export const navBarConfig: NavBarConfig = {
 				},
 				{
 					name: "管理后台",
-					url: "/friends/admin/",
+					url: "https://api.starshadow.cc/friends/admin/",
+					external: true,
 				},
 			],
 		},

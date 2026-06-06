@@ -116,6 +116,7 @@ const statusOptions: FriendStatus[] = [
 let tokenInput = "";
 let token = "";
 let isAuthed = false;
+let isInitializingSession = true;
 let activeTab: AdminTab = "music";
 let friendStatus: FriendStatus = "pending";
 let contentPosts: ContentPost[] = [];
@@ -260,7 +261,6 @@ const login = async () => {
 		rememberLoginActivity();
 		isAuthed = true;
 		setMessage("已登录。");
-		await loadMusicObjects();
 		startInactivityTimer();
 	} catch (err) {
 		token = "";
@@ -637,10 +637,14 @@ const uploadMusicFiles = async () => {
 };
 
 const toggleMusicSection = (section: keyof typeof musicSectionsOpen) => {
+	const willOpen = !musicSectionsOpen[section];
 	musicSectionsOpen = {
 		...musicSectionsOpen,
-		[section]: !musicSectionsOpen[section],
+		[section]: willOpen,
 	};
+	if (section === "scan" && willOpen && musicObjects.length === 0) {
+		void loadMusicObjects();
+	}
 };
 
 const openContentTab = async () => {
@@ -655,7 +659,6 @@ const openFriendsTab = async () => {
 
 const openMusicTab = async () => {
 	activeTab = "music";
-	if (musicObjects.length === 0) await loadMusicObjects();
 };
 
 const openCommentsTab = async () => {
@@ -772,18 +775,22 @@ const startInactivityTimer = () => {
 };
 
 onMount(async () => {
-	tokenInput = sessionStorage.getItem(tokenKey) ?? "";
-	if (tokenInput) {
-		const loginTimeStr = sessionStorage.getItem(tokenLoginTimeKey);
-		const loginTime = loginTimeStr ? Number(loginTimeStr) : 0;
-		if (loginTime && Date.now() - loginTime > INACTIVITY_TIMEOUT_MS) {
-			sessionStorage.removeItem(tokenKey);
-			sessionStorage.removeItem(tokenLoginTimeKey);
-			tokenInput = "";
-			setError("登录已过期，请重新登录。");
-		} else {
-			await login();
+	try {
+		tokenInput = sessionStorage.getItem(tokenKey) ?? "";
+		if (tokenInput) {
+			const loginTimeStr = sessionStorage.getItem(tokenLoginTimeKey);
+			const loginTime = loginTimeStr ? Number(loginTimeStr) : 0;
+			if (loginTime && Date.now() - loginTime > INACTIVITY_TIMEOUT_MS) {
+				sessionStorage.removeItem(tokenKey);
+				sessionStorage.removeItem(tokenLoginTimeKey);
+				tokenInput = "";
+				setError("登录已过期，请重新登录。");
+			} else {
+				await login();
+			}
 		}
+	} finally {
+		isInitializingSession = false;
 	}
 });
 
@@ -792,7 +799,14 @@ onDestroy(() => {
 });
 </script>
 
-{#if !isAuthed}
+{#if isInitializingSession}
+    <div class="card-base px-6 py-6 md:px-8">
+        <div class="relative mb-3 pl-4 text-2xl font-bold text-90 before:absolute before:left-0 before:top-2 before:h-5 before:w-1 before:rounded-md before:bg-[var(--primary)]">
+            友链后台
+        </div>
+        <div class="text-sm text-50">正在检查登录状态...</div>
+    </div>
+{:else if !isAuthed}
     <form class="card-base px-6 py-6 md:px-8" on:submit|preventDefault={login}>
         <div class="relative mb-5 pl-4 text-2xl font-bold text-90 before:absolute before:left-0 before:top-2 before:h-5 before:w-1 before:rounded-md before:bg-[var(--primary)]">
             友链后台

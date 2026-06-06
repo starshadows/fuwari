@@ -54,6 +54,11 @@ export default {
 				return withServerTiming(withSecurityHeaders(response), startedAt);
 			}
 
+			if (requestUrl.pathname.startsWith("/worker-admin")) {
+				response = json({ error: apiError("NOT_FOUND") }, 404);
+				return withServerTiming(withSecurityHeaders(response), startedAt);
+			}
+
 			if (requestUrl.pathname.startsWith("/_astro/")) {
 				response = await handleStaticAsset(request, env);
 				return withServerTiming(withSecurityHeaders(response), startedAt);
@@ -112,7 +117,11 @@ async function handleWorkerAdminPage(
 
 	const assetUrl = new URL(request.url);
 	assetUrl.pathname = "/worker-admin/friends/admin/";
-	return env.ASSETS.fetch(new Request(assetUrl, request));
+	const response = await env.ASSETS.fetch(new Request(assetUrl, request));
+	const adminPage = new Response(response.body, response);
+	adminPage.headers.set("cache-control", "no-store");
+	adminPage.headers.set("x-robots-tag", "noindex,nofollow");
+	return adminPage;
 }
 
 async function handleApi(

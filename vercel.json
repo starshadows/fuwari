@@ -11,6 +11,11 @@
 			"permanent": false
 		},
 		{
+			"source": "/friends/admin/",
+			"destination": "https://api.starshadow.cc/friends/admin/",
+			"permanent": false
+		},
+		{
 			"source": "/friends/admin/:path*",
 			"destination": "https://api.starshadow.cc/friends/admin/:path*",
 			"permanent": false
