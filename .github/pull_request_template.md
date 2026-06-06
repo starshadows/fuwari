@@ -7,10 +7,10 @@
 
 ## Checklist
 
-- [ ] I have read the [**CONTRIBUTING**](https://github.com/saicaca/fuwari/blob/main/CONTRIBUTING.md) document.
-- [ ] I have checked to ensure that this Pull Request is not for personal changes.
+- [ ] I have checked the repo docs: `README.md`, `PROJECT.md`, and `AGENTS.md` when relevant.
 - [ ] I have performed a self-review of my own code.
 - [ ] My changes generate no new warnings.
+- [ ] I ran focused checks or explained why they were not needed.
 
 ## Related Issue
 

@@ -56,7 +56,7 @@
 | 包管理器 | pnpm 9.14.4 | 锁定版本 |
 | 语言 | TypeScript 6 | 全栈类型检查 |
 | 代码检查 | Biome 2.4 | 格式化和 lint，tab 缩进 |
-| 测试 | Vitest 4 | 60 个测试用例 |
+| 测试 | Vitest 4 | Worker-focused 测试，当前 164 个用例 |
 | Node | >= 22 | Wrangler 要求 |
 
 ---
@@ -101,13 +101,13 @@ pnpm worker:deploy   # 构建并部署 Worker
 
 ```bash
 corepack pnpm lint     # 检查格式和 lint
-corepack pnpm type-check # TypeScript 类型检查
 corepack pnpm check    # Astro 检查
+corepack pnpm astro sync && corepack pnpm type-check # TypeScript 类型检查
 corepack pnpm test     # 确保测试通过
 corepack pnpm build    # 确保能正常构建
 ```
 
-三者全部通过再提交。
+以上命令按本次改动范围选择执行；涉及类型生成时先运行 `pnpm astro sync` 再运行 `pnpm type-check`。
 
 ---
 
@@ -170,8 +170,8 @@ corepack pnpm build    # 确保能正常构建
 │       ├── constants.ts        # 所有常量 + API 错误消息
 │       ├── types/              # Env + 类型定义
 │       └── __tests__/          # 测试文件
-│           ├── utils.test.ts   # 纯函数单元测试（46 个）
-│           └── api.test.ts     # API 集成测试（14 个）
+│           ├── utils.test.ts   # Worker 工具函数测试（79 个）
+│           └── api.test.ts     # Worker API/集成测试（85 个）
 ├── public/
 │   ├── favicon/                # 明暗两套 favicon
 │   ├── sakana/starshadow.webp  # 摇摇乐角色图
@@ -190,8 +190,8 @@ corepack pnpm build    # 确保能正常构建
 ├── tsconfig.json               # TypeScript 配置
 ├── svelte.config.js            # Svelte 配置
 ├── package.json                # 依赖和脚本
-├── PROJECT.md                  # 【本文档】项目唯一参考文档
-└── CLAUDE.md                   # AI 助手专用（不提交到 GitHub）
+├── PROJECT.md                  # 【本文档】项目参考文档
+└── AGENTS.md                   # OpenCode/AI 助手专用的高信号指令
 ```
 
 ---
@@ -207,7 +207,7 @@ corepack pnpm build    # 确保能正常构建
 - `/about/` → 关于页
 - `/friends/` → 友链展示
 - `/friends/apply/` → 友链申请
-- `/friends/admin/` → 后台管理页
+- `/friends/admin/` → 后台管理页；导航里的“管理后台”指向 `https://api.starshadow.cc/friends/admin/` 并覆盖当前标签页打开，以便经过 Cloudflare Access 保护
 - `/rss.xml` → RSS 输出
 - `/robots.txt` → robots.txt
 
@@ -285,7 +285,8 @@ api.starshadow.cc   -> Cloudflare Worker 后端
 请求路由：
 1. `/api/*` → `handleApi()` 动态 API
 2. `/media/*` → `handleMedia()` R2 媒体文件
-3. 其他路径 → 404（生产前端由 Vercel 提供）
+3. `/friends/admin/` → 代理 Vercel 前端里的后台壳，便于 Cloudflare Access 保护
+4. 其他路径 → 404（生产前端由 Vercel 提供）
 
 **Worker 绑定：**
 ```
@@ -303,16 +304,16 @@ TWIKOO_ADMIN_PASSWORD    → Twikoo 管理员密码
 - 公开 GET 接口用 `cachedResponseV()` 版本化缓存
 - Admin 写操作调用 `incrementCacheVersion()` 使缓存失效
 - Admin 鉴权：统一先做限流再验证（防止时序侧信道）
-- 公开写接口（友链申请/评论/统计）：`rejectCrossSiteWrite()` + ALTCHA + D1 限流
+- 公开写接口（友链申请/评论/统计）：`rejectCrossSiteWrite()` + ALTCHA + D1 限流；评论支持生产部署中的 `blog.starshadow.cc` 前端写入 `api.starshadow.cc` Worker
 - Twikoo CORS 只对同源请求返回 credential 头
 
 ### 5.4 数据库设计
 
-通过 `GET /api/setup/init-db` + `Authorization: Bearer <token>` 初始化。
+通过 `GET /api/setup/init-db` 或 `POST /api/setup/init-db` + `Authorization: Bearer <ADMIN_TOKEN>` 初始化。
 迁移是版本化的（`db_migration_version` 字段追踪），只会应用未执行的迁移。
 
 **app_settings** — 键值对配置表
-- `admin_token_sha256` — 后台 token 的 SHA-256
+- `admin_token_sha256` — 兼容旧部署的后台 token 存储哈希；生产优先使用 `ADMIN_TOKEN` Secret
 - `db_migration_version` — 当前迁移版本号
 - `stats_salt` — 访客统计哈希盐
 - `comments_enabled` — 评论开关
@@ -425,7 +426,7 @@ GET /api/content/manifest      → Vercel 构建时读取文章清单
 GET /api/content/object?key=   → Vercel 构建时下载文章对象
 ```
 
-Vercel 构建前会运行 `scripts/sync-posts.mjs`。当 `CONTENT_SYNC_BASE_URL` / `FUWARI_CONTENT_API_BASE_URL` 和 `CONTENT_SYNC_TOKEN` 可用时，会从 Worker 拉取 R2 中的文章到 `src/content/posts/` 再构建；同步失败默认保留本地文章继续构建。需要同步失败直接阻断构建时，设置 `CONTENT_SYNC_STRICT=true`。
+Vercel 构建前会运行 `scripts/sync-posts.mjs`。只有 `CONTENT_SYNC_ENABLED=true` 时才会尝试同步；同步还需要 `CONTENT_SYNC_BASE_URL` 或 `FUWARI_CONTENT_API_BASE_URL`，以及 `CONTENT_SYNC_TOKEN`。启用后会从 Worker 拉取 R2 中的文章到 `src/content/posts/` 再构建；同步失败默认保留本地文章继续构建。需要同步失败直接阻断构建时，设置 `CONTENT_SYNC_STRICT=true`。
 
 ---
 
@@ -489,7 +490,7 @@ licenseConfig           // 文章版权声明
 4. `POST /api/friends` 提交，状态为 `pending`
 
 **审核流程：**
-1. 管理员访问 `/friends/admin/`（建议开启 Cloudflare Access）
+1. 管理员通过导航访问 `https://api.starshadow.cc/friends/admin/`，Worker 代理后台壳并建议开启 Cloudflare Access
 2. 输入后台 token 登录
 3. 审核（通过/拒绝）、编辑、删除、排序
 
@@ -593,7 +594,7 @@ form-action 'self'; frame-src 'none'; upgrade-insecure-requests
 
 ### 7.2 鉴权
 
-- Admin token 支持两种模式：环境变量 `ADMIN_TOKEN`（明文比较，优先）或 D1 存储的 SHA-256 哈希
+- Admin token 支持两种模式：环境变量 `ADMIN_TOKEN`（Secret 明文比较，优先）或 D1 存储的兼容哈希
 - 所有 auth 路径统一先做限流再验证，防止通过时序/429 存在性探测 auth 配置状态
 - Token 不能放在 URL 参数中传递
 
@@ -607,7 +608,7 @@ D1 滑动窗口实现，每个 scope 独立配置：
 
 ### 7.4 其他
 
-- 公开写接口检查 Origin/Referer 同源（`rejectCrossSiteWrite()`）
+- 公开写接口检查 Origin/Referer（`rejectCrossSiteWrite()`）；除同源外，生产允许 `blog.starshadow.cc` 前端写入 `api.starshadow.cc` Worker
 - 头像上传限制 JPG/PNG/WebP/AVIF/GIF，最大 3MB
 - 评论 HTML 用 sanitize-html 白名单净化
 - 友链 URL 必须 https://
@@ -626,15 +627,15 @@ pnpm test:watch     # 监听模式
 
 ### 测试覆盖
 
-**utils.test.ts（46 个单元测试）：**
+**utils.test.ts（79 个单元测试）：**
 - readString / readInteger / readBoolean / clampInteger
 - safeNormalizeMediaKey / safeDecodeURIComponent / stripMediaPrefix
 - base64UrlEncode / base64UrlDecode
 - timingSafeEqual / maskSecret
-- isSameOrigin / isHttpsUrl / isAvatarUrl
+- isSameOrigin / 可信前端到 API Worker 写入 / isHttpsUrl / isAvatarUrl
 - sanitizeFileName / isLikelyBot
 
-**api.test.ts（14 个集成测试）：**
+**api.test.ts（85 个集成测试）：**
 - 路由分发（API/静态/404/410）
 - 安全响应头（CSP/nosniff/referrer-policy）
 - 跨站请求保护
@@ -663,6 +664,7 @@ Vercel 需要配置：
 - 自定义域名：`blog.starshadow.cc`
 - 环境变量：`CONTENT_SYNC_BASE_URL=https://api.starshadow.cc`
 - 环境变量：`CONTENT_SYNC_TOKEN`，必须与 Worker 的 `CONTENT_SYNC_TOKEN` 一致
+- 环境变量：`CONTENT_SYNC_ENABLED=true`，启用构建前从 Worker 同步 R2 文章
 - 可选环境变量：`CONTENT_SYNC_STRICT=true`，用于让内容同步失败时直接阻断构建
 
 `blog.starshadow.cc` 在 Cloudflare DNS 中可以使用：
@@ -693,7 +695,7 @@ Vercel 需要配置：
 curl -H "Authorization: Bearer <你的token>" https://api.starshadow.cc/api/setup/init-db
 ```
 
-如果 Worker 没有设置 `ADMIN_TOKEN`，传入的 token 的 SHA-256 哈希会自动存入 D1，后续后台登录用同一个 token。
+Worker 必须配置 `ADMIN_TOKEN` Secret 后才能初始化数据库；初始化接口不再接受 URL path/query 中的 token。
 
 ### GitHub 自动部署
 
@@ -723,7 +725,7 @@ pnpm build
 
 - `keep_vars: true` 保留 Dashboard 手动设置的环境变量
 - D1/R2 绑定当前采用 Dashboard 管理资源名和 UUID；新环境部署时必须在 Cloudflare 控制台把 `DB`、`MEDIA_BUCKET` 绑定到实际资源，再执行 D1 migration
-- `routes` 当前匹配 `api.starshadow.cc/*`，Worker 只承载后端入口
+- `routes` 当前匹配 `api.starshadow.cc/*`，Worker 承载 `/api/*`、`/media/*` 和 Access 保护的 `/friends/admin/` 后台壳
 
 ---
 
@@ -735,7 +737,7 @@ pnpm build
 pnpm lint        # Biome CI 检查（不改文件）
 pnpm format:check # Biome 格式检查
 pnpm astro check # Astro 检查
-pnpm type-check  # TypeScript 类型检查
+pnpm astro sync && pnpm type-check  # TypeScript 类型检查
 pnpm test        # 所有测试
 pnpm build       # 生产构建
 ```
@@ -758,7 +760,7 @@ pnpm build       # 生产构建
 
 - 不要在前端源码或文档中写 token
 - 截图前用实心遮罩覆盖邮箱/域名/API Key/头像等敏感信息
-- 外部链接用 `target="_blank" rel="noopener noreferrer"`
+- 外部链接默认用 `target="_blank" rel="noopener noreferrer"`；导航里的“管理后台”例外，使用 `openInCurrentTab: true` 覆盖当前页
 - 不要提交 `dist/`、`.astro/`、`node_modules/`、`博客素材/`
 
 ### 已知坑点
@@ -769,8 +771,7 @@ pnpm build       # 生产构建
 - `astro.config.mjs` 的 `site` 必须是 `https://blog.starshadow.cc/`
 - `api.starshadow.cc` 必须绑定到 Worker 自定义域名或 Worker route，否则 Vercel rewrites 会转发失败
 - 纯 CNAME 到 Vercel 不能保证解决国内访问 Vercel Anycast IP 被墙的问题；DNS only 是纯 Vercel 线路，Proxied/CDN/反代才会改变入口线路
-- `scripts/sync-posts.mjs` 默认非严格同步；需要构建因内容同步失败而失败时设置 `CONTENT_SYNC_STRICT=true`
-- CRITICAL: CLAUDE.md 不能提交到 GitHub
+- `scripts/sync-posts.mjs` 默认不启用同步；设置 `CONTENT_SYNC_ENABLED=true` 后才同步，设置 `CONTENT_SYNC_STRICT=true` 后同步失败才会阻断构建
 
 ---
 
@@ -783,6 +784,8 @@ pnpm build       # 生产构建
 - `scripts/sync-posts.mjs` 支持构建前从 Worker 同步 R2 文章；默认同步失败不阻断构建，可通过 `CONTENT_SYNC_STRICT=true` 切换为严格模式。
 - Worker 部署 workflow 在执行远端 D1 migrations 后部署 Worker，migration step 允许失败以避免阻断发布。
 - 删除独立 Vercel deploy hook workflow，前端部署回到 Vercel Git 集成。
+- Worker 代理 `https://api.starshadow.cc/friends/admin/` 后台壳用于 Cloudflare Access 保护；导航里的“管理后台”覆盖当前页打开，其他外链仍新开页。
+- `rejectCrossSiteWrite()` 明确允许生产中的 `blog.starshadow.cc` 前端写入 `api.starshadow.cc` Worker，修复评论区 ALTCHA session 被误判跨站的问题。
 - 后台内容管理页和 Worker API 错误提示改为中文。
 - README 和 PROJECT 文档同步到当前 Vercel + Cloudflare Worker 分离架构。
 
@@ -813,7 +816,7 @@ pnpm build       # 生产构建
 - Biome 范围扩展到全项目
 - 访客统计数据自动清理（超过 2 年的记录）
 - 文章 JSON-LD 补全封面图
-- Vitest 单元测试 46 个 + 集成测试 14 个
+- Vitest Worker 工具函数测试和 API 集成测试持续补充
 
 ### 2026-05 第一轮
 

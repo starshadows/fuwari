@@ -18,7 +18,7 @@
 - 友链系统，支持公开申请、后台审核和 Telegram 通知。
 - 音乐列表，支持从 R2 `music/` 前缀扫描音频并读取 ID3 元数据。
 - 访问统计，支持 PV / UV / 今日 / 昨日 / 月访问量和实时在线人数。
-- Vercel + Cloudflare Worker 分离部署：前端走 Vercel，`/api/*` 和 `/media/*` 通过 Vercel rewrites 转发到 Worker 自定义域名。
+- Vercel + Cloudflare Worker 分离部署：前端走 Vercel，`/api/*` 和 `/media/*` 通过 Vercel rewrites 转发到 Worker 自定义域名；Access 保护的 `/friends/admin/` 壳由 Worker 代理前端页面。
 - 内容后台支持上传文章 ZIP 到 R2，并通过 Vercel Deploy Hook 触发前端重新部署。
 - 安全加固：Origin/Referer 写保护、公开写接口限流、ALTCHA、D1 prepared statements、R2 key 规范化、安全响应头。
 
@@ -135,7 +135,7 @@ draft: false
 |:--|:--|
 | `pnpm dev` | 启动 Astro 开发服务器 |
 | `pnpm worker:dev` | 启动 Cloudflare Worker 本地开发服务器 |
-| `pnpm build` | 构建站点并生成 Pagefind 索引 |
+| `pnpm build` | 先按需同步 R2 文章，再构建站点并生成 Pagefind 索引 |
 | `pnpm preview` | 本地预览构建产物 |
 | `pnpm check` | Astro 类型检查 |
 | `pnpm type-check` | TypeScript 类型检查 |
@@ -169,6 +169,7 @@ Worker 通过 `wrangler.jsonc` 绑定到 `api.starshadow.cc/*`，负责处理：
 
 - `/api/*`
 - `/media/*`
+- `/friends/admin/`，用于在 Cloudflare Access 保护下代理 Vercel 前端里的后台壳；导航里的“管理后台”会在当前标签页打开该地址。
 
 `blog.starshadow.cc` 是否走纯 Vercel 线路取决于 Cloudflare DNS 记录状态：DNS only 会直连 Vercel，Proxied 会由 Cloudflare 代理回源 Vercel。
 
@@ -271,7 +272,7 @@ Worker 部署命令：
 pnpm worker:deploy
 ```
 
-Vercel 前端部署使用 `vercel.json` 中的 `buildCommand`：`pnpm build`。构建前会执行 `scripts/sync-posts.mjs`，如果 `CONTENT_SYNC_BASE_URL` 和 `CONTENT_SYNC_TOKEN` 可用，会从 Worker 拉取 R2 中的文章；同步失败时默认保留本地文章继续构建。需要让同步失败阻断构建时，设置 `CONTENT_SYNC_STRICT=true`。
+Vercel 前端部署使用 `vercel.json` 中的 `buildCommand`：`pnpm build`。构建前会执行 `scripts/sync-posts.mjs`；只有设置 `CONTENT_SYNC_ENABLED=true` 时才会从 Worker 拉取 R2 中的文章。同步需要 `CONTENT_SYNC_BASE_URL` 或 `FUWARI_CONTENT_API_BASE_URL`，以及 `CONTENT_SYNC_TOKEN`。同步失败时默认保留本地文章继续构建；需要让同步失败阻断构建时，设置 `CONTENT_SYNC_STRICT=true`。
 
 GitHub Actions 中 Worker 部署会先尝试执行远端 D1 migrations，再部署 Worker；migration step 允许失败，避免权限或远端状态问题阻断 Worker 发布。
 
@@ -281,7 +282,7 @@ GitHub Actions 中 Worker 部署会先尝试执行远端 D1 migrations，再部�
 
 - `/api/comments/config` 是否返回评论配置。
 - `/api/anti-abuse/challenge?context=comments` 是否返回 ALTCHA challenge。
-- 评论区是否可以完成人机验证并提交评论。
+- 评论区是否可以完成人机验证并提交评论；`blog.starshadow.cc` 前端写入 `api.starshadow.cc` Worker 是允许的可信跨域写入。
 - Twikoo 管理员是否可以用 `TWIKOO_ADMIN_PASSWORD` 登录。
 - `/api/friends` 是否能返回友链列表。
 - `/api/music/tracks` 是否能返回音乐列表。
@@ -295,7 +296,7 @@ GitHub Actions 中 Worker 部署会先尝试执行远端 D1 migrations，再部�
 
 项目中的公开写接口会尽量使用：
 
-- Origin / Referer same-origin 检查
+- Origin / Referer 写保护；同源请求允许，生产中的 `blog.starshadow.cc` 前端写入 `api.starshadow.cc` Worker 也允许
 - D1 rate limiting
 - ALTCHA 人机验证
 - JSON body size 限制
@@ -320,7 +321,7 @@ pnpm lint
 pnpm format:check
 pnpm test
 pnpm astro check
-pnpm type-check
+pnpm astro sync && pnpm type-check
 pnpm build
 git diff --check
 ```
