@@ -201,7 +201,7 @@ const formatFileSize = (size: number) => {
 $: unimportedMusicObjects = musicObjects.filter((object) => !object.imported);
 $: selectedContentZipSummary = selectedContentZip
 	? `${selectedContentZip.name} (${formatFileSize(selectedContentZip.size)})`
-	: "No article ZIP selected";
+	: "未选择文章 ZIP";
 $: selectedMusicFileSummary =
 	selectedMusicFiles.length === 0
 		? "未选择任何文件"
@@ -289,7 +289,7 @@ const loadContentPosts = async () => {
 		const data = await adminFetch("/api/admin/content");
 		contentPosts = data.posts ?? [];
 	} catch (err) {
-		setError(err instanceof Error ? err.message : "Failed to load articles.");
+		setError(err instanceof Error ? err.message : "文章加载失败。");
 	} finally {
 		isLoadingContent = false;
 	}
@@ -306,7 +306,7 @@ const openContentFilePicker = () => {
 
 const uploadContentZip = async () => {
 	if (!selectedContentZip) {
-		setError("Please select an article ZIP.");
+		setError("请选择文章 ZIP。");
 		return;
 	}
 
@@ -322,9 +322,9 @@ const uploadContentZip = async () => {
 		selectedContentZip = null;
 		if (contentFileInput) contentFileInput.value = "";
 		await loadContentPosts();
-		setMessage(`Article ${data.post?.slug ?? ""} uploaded as draft.`);
+		setMessage(`文章 ${data.post?.slug ?? ""} 已上传为草稿。`);
 	} catch (err) {
-		setError(err instanceof Error ? err.message : "Article upload failed.");
+		setError(err instanceof Error ? err.message : "文章上传失败。");
 	} finally {
 		isUploadingContent = false;
 	}
@@ -338,9 +338,7 @@ const previewContentPost = async (post: ContentPost) => {
 		contentPreviewSlug = post.slug;
 		contentPreviewMarkdown = data.markdown ?? "";
 	} catch (err) {
-		setError(
-			err instanceof Error ? err.message : "Failed to load article preview.",
-		);
+		setError(err instanceof Error ? err.message : "文章预览加载失败。");
 	}
 };
 
@@ -353,10 +351,10 @@ const publishContentPost = async (post: ContentPost) => {
 			},
 		);
 		await loadContentPosts();
-		setMessage(`Published ${post.slug} and triggered Vercel.`);
+		setMessage(`文章 ${post.slug} 已发布，并已触发 Vercel 部署。`);
 	} catch (err) {
 		await loadContentPosts();
-		setError(err instanceof Error ? err.message : "Publish failed.");
+		setError(err instanceof Error ? err.message : "文章发布失败。");
 	}
 };
 
@@ -369,10 +367,10 @@ const unpublishContentPost = async (post: ContentPost) => {
 			},
 		);
 		await loadContentPosts();
-		setMessage(`Unpublished ${post.slug} and triggered Vercel.`);
+		setMessage(`文章 ${post.slug} 已取消发布，并已触发 Vercel 部署。`);
 	} catch (err) {
 		await loadContentPosts();
-		setError(err instanceof Error ? err.message : "Unpublish failed.");
+		setError(err instanceof Error ? err.message : "取消发布失败。");
 	}
 };
 
@@ -385,18 +383,18 @@ const retryContentDeploy = async (post?: ContentPost) => {
 		await adminFetch(path, { method: "POST" });
 		await loadContentPosts();
 		setMessage(
-			post ? `Deployment retried for ${post.slug}.` : "Deployment triggered.",
+			post ? `已重新触发 ${post.slug} 的部署。` : "已触发 Vercel 部署。",
 		);
 	} catch (err) {
 		await loadContentPosts();
-		setError(err instanceof Error ? err.message : "Deployment trigger failed.");
+		setError(err instanceof Error ? err.message : "触发部署失败。");
 	} finally {
 		isDeployingContent = false;
 	}
 };
 
 const deleteContentPost = async (post: ContentPost) => {
-	if (!confirm(`Delete article ${post.slug}?`)) return;
+	if (!confirm(`确定删除文章 ${post.slug} 吗？`)) return;
 
 	try {
 		await adminFetch(`/api/admin/content/${encodeURIComponent(post.slug)}`, {
@@ -407,10 +405,10 @@ const deleteContentPost = async (post: ContentPost) => {
 			contentPreviewMarkdown = "";
 		}
 		await loadContentPosts();
-		setMessage(`Deleted ${post.slug} and triggered Vercel.`);
+		setMessage(`文章 ${post.slug} 已删除，并已触发 Vercel 部署。`);
 	} catch (err) {
 		await loadContentPosts();
-		setError(err instanceof Error ? err.message : "Delete failed.");
+		setError(err instanceof Error ? err.message : "删除失败。");
 	}
 };
 
@@ -861,9 +859,9 @@ onDestroy(() => {
             {/if}
         </div>
 
-        {#if activeTab === "content"}
-            <section class="mb-4 rounded-xl bg-[var(--btn-plain-bg-hover)] p-4">
-                <div class="mb-3 font-bold text-75">Upload Article ZIP</div>
+		{#if activeTab === "content"}
+			<section class="mb-4 rounded-xl bg-[var(--btn-plain-bg-hover)] p-4">
+				<div class="mb-3 font-bold text-75">上传文章 ZIP</div>
                 <input
                     bind:this={contentFileInput}
                     type="file"
@@ -871,46 +869,46 @@ onDestroy(() => {
                     class="sr-only"
                     on:change={selectContentZip}
                 />
-                <button type="button" class="admin-file-picker" on:click={openContentFilePicker}>
-                    <span class="font-bold text-90">Choose ZIP</span>
-                    <span class="text-50">{selectedContentZipSummary}</span>
-                </button>
+				<button type="button" class="admin-file-picker" on:click={openContentFilePicker}>
+					<span class="font-bold text-90">选择 ZIP</span>
+					<span class="text-50">{selectedContentZipSummary}</span>
+				</button>
                 <div class="mt-3 flex flex-wrap items-center gap-2">
                     <button
                         type="button"
                         class="btn-regular h-10 rounded-xl px-4 font-bold"
                         disabled={isUploadingContent || !selectedContentZip}
-                        on:click={uploadContentZip}
-                    >
-                        {isUploadingContent ? "Uploading..." : "Upload as Draft"}
-                    </button>
+						on:click={uploadContentZip}
+					>
+						{isUploadingContent ? "上传中..." : "上传为草稿"}
+					</button>
                     <button
                         type="button"
                         class="btn-plain h-10 rounded-xl px-4 font-bold"
                         disabled={isDeployingContent}
-                        on:click={() => retryContentDeploy()}
-                    >
-                        {isDeployingContent ? "Triggering..." : "Trigger Vercel Deploy"}
-                    </button>
-                    <div class="text-sm text-50">ZIP must contain one top-level folder with index.md or index.mdx.</div>
-                </div>
-            </section>
+						on:click={() => retryContentDeploy()}
+					>
+						{isDeployingContent ? "触发中..." : "触发 Vercel 部署"}
+					</button>
+					<div class="text-sm text-50">ZIP 必须包含一个顶层文件夹，且其中有 index.md 或 index.mdx。</div>
+				</div>
+			</section>
 
             <section class="rounded-xl bg-[var(--btn-plain-bg-hover)] p-4">
                 <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                        <div class="font-bold text-75">Articles</div>
-                        <div class="mt-1 text-sm text-50">{contentPosts.length} records in D1</div>
-                    </div>
-                    <button type="button" class="btn-plain h-10 rounded-xl px-4 font-bold" disabled={isLoadingContent} on:click={loadContentPosts}>
-                        {isLoadingContent ? "Loading..." : "Refresh"}
-                    </button>
-                </div>
+					<div>
+						<div class="font-bold text-75">文章</div>
+						<div class="mt-1 text-sm text-50">D1 中共有 {contentPosts.length} 条记录</div>
+					</div>
+					<button type="button" class="btn-plain h-10 rounded-xl px-4 font-bold" disabled={isLoadingContent} on:click={loadContentPosts}>
+						{isLoadingContent ? "加载中..." : "刷新"}
+					</button>
+				</div>
 
-                {#if contentPosts.length === 0}
-                    <div class="rounded-lg bg-[var(--card-bg)] px-4 py-5 text-sm text-50">
-                        No articles uploaded yet.
-                    </div>
+				{#if contentPosts.length === 0}
+					<div class="rounded-lg bg-[var(--card-bg)] px-4 py-5 text-sm text-50">
+						暂无已上传文章。
+					</div>
                 {:else}
                     <div class="flex max-h-[44rem] flex-col gap-3 overflow-y-auto pr-1">
                         {#each contentPosts as post}
@@ -920,7 +918,7 @@ onDestroy(() => {
                                         <div class="truncate font-bold text-90">{post.title || post.slug}</div>
                                         <div class="mt-1 break-all text-sm text-[var(--primary)]">/posts/{post.slug}/</div>
                                         <div class="mt-1 text-sm text-50">
-                                            {post.status} · {post.format.toUpperCase()} · {post.files.length} files · deploy {post.deployStatus}
+										{post.status} · {post.format.toUpperCase()} · {post.files.length} 个文件 · 部署 {post.deployStatus}
                                         </div>
                                         {#if post.deploymentError}
                                             <div class="mt-1 break-all text-xs text-red-500">{post.deploymentError}</div>
@@ -928,26 +926,26 @@ onDestroy(() => {
                                         <div class="mt-1 truncate text-xs text-30">{post.sourceKey}</div>
                                     </div>
                                     <div class="flex shrink-0 flex-wrap gap-2">
-                                        <button type="button" class="btn-regular h-9 rounded-lg px-3 text-sm font-bold" on:click={() => previewContentPost(post)}>
-                                            Preview
-                                        </button>
+									<button type="button" class="btn-regular h-9 rounded-lg px-3 text-sm font-bold" on:click={() => previewContentPost(post)}>
+										预览
+									</button>
                                         {#if post.status !== "published"}
-                                            <button type="button" class="btn-regular h-9 rounded-lg px-3 text-sm font-bold" on:click={() => publishContentPost(post)}>
-                                                Publish
-                                            </button>
-                                        {:else}
-                                            <button type="button" class="btn-regular h-9 rounded-lg px-3 text-sm font-bold" on:click={() => unpublishContentPost(post)}>
-                                                Unpublish
-                                            </button>
-                                        {/if}
+										<button type="button" class="btn-regular h-9 rounded-lg px-3 text-sm font-bold" on:click={() => publishContentPost(post)}>
+											发布
+										</button>
+									{:else}
+										<button type="button" class="btn-regular h-9 rounded-lg px-3 text-sm font-bold" on:click={() => unpublishContentPost(post)}>
+											取消发布
+										</button>
+									{/if}
                                         {#if post.deployStatus === "failed" || post.deployStatus === "pending"}
-                                            <button type="button" class="btn-plain h-9 rounded-lg px-3 text-sm font-bold" on:click={() => retryContentDeploy(post)}>
-                                                Retry Deploy
-                                            </button>
-                                        {/if}
-                                        <button type="button" class="btn-plain h-9 rounded-lg px-3 text-sm font-bold" on:click={() => deleteContentPost(post)}>
-                                            Delete
-                                        </button>
+										<button type="button" class="btn-plain h-9 rounded-lg px-3 text-sm font-bold" on:click={() => retryContentDeploy(post)}>
+											重试部署
+										</button>
+									{/if}
+									<button type="button" class="btn-plain h-9 rounded-lg px-3 text-sm font-bold" on:click={() => deleteContentPost(post)}>
+										删除
+									</button>
                                     </div>
                                 </div>
                             </div>
@@ -959,13 +957,13 @@ onDestroy(() => {
             {#if contentPreviewSlug}
                 <section class="mt-4 rounded-xl bg-[var(--btn-plain-bg-hover)] p-4">
                     <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                            <div class="font-bold text-75">Markdown Preview</div>
-                            <div class="mt-1 text-sm text-50">{contentPreviewSlug}</div>
-                        </div>
-                        <button type="button" class="btn-plain h-9 rounded-lg px-3 text-sm font-bold" on:click={() => { contentPreviewSlug = ""; contentPreviewMarkdown = ""; }}>
-                            Close
-                        </button>
+						<div>
+							<div class="font-bold text-75">Markdown 预览</div>
+							<div class="mt-1 text-sm text-50">{contentPreviewSlug}</div>
+						</div>
+						<button type="button" class="btn-plain h-9 rounded-lg px-3 text-sm font-bold" on:click={() => { contentPreviewSlug = ""; contentPreviewMarkdown = ""; }}>
+							关闭
+						</button>
                     </div>
                     <pre class="max-h-[32rem] overflow-auto rounded-xl bg-[var(--card-bg)] p-4 text-sm text-75 whitespace-pre-wrap">{contentPreviewMarkdown}</pre>
                 </section>

@@ -7,21 +7,23 @@
 
 ## 1. 项目概述
 
-这是一个基于 **Astro 6** + **Svelte 5** + **Tailwind CSS 3** 的静态博客，部署在 **Cloudflare Workers** 上。
+这是一个基于 **Astro 6** + **Svelte 5** + **Tailwind CSS 3** 的静态博客，当前线上采用 **Vercel 前端 + Cloudflare Workers 后端** 的分离部署。
 原始主题是 Fuwari（saicaca/fuwari），经过大量定制后形成当前版本。
 
 博客地址：https://blog.starshadow.cc/
+后端地址：https://api.starshadow.cc/
 
 ### 核心理念
 
 **静态博客 + 少量运行时能力。**
 
-- **静态部分**（Astro SSG）：文章、页面布局、主题样式、搜索索引、RSS。
-- **动态部分**（Cloudflare Worker）：友链审核、音乐管理、访客统计、评论系统、文件上传。
+- **静态部分**（Astro SSG on Vercel）：文章、页面布局、主题样式、搜索索引、RSS。
+- **动态部分**（Cloudflare Worker on api.starshadow.cc）：友链审核、音乐管理、文章后台、访客统计、评论系统、文件上传。
 
 这样做的好处：
-- 写文章仍然是 Markdown + Git Push，不需要登录后台。
+- 写文章可以继续使用 Markdown + Git Push，也可以通过后台上传文章 ZIP 到 R2。
 - 友链审核、添加音乐等频繁变动的内容不需要重新构建站点。
+- 后台发布/删除文章时可以通过 Vercel Deploy Hook 触发前端重建。
 - 音频和图片存在 R2，不污染 Git 仓库。
 - 访客统计数据实时生效。
 
@@ -45,7 +47,8 @@
 | 字体 | Roboto + JetBrains Mono | 正文 + 等宽代码 |
 | HTML 净化 | sanitize-html | 评论内容安全过滤 |
 ||||
-| 运行时 | Cloudflare Workers | 处理 /api/* 和 /media/* |
+| 前端部署 | Vercel | 托管 Astro 静态站点，rewrites 转发 API/media |
+| 运行时 | Cloudflare Workers | 处理 api.starshadow.cc 上的 /api/* 和 /media/* |
 | 数据库 | Cloudflare D1 | SQLite 兼容，存友链/音乐/评论/统计/配置 |
 | 对象存储 | Cloudflare R2 | 存头像/音乐/封面/评论图片 |
 | 部署工具 | Wrangler 4 | 本地开发和线上部署 |
@@ -179,6 +182,7 @@ corepack pnpm build    # 确保能正常构建
 │   ├── 0003_create_rate_limits.sql
 │   └── 0004_create_comments_and_notifications.sql
 ├── astro.config.mjs            # Astro 配置（集成+Markdown 插件）
+├── vercel.json                 # Vercel 构建配置 + /api /media rewrites
 ├── wrangler.jsonc              # Cloudflare Worker 配置
 ├── vitest.config.ts            # 测试配置
 ├── biome.json                  # Biome 格式化/lint 配置
@@ -228,21 +232,69 @@ corepack pnpm build    # 确保能正常构建
 
 **搜索：** Pagefind 在 `pnpm build` 后索引 `dist/`。开发模式下搜索返回空结果是正常的。
 
-### 5.2 后端（Cloudflare Worker）
+### 5.2 线上部署与路由
+
+当前生产环境不是 Worker 一体化托管前端，而是拆成两个入口：
+
+```text
+blog.starshadow.cc  -> Vercel 前端
+api.starshadow.cc   -> Cloudflare Worker 后端
+```
+
+`vercel.json` 负责 Vercel 构建和同源转发：
+
+```json
+{
+  "buildCommand": "pnpm build",
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://api.starshadow.cc/api/:path*"
+    },
+    {
+      "source": "/media/:path*",
+      "destination": "https://api.starshadow.cc/media/:path*"
+    }
+  ]
+}
+```
+
+这样浏览器仍访问 `https://blog.starshadow.cc/api/*` 和 `https://blog.starshadow.cc/media/*`，但请求会由 Vercel 转发到 Worker 自定义域名，避免跨域问题。
+
+`wrangler.jsonc` 当前 Worker route 是：
+
+```jsonc
+"routes": [
+  {
+    "pattern": "api.starshadow.cc/*",
+    "zone_name": "starshadow.cc"
+  }
+]
+```
+
+`api.starshadow.cc` 必须在 Cloudflare 中绑定到 Worker 自定义域名或匹配 Worker route。只创建 route 但未绑定域名时，线上访问不会按预期命中 Worker。
+
+`blog.starshadow.cc` 的 Cloudflare DNS 状态决定前端线路：
+- DNS only / 灰云：直连 Vercel，最接近纯 Vercel 线路，但国内可访问性取决于 Vercel 入口 IP。
+- Proxied / 橙云：Cloudflare 代理回源 Vercel，可绕开部分 Vercel IP 被墙问题，但不再是纯 Vercel 直连。
+
+### 5.3 后端（Cloudflare Worker）
 
 **入口：** `src/worker/index.ts`
 
 请求路由：
 1. `/api/*` → `handleApi()` 动态 API
 2. `/media/*` → `handleMedia()` R2 媒体文件
-3. 其他路径 → `env.ASSETS.fetch()` 静态站点
+3. 其他路径 → 404（生产前端由 Vercel 提供）
 
 **Worker 绑定：**
 ```
 DB           → D1 数据库
 MEDIA_BUCKET → R2 对象存储
-ASSETS       → 静态站点文件
-ADMIN_TOKEN  → 可选，后台管理口令
+ADMIN_TOKEN  → 后台管理口令
+CONTENT_SYNC_TOKEN       → Vercel 构建同步 R2 文章用 token
+VERCEL_DEPLOY_HOOK_URL   → 后台文章发布/删除后触发 Vercel 重建
+TWIKOO_ADMIN_PASSWORD    → Twikoo 管理员密码
 ```
 
 **关键后端模式：**
@@ -254,7 +306,7 @@ ADMIN_TOKEN  → 可选，后台管理口令
 - 公开写接口（友链申请/评论/统计）：`rejectCrossSiteWrite()` + ALTCHA + D1 限流
 - Twikoo CORS 只对同源请求返回 credential 头
 
-### 5.3 数据库设计
+### 5.4 数据库设计
 
 通过 `GET /api/setup/init-db` + `Authorization: Bearer <token>` 初始化。
 迁移是版本化的（`db_migration_version` 字段追踪），只会应用未执行的迁移。
@@ -288,7 +340,7 @@ ADMIN_TOKEN  → 可选，后台管理口令
 **rate_limits** — 限流（D1 滑动窗口）
 - 按 scope + actor_hash + window_start 三元组计数
 
-### 5.4 API 总览
+### 5.5 API 总览
 
 #### 公开 API
 
@@ -338,6 +390,16 @@ DELETE /api/admin/music/:id                → 删除
 GET    /api/admin/music/objects            → 扫描 R2 中未入库的音频
 POST   /api/admin/music/import             → 批量导入 R2 音频
 
+# 文章内容管理
+GET    /api/admin/content                  → 列出 R2/D1 中的文章
+POST   /api/admin/content                  → 上传文章 ZIP 为草稿
+GET    /api/admin/content/:slug            → 读取文章 Markdown 预览
+POST   /api/admin/content/:slug/publish    → 发布文章并触发 Vercel 部署
+POST   /api/admin/content/:slug/unpublish  → 取消发布并触发 Vercel 部署
+POST   /api/admin/content/:slug/deploy     → 重试指定文章部署
+POST   /api/admin/content/deploy           → 触发 Vercel 部署
+DELETE /api/admin/content/:slug            → 删除文章并触发 Vercel 部署
+
 # 设置
 GET    /api/admin/settings/comments        → 评论开关状态
 POST   /api/admin/settings/comments        → 设置评论开关
@@ -355,6 +417,15 @@ POST /api/setup/init-db    → 同上
 
 需要通过 `Authorization: Bearer <token>` 头或 POST JSON body 传 token。
 URL 参数中的 token 会被拒绝（安全原因）。
+
+#### 内容同步 API（需要 CONTENT_SYNC_TOKEN）
+
+```text
+GET /api/content/manifest      → Vercel 构建时读取文章清单
+GET /api/content/object?key=   → Vercel 构建时下载文章对象
+```
+
+Vercel 构建前会运行 `scripts/sync-posts.mjs`。当 `CONTENT_SYNC_BASE_URL` / `FUWARI_CONTENT_API_BASE_URL` 和 `CONTENT_SYNC_TOKEN` 可用时，会从 Worker 拉取 R2 中的文章到 `src/content/posts/` 再构建；同步失败默认保留本地文章继续构建。需要同步失败直接阻断构建时，设置 `CONTENT_SYNC_STRICT=true`。
 
 ---
 
@@ -575,51 +646,84 @@ pnpm test:watch     # 监听模式
 
 ## 9. 部署
 
+### Vercel 前端配置
+
+Vercel 项目绑定 `blog.starshadow.cc`，构建配置由 `vercel.json` 管理：
+
+```json
+{
+  "buildCommand": "pnpm build",
+  "installCommand": "pnpm install --frozen-lockfile",
+  "outputDirectory": "dist"
+}
+```
+
+Vercel 需要配置：
+
+- 自定义域名：`blog.starshadow.cc`
+- 环境变量：`CONTENT_SYNC_BASE_URL=https://api.starshadow.cc`
+- 环境变量：`CONTENT_SYNC_TOKEN`，必须与 Worker 的 `CONTENT_SYNC_TOKEN` 一致
+- 可选环境变量：`CONTENT_SYNC_STRICT=true`，用于让内容同步失败时直接阻断构建
+
+`blog.starshadow.cc` 在 Cloudflare DNS 中可以使用：
+
+- `CNAME cname.vercel-dns.com` + DNS only：直连 Vercel
+- `CNAME cname.vercel-dns.com` + Proxied：Cloudflare 代理回源 Vercel
+
 ### Cloudflare 资源配置
 
 在 Cloudflare 控制台：
 1. 创建 Worker（通过 GitHub 自动部署或 wrangler deploy）
 2. 创建 D1 数据库（名称随意）
 3. 创建 R2 存储桶（名称随意）
-4. 在 Worker 设置中绑定：
+4. 将 `api.starshadow.cc` 绑定到 Worker 自定义域名或确保 Worker route 生效
+5. 在 Worker 设置中绑定：
    - D1 绑定名：`DB`
    - R2 绑定名：`MEDIA_BUCKET`
-   - 可选：Secret `ADMIN_TOKEN`
+   - Secret `ADMIN_TOKEN`
+   - Secret `TWIKOO_ADMIN_PASSWORD`
+   - Secret `CONTENT_SYNC_TOKEN`
+   - Secret `VERCEL_DEPLOY_HOOK_URL`
 
 ### 初始化数据库
 
 部署完成后，用 `Authorization` 头调用初始化接口：
 
 ```bash
-curl -H "Authorization: Bearer <你的token>" https://你的域名/api/setup/init-db
+curl -H "Authorization: Bearer <你的token>" https://api.starshadow.cc/api/setup/init-db
 ```
 
 如果 Worker 没有设置 `ADMIN_TOKEN`，传入的 token 的 SHA-256 哈希会自动存入 D1，后续后台登录用同一个 token。
 
 ### GitHub 自动部署
 
-Build command:
-```
-corepack enable && corepack pnpm install --frozen-lockfile && corepack pnpm build
-```
+当前有三类 workflow：
 
-Deploy command:
-```
-corepack pnpm exec wrangler deploy
-```
+- `build.yml`：对 push / PR 运行 audit、Biome、Astro check、type-check、test、build。
+- `deploy-worker.yml`：当 Worker、migrations、wrangler 或依赖配置变化时部署 Cloudflare Worker。
+- `biome.yml`：使用 Biome 官方 action 做代码质量检查。
+
+`deploy-worker.yml` 会先尝试执行远端 D1 migrations，再执行 `pnpm worker:deploy`。D1 migration step 设置了 `continue-on-error: true`，避免迁移权限或远端状态问题阻断 Worker 发布。
+
+Vercel 前端部署由 Vercel Git 集成触发，不再使用仓库里的 Vercel deploy hook workflow。
 
 ### 手动部署
 
 ```bash
-pnpm build
 pnpm worker:deploy
+```
+
+前端手动验证构建：
+
+```bash
+pnpm build
 ```
 
 ### wrangler.jsonc 配置要点
 
 - `keep_vars: true` 保留 Dashboard 手动设置的环境变量
 - D1/R2 绑定当前采用 Dashboard 管理资源名和 UUID；新环境部署时必须在 Cloudflare 控制台把 `DB`、`MEDIA_BUCKET` 绑定到实际资源，再执行 D1 migration
-- `run_worker_first: [/api/*, /media/*]` 让 API 和媒体路径优先走 Worker
+- `routes` 当前匹配 `api.starshadow.cc/*`，Worker 只承载后端入口
 
 ---
 
@@ -629,8 +733,9 @@ pnpm worker:deploy
 
 ```bash
 pnpm lint        # Biome CI 检查（不改文件）
+pnpm format:check # Biome 格式检查
+pnpm astro check # Astro 检查
 pnpm type-check  # TypeScript 类型检查
-pnpm check       # Astro 检查（通过不代表能构建）
 pnpm test        # 所有测试
 pnpm build       # 生产构建
 ```
@@ -641,7 +746,7 @@ pnpm build       # 生产构建
 - Biome lint：推荐的规则 + 额外 style 规则
 - 格式化命令：`pnpm format`（会写入可自动修复的格式和 lint 变更）
 - 检查命令：`pnpm lint`（CI 模式，不写文件）
-- Worker 代码不要硬编码中文错误消息——使用 `apiError()` 从 `constants.ts` 获取
+- Worker API 错误消息集中维护在 `src/worker/constants.ts`，通过 `apiError()` 获取；当前面向站点用户默认返回中文。
 
 ### 新增 D1 迁移
 
@@ -662,11 +767,24 @@ pnpm build       # 生产构建
 - Pagefind 开发模式下搜索返回空结果是正常的
 - R2 控制台拖拽上传文件夹可能不完整，需要确认文件数量
 - `astro.config.mjs` 的 `site` 必须是 `https://blog.starshadow.cc/`
+- `api.starshadow.cc` 必须绑定到 Worker 自定义域名或 Worker route，否则 Vercel rewrites 会转发失败
+- 纯 CNAME 到 Vercel 不能保证解决国内访问 Vercel Anycast IP 被墙的问题；DNS only 是纯 Vercel 线路，Proxied/CDN/反代才会改变入口线路
+- `scripts/sync-posts.mjs` 默认非严格同步；需要构建因内容同步失败而失败时设置 `CONTENT_SYNC_STRICT=true`
 - CRITICAL: CLAUDE.md 不能提交到 GitHub
 
 ---
 
 ## 11. 已完成的改进
+
+### 2026-06（前后端分离部署 + 中文化）
+
+- 前端改为 Vercel 托管，后端 Worker 绑定 `api.starshadow.cc/*`。
+- `vercel.json` 恢复前端构建配置，并通过 rewrites 将 `/api/*` 和 `/media/*` 转发到 `https://api.starshadow.cc`。
+- `scripts/sync-posts.mjs` 支持构建前从 Worker 同步 R2 文章；默认同步失败不阻断构建，可通过 `CONTENT_SYNC_STRICT=true` 切换为严格模式。
+- Worker 部署 workflow 在执行远端 D1 migrations 后部署 Worker，migration step 允许失败以避免阻断发布。
+- 删除独立 Vercel deploy hook workflow，前端部署回到 Vercel Git 集成。
+- 后台内容管理页和 Worker API 错误提示改为中文。
+- README 和 PROJECT 文档同步到当前 Vercel + Cloudflare Worker 分离架构。
 
 ### 2026-05 第三轮（质量门禁 + 性能）
 
@@ -720,6 +838,6 @@ pnpm build       # 生产构建
 
 ---
 
-> 文档最后更新：2026-05-31
+> 文档最后更新：2026-06-06
 > 项目仓库：https://github.com/starshadows/fuwari
 > 博客地址：https://blog.starshadow.cc/

@@ -7,7 +7,7 @@
 
 这里是 **星影** 的个人博客项目，用来记录踩过的坑、学到的东西和一些日常内容。
 
-站点基于 Fuwari 主题二次开发，前端使用 Astro + Svelte + Tailwind CSS，后端通过 Cloudflare Worker 提供 API，并使用 D1 / R2 支撑评论、友链、音乐和访问统计等动态功能。
+站点基于 Fuwari 主题二次开发。当前线上采用前后端分离部署：前端静态站点部署到 Vercel，后端 API 和媒体访问由 Cloudflare Worker 提供，并使用 D1 / R2 支撑评论、友链、音乐、文章后台和访问统计等动态功能。
 
 ## ✨ 功能特性
 
@@ -18,7 +18,8 @@
 - 友链系统，支持公开申请、后台审核和 Telegram 通知。
 - 音乐列表，支持从 R2 `music/` 前缀扫描音频并读取 ID3 元数据。
 - 访问统计，支持 PV / UV / 今日 / 昨日 / 月访问量和实时在线人数。
-- Cloudflare Worker 一体化部署：静态资源、API、R2 媒体访问都由同一个 Worker 提供。
+- Vercel + Cloudflare Worker 分离部署：前端走 Vercel，`/api/*` 和 `/media/*` 通过 Vercel rewrites 转发到 Worker 自定义域名。
+- 内容后台支持上传文章 ZIP 到 R2，并通过 Vercel Deploy Hook 触发前端重新部署。
 - 安全加固：Origin/Referer 写保护、公开写接口限流、ALTCHA、D1 prepared statements、R2 key 规范化、安全响应头。
 
 ## 🧱 技术栈
@@ -51,6 +52,7 @@ src/
     db.ts              # D1 migration / 初始化
     media.ts           # R2 媒体访问
 migrations/            # Wrangler D1 migrations
+vercel.json            # Vercel 前端构建与 API/media rewrites
 wrangler.jsonc         # Cloudflare Worker 配置
 ```
 
@@ -92,7 +94,7 @@ Worker 默认运行在：
 http://localhost:8787
 ```
 
-完整本地开发时通常需要同时运行 `pnpm dev` 和 `pnpm worker:dev`。线上部署后，静态资源和 API 会由同一个 Cloudflare Worker 提供。
+完整本地开发时通常需要同时运行 `pnpm dev` 和 `pnpm worker:dev`。线上部署后，前端由 Vercel 提供，API 和媒体路径由 Cloudflare Worker 提供。
 
 ## ✍️ 写文章
 
@@ -143,15 +145,36 @@ draft: false
 | `pnpm new-post <name>` | 创建新文章 |
 | `pnpm d1:migrate:local` | 执行本地 D1 migrations |
 | `pnpm d1:migrate:remote` | 执行远端 D1 migrations |
-| `pnpm worker:deploy` | 构建并部署 Cloudflare Worker |
+| `pnpm worker:deploy` | 部署 Cloudflare Worker |
 
-## ☁️ Cloudflare Worker 部署
+## ☁️ 线上部署架构
 
-这个项目不是纯静态 Astro 部署。构建后的 `dist/` 会作为 Worker Assets 发布，同时 Worker 负责处理：
+当前生产环境拆成两个域名：
+
+```text
+blog.starshadow.cc  -> Vercel 前端
+api.starshadow.cc   -> Cloudflare Worker 后端
+```
+
+Vercel 通过 `vercel.json` 构建 Astro 静态站点，并把同源请求转发到 Worker：
+
+```json
+{
+  "source": "/api/:path*",
+  "destination": "https://api.starshadow.cc/api/:path*"
+}
+```
+
+Worker 通过 `wrangler.jsonc` 绑定到 `api.starshadow.cc/*`，负责处理：
 
 - `/api/*`
 - `/media/*`
-- 静态页面和资源
+
+`blog.starshadow.cc` 是否走纯 Vercel 线路取决于 Cloudflare DNS 记录状态：DNS only 会直连 Vercel，Proxied 会由 Cloudflare 代理回源 Vercel。
+
+## ☁️ Cloudflare Worker 部署
+
+Worker 只负责后端 API 和 R2 媒体访问，不再承载前端静态站点。`api.starshadow.cc` 必须在 Cloudflare 中绑定到 Worker 自定义域名或匹配 Worker route，否则 Vercel rewrites 无法正常访问后端。
 
 ### 1. 创建 Cloudflare 资源
 
@@ -160,11 +183,16 @@ draft: false
 - Cloudflare Worker
 - D1 数据库，binding 名称必须是 `DB`
 - R2 bucket，binding 名称必须是 `MEDIA_BUCKET`
-- Worker Assets，binding 名称是 `ASSETS`，目录是 `./dist`
 
-`wrangler.jsonc` 当前声明了 binding 名称和 migrations 目录：
+`wrangler.jsonc` 当前声明了 Worker 路由、binding 名称和 migrations 目录：
 
 ```jsonc
+"routes": [
+  {
+    "pattern": "api.starshadow.cc/*",
+    "zone_name": "starshadow.cc"
+  }
+],
 "d1_databases": [
   {
     "binding": "DB",
@@ -195,10 +223,19 @@ wrangler secret put ADMIN_TOKEN
 wrangler secret put TWIKOO_ADMIN_PASSWORD
 ```
 
+内容后台和 Vercel 自动重建还需要：
+
+```sh
+wrangler secret put CONTENT_SYNC_TOKEN
+wrangler secret put VERCEL_DEPLOY_HOOK_URL
+```
+
 说明：
 
 - `ADMIN_TOKEN` 用于 `/api/admin/*` 和 `/api/setup/init-db`。
 - `TWIKOO_ADMIN_PASSWORD` 用于 Twikoo 管理员登录。
+- `CONTENT_SYNC_TOKEN` 用于 Vercel 构建时从 Worker 同步 R2 中的文章内容。
+- `VERCEL_DEPLOY_HOOK_URL` 用于后台发布/删除文章后触发 Vercel 重新构建。
 - 生产环境建议像当前部署一样，用 Cloudflare Access 额外保护 `/friends/admin/` 和 `/api/admin/*`。
 - Cloudflare Access 是边缘层保护，`Authorization: Bearer <ADMIN_TOKEN>` 是应用层保护；不要因为开启 Access 就移除 Worker 内置认证。
 - 不要把 secret 写入 Git、`wrangler.jsonc` 或 GitHub Actions 明文环境变量。
@@ -215,7 +252,7 @@ pnpm d1:migrate:remote
 
 ```sh
 curl -H "Authorization: Bearer <ADMIN_TOKEN>" \
-  https://<your-domain>/api/setup/init-db
+  https://api.starshadow.cc/api/setup/init-db
 ```
 
 初始化接口已经限流，并且不接受 token 放在 URL path / query 中。请使用 `Authorization: Bearer ...` 请求头，或在必要时使用 POST JSON body。
@@ -228,17 +265,15 @@ pnpm d1:migrate:local
 
 ### 4. 构建与部署
 
+Worker 部署命令：
+
 ```sh
 pnpm worker:deploy
 ```
 
-该命令会先执行 `pnpm build`，再执行 `wrangler deploy`。
+Vercel 前端部署使用 `vercel.json` 中的 `buildCommand`：`pnpm build`。构建前会执行 `scripts/sync-posts.mjs`，如果 `CONTENT_SYNC_BASE_URL` 和 `CONTENT_SYNC_TOKEN` 可用，会从 Worker 拉取 R2 中的文章；同步失败时默认保留本地文章继续构建。需要让同步失败阻断构建时，设置 `CONTENT_SYNC_STRICT=true`。
 
-GitHub 自动部署可使用类似命令：
-
-```sh
-corepack enable && corepack pnpm install --frozen-lockfile && corepack pnpm build
-```
+GitHub Actions 中 Worker 部署会先尝试执行远端 D1 migrations，再部署 Worker；migration step 允许失败，避免权限或远端状态问题阻断 Worker 发布。
 
 ### 5. 部署后检查
 
@@ -251,7 +286,8 @@ corepack enable && corepack pnpm install --frozen-lockfile && corepack pnpm buil
 - `/api/friends` 是否能返回友链列表。
 - `/api/music/tracks` 是否能返回音乐列表。
 - `/api/stats/summary` 是否能返回访问统计。
-- `/media/*` 是否能访问预期 R2 对象。
+- `https://api.starshadow.cc/media/*` 是否能访问预期 R2 对象。
+- `https://blog.starshadow.cc/api/*` 是否经由 Vercel rewrites 正常转发到 Worker。
 - `/friends/admin/` 和 `/api/admin/*` 是否被 Cloudflare Access 保护。
 - `/api/admin/*` 是否仍必须携带 `Authorization: Bearer <ADMIN_TOKEN>`。
 
@@ -281,7 +317,9 @@ corepack enable && corepack pnpm install --frozen-lockfile && corepack pnpm buil
 
 ```sh
 pnpm lint
+pnpm format:check
 pnpm test
+pnpm astro check
 pnpm type-check
 pnpm build
 git diff --check
