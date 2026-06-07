@@ -790,6 +790,59 @@ describe("Admin content management", () => {
 		} as unknown as D1Database;
 	}
 
+	function contentAdminDb(): D1Database {
+		const contentRow = {
+			id: 1,
+			slug: "published-post",
+			sourceKey: "posts/published-post/index.md",
+			format: "md",
+			title: "Published",
+			description: "",
+			image: "",
+			tagsJson: "[]",
+			category: "",
+			lang: "",
+			published: "2026-01-01",
+			updated: "",
+			status: "published",
+			contentHash: "abc",
+			assetsManifest: "[]",
+			deployStatus: "triggered",
+			deploymentError: "",
+			lastDeployTriggeredAt: "",
+			createdAt: "2026-01-01T00:00:00.000Z",
+			updatedAt: "2026-01-01T00:00:00.000Z",
+		};
+		const stmt = (firstValue: unknown = null) => ({
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(firstValue),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi.fn().mockResolvedValue({ success: true, meta: { changes: 1 } }),
+		});
+		const contentTableStmt = stmt({ name: "content_posts" });
+		const contentRowStmt = stmt(contentRow);
+		const appSettingStmt = stmt({ value: "stable-salt" });
+		const rateCountStmt = stmt({ count: 1 });
+		const genericStmt = stmt();
+		return {
+			prepare: vi.fn((sql: string) => {
+				if (sql.includes("sqlite_master") && sql.includes("content_posts")) {
+					return contentTableStmt;
+				}
+				if (sql.includes("FROM content_posts WHERE slug = ?")) {
+					return contentRowStmt;
+				}
+				if (sql.includes("SELECT value FROM app_settings"))
+					return appSettingStmt;
+				if (sql.includes("SELECT count FROM rate_limits")) return rateCountStmt;
+				return genericStmt;
+			}),
+			batch: vi.fn().mockResolvedValue([]),
+			exec: vi.fn().mockResolvedValue({ count: 0, duration: 0 }),
+			dump: vi.fn().mockResolvedValue([]),
+		} as unknown as D1Database;
+	}
+
 	it("cleans up uploaded R2 objects when the D1 insert fails", async () => {
 		const bucket = mockR2Bucket();
 		const formData = new FormData();
@@ -828,6 +881,56 @@ published: 2026-01-01
 		expect(bucket.put).toHaveBeenCalledTimes(2);
 		expect(bucket.delete).toHaveBeenCalledWith("posts/hello/index.md");
 		expect(bucket.delete).toHaveBeenCalledWith("posts/hello/cover.webp");
+	});
+
+	it("unpublishes content without triggering Vercel until deploy is requested", async () => {
+		const fetchSpy = vi
+			.fn()
+			.mockResolvedValue(new Response(null, { status: 204 }));
+		const originalFetch = globalThis.fetch;
+		vi.stubGlobal("fetch", fetchSpy);
+		try {
+			const env = mockEnv({ DB: contentAdminDb() });
+			const unpublishRes = await worker.default.fetch(
+				new Request(
+					"https://blog.example.com/api/admin/content/published-post/unpublish",
+					{
+						method: "POST",
+						headers: {
+							origin: "https://blog.example.com",
+							"x-fuwari-admin-token": "test-admin-token",
+						},
+					},
+				),
+				env,
+				mockCtx(),
+			);
+			expect(unpublishRes.status).toBe(200);
+			expect(await unpublishRes.json()).toMatchObject({
+				ok: true,
+				deployStatus: "pending",
+			});
+			expect(fetchSpy).not.toHaveBeenCalled();
+
+			const deployRes = await worker.default.fetch(
+				new Request(
+					"https://blog.example.com/api/admin/content/published-post/deploy",
+					{
+						method: "POST",
+						headers: {
+							origin: "https://blog.example.com",
+							"x-fuwari-admin-token": "test-admin-token",
+						},
+					},
+				),
+				env,
+				mockCtx(),
+			);
+			expect(deployRes.status).toBe(200);
+			expect(fetchSpy).toHaveBeenCalledTimes(1);
+		} finally {
+			vi.stubGlobal("fetch", originalFetch);
+		}
 	});
 });
 

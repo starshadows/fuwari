@@ -457,7 +457,7 @@ async function publishContentPost(
 	ctx.waitUntil(
 		auditAdminAction(env, request, "update", "content", slug, "publish"),
 	);
-	return triggerContentDeploy(env, "publish", slug);
+	return json({ ok: true, deployStatus: "pending" });
 }
 
 async function unpublishContentPost(
@@ -480,7 +480,7 @@ async function unpublishContentPost(
 	ctx.waitUntil(
 		auditAdminAction(env, request, "update", "content", slug, "unpublish"),
 	);
-	return triggerContentDeploy(env, "unpublish", slug);
+	return json({ ok: true, deployStatus: "pending" });
 }
 
 async function deleteContentPost(

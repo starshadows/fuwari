@@ -355,7 +355,7 @@ const publishContentPost = async (post: ContentPost) => {
 			},
 		);
 		await loadContentPosts();
-		setMessage(`文章 ${post.slug} 已发布，并已触发 Vercel 部署。`);
+		setMessage(`文章 ${post.slug} 已发布，待触发 Vercel 部署。`);
 	} catch (err) {
 		await loadContentPosts();
 		setError(err instanceof Error ? err.message : "文章发布失败。");
@@ -371,7 +371,7 @@ const unpublishContentPost = async (post: ContentPost) => {
 			},
 		);
 		await loadContentPosts();
-		setMessage(`文章 ${post.slug} 已取消发布，并已触发 Vercel 部署。`);
+		setMessage(`文章 ${post.slug} 已取消发布，待触发 Vercel 部署。`);
 	} catch (err) {
 		await loadContentPosts();
 		setError(err instanceof Error ? err.message : "取消发布失败。");
@@ -956,9 +956,9 @@ onDestroy(() => {
 											取消发布
 										</button>
 									{/if}
-                                        {#if post.deployStatus === "failed" || post.deployStatus === "pending"}
+		{#if post.deployStatus === "failed" || post.deployStatus === "pending"}
 										<button type="button" class="btn-plain h-9 rounded-lg px-3 text-sm font-bold" on:click={() => retryContentDeploy(post)}>
-											重试部署
+											{post.deployStatus === "pending" ? "触发部署" : "重试部署"}
 										</button>
 									{/if}
 									<button type="button" class="btn-plain h-9 rounded-lg px-3 text-sm font-bold" on:click={() => deleteContentPost(post)}>
