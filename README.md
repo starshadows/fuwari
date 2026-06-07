@@ -226,21 +226,14 @@ Worker 只负责后端 API 和 R2 媒体访问，不再承载前端静态站点�
 
 ```sh
 wrangler secret put ADMIN_TOKEN
-wrangler secret put TWIKOO_ADMIN_PASSWORD
-```
-
-内容后台和 Vercel 自动重建还需要：
-
-```sh
 wrangler secret put CONTENT_SYNC_TOKEN
 wrangler secret put VERCEL_DEPLOY_HOOK_URL
 ```
 
 说明：
 
-- `ADMIN_TOKEN` 用于 `/api/admin/*` 和 `/api/setup/init-db`。
-- `TWIKOO_ADMIN_PASSWORD` 用于 Twikoo 管理员登录。
-- `CONTENT_SYNC_TOKEN` 用于 Vercel 构建时从 Worker 同步 R2 中的文章内容。
+- `ADMIN_TOKEN` 用于 `/api/admin/*`、`/api/setup/init-db` 和 Twikoo 管理员登录。
+- `CONTENT_SYNC_TOKEN` 用于 Vercel 构建时从 Worker 同步 R2 文章，也用于 Worker 拉取 Vercel 内部后台 shell。
 - `VERCEL_DEPLOY_HOOK_URL` 用于后台发布/删除文章后触发 Vercel 重新构建。
 - 生产环境建议像当前部署一样，用 Cloudflare Access 额外保护 `/friends/admin/` 和 `/api/admin/*`。
 - Cloudflare Access 是边缘层保护，`Authorization: Bearer <ADMIN_TOKEN>` 是应用层保护；不要因为开启 Access 就移除 Worker 内置认证。
@@ -277,7 +270,7 @@ Worker 部署命令：
 pnpm worker:deploy
 ```
 
-Vercel 前端部署使用 `vercel.json` 中的 `buildCommand`：`pnpm build`。构建前会执行 `scripts/sync-posts.mjs`；只有设置 `CONTENT_SYNC_ENABLED=true` 时才会从 Worker 拉取 R2 中的文章。同步需要 `CONTENT_SYNC_BASE_URL` 或 `FUWARI_CONTENT_API_BASE_URL`，以及 `CONTENT_SYNC_TOKEN`。同步失败时默认保留本地文章继续构建；需要让同步失败阻断构建时，设置 `CONTENT_SYNC_STRICT=true`。
+Vercel 前端部署使用 `vercel.json` 中的 `buildCommand`：`pnpm build`。构建前会执行 `scripts/sync-posts.mjs`；只有设置 `CONTENT_SYNC_ENABLED=true` 时才会从 Worker 拉取 R2 中的文章。同步需要 `CONTENT_SYNC_BASE_URL` 或 `FUWARI_CONTENT_API_BASE_URL`，以及 `CONTENT_SYNC_TOKEN`。Vercel 的 `CONTENT_SYNC_TOKEN` 还用于保护内部后台 shell，必须与 Worker 的 `CONTENT_SYNC_TOKEN` 一致。同步失败时默认保留本地文章继续构建；需要让同步失败阻断构建时，设置 `CONTENT_SYNC_STRICT=true`。
 
 GitHub Actions 中 Worker 部署会先尝试执行远端 D1 migrations，再部署 Worker；migration step 允许失败，避免权限或远端状态问题阻断 Worker 发布。
 
@@ -288,7 +281,7 @@ GitHub Actions 中 Worker 部署会先尝试执行远端 D1 migrations，再部�
 - `/api/comments/config` 是否返回评论配置。
 - `/api/anti-abuse/challenge?context=comments` 是否返回 ALTCHA challenge。
 - 评论区是否可以完成人机验证并提交评论；`blog.starshadow.cc` 前端写入 `api.starshadow.cc` Worker 是允许的可信跨域写入。
-- Twikoo 管理员是否可以用 `TWIKOO_ADMIN_PASSWORD` 登录。
+- Twikoo 管理员是否可以用 `ADMIN_TOKEN` 登录。
 - `/api/friends` 是否能返回友链列表。
 - `/api/music/tracks` 是否能返回音乐列表。
 - `/api/stats/summary` 是否能返回访问统计。
@@ -311,7 +304,7 @@ GitHub Actions 中 Worker 部署会先尝试执行远端 D1 migrations，再部�
 
 部署和维护时请注意：
 
-- 使用高强度 `ADMIN_TOKEN` 和 `TWIKOO_ADMIN_PASSWORD`。
+- 使用高强度 `ADMIN_TOKEN` 和 `CONTENT_SYNC_TOKEN`。
 - 对后台路径保留 Cloudflare Access + Worker Bearer token 双层保护。
 - 定期查看 Cloudflare Worker 日志和 GitHub Actions 结果。
 - 不要在仓库中提交 `.env`、Cloudflare token、R2/D1 secret 或任何私钥。

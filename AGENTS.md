@@ -26,9 +26,9 @@
 - `rejectCrossSiteWrite()` permits same-origin writes plus the production `blog.starshadow.cc` -> `api.starshadow.cc` write path used by comments; keep this pairing in mind when changing comment or CSRF logic.
 - D1 migrations live in `migrations/`; apply with `pnpm d1:migrate:local` or `pnpm d1:migrate:remote` against the `fuwari-data` database name from package scripts. Worker deploy CI applies remote migrations before `pnpm worker:deploy` and fails deployment if migrations fail.
 - Keep D1 migrations in sync in two places: `migrations/*.sql` for Wrangler CLI and the `MIGRATIONS` array in `src/worker/db.ts` for `/api/setup/init-db` runtime migration.
-- Do not commit placeholder Cloudflare resource IDs or secrets. Core secrets include `ADMIN_TOKEN`, `TWIKOO_ADMIN_PASSWORD`, `CONTENT_SYNC_TOKEN`, and `VERCEL_DEPLOY_HOOK_URL`.
+- Do not commit placeholder Cloudflare resource IDs or secrets. Core secrets include `ADMIN_TOKEN`, `CONTENT_SYNC_TOKEN`, and `VERCEL_DEPLOY_HOOK_URL`.
 - Keep admin protection layered: Cloudflare Access may protect `/friends/admin/` and `/api/admin/*`, but Worker bearer/token auth must remain in code.
-- Twikoo admin password is managed through `TWIKOO_ADMIN_PASSWORD`; `SET_PASSWORD` is intentionally a no-op in the adapter/tests.
+- Twikoo admin password is managed through `ADMIN_TOKEN`; `SET_PASSWORD` is intentionally a no-op in the adapter/tests.
 
 ## Style And Tooling
 - Biome is the formatter/linter; it formats with tabs and double quotes, organizes imports, and `pnpm lint:fix` is the write/fix command.

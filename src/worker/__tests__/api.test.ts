@@ -51,7 +51,6 @@ function mockEnv(overrides: Partial<Env> = {}): Env {
 		DB: mockD1Result().db,
 		MEDIA_BUCKET: mockR2Bucket(),
 		ADMIN_TOKEN: "test-admin-token",
-		ADMIN_SHELL_TOKEN: "test-admin-shell-token",
 		CONTENT_SYNC_TOKEN: "test-sync-token",
 		VERCEL_DEPLOY_HOOK_URL: "https://vercel.example.com/deploy",
 		...overrides,
@@ -196,7 +195,7 @@ describe("Route dispatch", () => {
 			);
 			expect(upstreamFetch.mock.calls[0]?.[1]).toMatchObject({
 				headers: expect.objectContaining({
-					"x-fuwari-admin-shell-token": "test-admin-shell-token",
+					"x-fuwari-admin-shell-token": "test-sync-token",
 				}),
 			});
 			const html = await res.text();
@@ -263,11 +262,11 @@ describe("Route dispatch", () => {
 		}
 	});
 
-	it("fails closed when the admin shell token is not configured", async () => {
+	it("fails closed when the content sync token is not configured", async () => {
 		const upstreamFetch = vi.fn();
 		const originalFetch = globalThis.fetch;
 		vi.stubGlobal("fetch", upstreamFetch);
-		const env = mockEnv({ ADMIN_SHELL_TOKEN: undefined });
+		const env = mockEnv({ CONTENT_SYNC_TOKEN: undefined });
 		try {
 			const res = await worker.default.fetch(
 				new Request("https://api.example.com/friends/admin/"),
@@ -2935,7 +2934,7 @@ describe("Twikoo security", () => {
 
 	it("SET_PASSWORD succeeds as no-op (password managed via env var)", async () => {
 		// SET_PASSWORD is accepted (code 0) but does nothing — the actual
-		// admin password is managed via TWIKOO_ADMIN_PASSWORD Cloudflare secret.
+		// admin password is managed via ADMIN_TOKEN Cloudflare secret.
 		const { db } = mockD1Result("{}");
 		const env = mockEnv({ DB: db });
 
@@ -3038,7 +3037,7 @@ describe("Twikoo security", () => {
 		const plaintext = "my-secret";
 		const { md5 } = await import("../utils");
 		const { db } = mockD1Result("{}");
-		const env = mockEnv({ DB: db, TWIKOO_ADMIN_PASSWORD: plaintext });
+		const env = mockEnv({ DB: db, ADMIN_TOKEN: plaintext });
 		const res = await worker.default.fetch(
 			twikooRequest("LOGIN", { password: md5(plaintext) }),
 			env,
@@ -3068,7 +3067,7 @@ describe("Twikoo security", () => {
 		const plaintext = "my-secret";
 		const { md5 } = await import("../utils");
 		const { db } = mockD1Result("{}");
-		const env = mockEnv({ DB: db, TWIKOO_ADMIN_PASSWORD: plaintext });
+		const env = mockEnv({ DB: db, ADMIN_TOKEN: plaintext });
 		const res = await worker.default.fetch(
 			new Request("https://blog.example.com/api/admin/twikoo", {
 				method: "POST",
@@ -3091,14 +3090,14 @@ describe("Twikoo security", () => {
 		const plaintext = "my-secret";
 		const { md5 } = await import("../utils");
 		const { db } = mockD1Result("{}");
-		const env = mockEnv({ DB: db, TWIKOO_ADMIN_PASSWORD: plaintext });
+		const env = mockEnv({ DB: db, ADMIN_TOKEN: plaintext });
 		const res = await worker.default.fetch(
 			new Request("https://blog.example.com/api/admin/twikoo", {
 				method: "POST",
 				headers: {
 					"content-type": "application/json",
 					origin: "https://blog.example.com",
-					"x-fuwari-admin-token": "test-admin-token",
+					"x-fuwari-admin-token": plaintext,
 				},
 				body: JSON.stringify({
 					event: "LOGIN",
@@ -3259,7 +3258,7 @@ describe("Twikoo adapter upload validation", () => {
 		expect(body.message).toContain("urls");
 	});
 
-	it("LOGIN succeeds with correct TWIKOO_ADMIN_PASSWORD", async () => {
+	it("LOGIN succeeds with correct ADMIN_TOKEN-derived password", async () => {
 		// The Twikoo frontend (TkAdmin.vue) pre-hashes the password with
 		// MD5 before sending LOGIN.  The password field in the request is a
 		// 32-char MD5 hex string, NOT the plaintext password.

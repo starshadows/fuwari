@@ -25,7 +25,7 @@ export default function middleware(request) {
 	}
 
 	if (url.pathname.startsWith(ADMIN_SHELL_PREFIX)) {
-		const expectedToken = process.env.ADMIN_SHELL_TOKEN;
+		const expectedToken = process.env.CONTENT_SYNC_TOKEN;
 		const requestToken = request.headers.get("x-fuwari-admin-shell-token");
 
 		if (!expectedToken || requestToken !== expectedToken) {

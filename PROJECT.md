@@ -295,10 +295,9 @@ api.starshadow.cc   -> Cloudflare Worker 后端
 ```
 DB           → D1 数据库
 MEDIA_BUCKET → R2 对象存储
-ADMIN_TOKEN  → 后台管理口令
-CONTENT_SYNC_TOKEN       → Vercel 构建同步 R2 文章用 token
+ADMIN_TOKEN  → 后台管理口令，也是 Twikoo 管理员密码
+CONTENT_SYNC_TOKEN       → Vercel 构建同步 R2 文章和内部后台 shell token
 VERCEL_DEPLOY_HOOK_URL   → 后台文章发布/删除后触发 Vercel 重建
-TWIKOO_ADMIN_PASSWORD    → Twikoo 管理员密码
 ```
 
 **关键后端模式：**
@@ -597,7 +596,7 @@ form-action 'self'; frame-src 'none'; upgrade-insecure-requests
 
 ### 7.2 鉴权
 
-- Admin token 支持两种模式：环境变量 `ADMIN_TOKEN`（Secret 明文比较，优先）或 D1 存储的兼容哈希
+- Admin token 支持两种模式：环境变量 `ADMIN_TOKEN`（Secret 明文比较，优先）或 D1 存储的兼容哈希；Twikoo 管理员登录也使用 `ADMIN_TOKEN`
 - 所有 auth 路径统一先做限流再验证，防止通过时序/429 存在性探测 auth 配置状态
 - Token 不能放在 URL 参数中传递
 
@@ -666,7 +665,7 @@ Vercel 需要配置：
 
 - 自定义域名：`blog.starshadow.cc`
 - 环境变量：`CONTENT_SYNC_BASE_URL=https://api.starshadow.cc`
-- 环境变量：`CONTENT_SYNC_TOKEN`，必须与 Worker 的 `CONTENT_SYNC_TOKEN` 一致
+- 环境变量：`CONTENT_SYNC_TOKEN`，必须与 Worker 的 `CONTENT_SYNC_TOKEN` 一致；同时用于保护 Vercel 内部后台 shell
 - 环境变量：`CONTENT_SYNC_ENABLED=true`，启用构建前从 Worker 同步 R2 文章
 - 可选环境变量：`CONTENT_SYNC_STRICT=true`，用于让内容同步失败时直接阻断构建
 
@@ -686,7 +685,6 @@ Vercel 需要配置：
    - D1 绑定名：`DB`
    - R2 绑定名：`MEDIA_BUCKET`
    - Secret `ADMIN_TOKEN`
-   - Secret `TWIKOO_ADMIN_PASSWORD`
    - Secret `CONTENT_SYNC_TOKEN`
    - Secret `VERCEL_DEPLOY_HOOK_URL`
 

@@ -39,8 +39,8 @@ type TwikooWorkerEnv = {
 	R2_PUBLIC_URL?: string;
 	/** Pre-parsed JSON body from the caller, to avoid re-parsing. */
 	preParsedBody?: Record<string, unknown>;
-	/** SHA-256 hex hash of the Twikoo admin password, pre-computed from
-	 *  the TWIKOO_ADMIN_PASSWORD Cloudflare secret. */
+	/** MD5 hex hash of the Twikoo admin password, pre-computed from
+	 *  the ADMIN_TOKEN Cloudflare secret. */
 	adminPasswordHash?: string;
 	onCommentSubmit?: (event: CommentSubmittedEvent) => void | Promise<void>;
 	/** Called before each LOGIN attempt to enforce rate limiting.
@@ -649,7 +649,7 @@ async function setPassword(
 	_config: TwikooConfig,
 	_accessToken: string,
 ): Promise<JsonRecord> {
-	// Password is managed via TWIKOO_ADMIN_PASSWORD Cloudflare secret.
+	// Password is managed via ADMIN_TOKEN Cloudflare secret.
 	// The Twikoo frontend may call SET_PASSWORD before LOGIN; we accept
 	// it to avoid breaking the UI flow but the actual password is set
 	// in the Cloudflare Dashboard.
@@ -666,7 +666,7 @@ async function login(
 		const error = await env.onLoginAttempt();
 		if (error) return JSON.parse(await error.text()) as JsonRecord;
 	}
-	// Password is sourced from TWIKOO_ADMIN_PASSWORD Cloudflare secret.
+	// Password is sourced from ADMIN_TOKEN Cloudflare secret.
 	if (!env.adminPasswordHash) {
 		return { code: RES_CODE.PASS_NOT_EXIST, message: "未配置管理密码" };
 	}
@@ -678,7 +678,7 @@ async function login(
 	// MD5 hex string, NOT the plaintext password.
 	//
 	// We compare it DIRECTLY against adminPasswordHash which is
-	// md5(TWIKOO_ADMIN_PASSWORD.trim()).  Do NOT hash it again —
+	// md5(ADMIN_TOKEN.trim()).  Do NOT hash it again —
 	// that would produce md5(md5(plaintext)) and never match md5(env_val).
 	if (!timingSafeEqual(password, env.adminPasswordHash)) {
 		return { code: RES_CODE.PASS_NOT_MATCH, message: "密码错误" };

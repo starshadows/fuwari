@@ -145,7 +145,8 @@ async function handleAccessProtectedAdminPage(
 	if (request.method !== "GET" && request.method !== "HEAD") {
 		return json({ error: apiError("METHOD_NOT_ALLOWED") }, 405);
 	}
-	if (!env.ADMIN_SHELL_TOKEN) {
+	const adminShellToken = env.CONTENT_SYNC_TOKEN?.trim();
+	if (!adminShellToken) {
 		return json({ error: apiError("SERVER_ERROR") }, 503);
 	}
 
@@ -154,7 +155,7 @@ async function handleAccessProtectedAdminPage(
 	const upstream = await fetch(upstreamUrl, {
 		headers: {
 			accept: request.headers.get("accept") ?? "text/html",
-			"x-fuwari-admin-shell-token": env.ADMIN_SHELL_TOKEN,
+			"x-fuwari-admin-shell-token": adminShellToken,
 			"user-agent": request.headers.get("user-agent") ?? "fuwari-worker",
 		},
 	});
