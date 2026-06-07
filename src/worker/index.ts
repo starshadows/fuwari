@@ -13,7 +13,12 @@ import { initializeDatabase } from "./db";
 import { getApprovedFriends, submitFriendLink } from "./friends";
 import { handleMedia } from "./media";
 import { getPublicMusicTracks } from "./music";
-import { getStatsSummaryResponse, recordStatsVisit } from "./stats";
+import {
+	getStatsSummaryResponse,
+	recordStatsVisit,
+	statsCorsPreflight,
+	withStatsCors,
+} from "./stats";
 import type { Env } from "./types";
 import {
 	cachedResponseV,
@@ -303,14 +308,26 @@ async function handleApi(
 	}
 
 	// Stats
-	if (pathname === "/api/stats/summary" && request.method === "GET") {
-		return getStatsSummaryResponse(env, requestUrl);
-	}
-	if (pathname === "/api/stats/visit" && request.method === "POST") {
-		return recordStatsVisit(request, env, false, ctx);
-	}
-	if (pathname === "/api/stats/heartbeat" && request.method === "POST") {
-		return recordStatsVisit(request, env, true, ctx);
+	if (pathname.startsWith("/api/stats/")) {
+		if (request.method === "OPTIONS") return statsCorsPreflight(request);
+		if (pathname === "/api/stats/summary" && request.method === "GET") {
+			return withStatsCors(
+				request,
+				await getStatsSummaryResponse(env, requestUrl),
+			);
+		}
+		if (pathname === "/api/stats/visit" && request.method === "POST") {
+			return withStatsCors(
+				request,
+				await recordStatsVisit(request, env, false, ctx),
+			);
+		}
+		if (pathname === "/api/stats/heartbeat" && request.method === "POST") {
+			return withStatsCors(
+				request,
+				await recordStatsVisit(request, env, true, ctx),
+			);
+		}
 	}
 
 	// Build-time content sync

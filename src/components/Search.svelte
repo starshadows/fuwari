@@ -6,15 +6,20 @@ import { url } from "@utils/url-utils.ts";
 import { onMount } from "svelte";
 import type { SearchResult } from "@/global";
 
+type PagefindClient = NonNullable<Window["pagefind"]>;
+
 let keywordDesktop = "";
 let keywordMobile = "";
 let result: SearchResult[] = [];
 let isSearching = false;
 let pagefindLoaded = false;
+let pagefindLoadFailed = false;
+let pagefindLoadPromise: Promise<boolean> | null = null;
 let initialized = false;
 let searchRequestId = 0;
 let panelOpen = false;
 const searchPanelId = "search-panel";
+const pagefindScriptUrl = url("/pagefind/pagefind.js");
 
 const fakeResult: SearchResult[] = [
 	{
@@ -80,6 +85,41 @@ const setPanelVisibility = (show: boolean, isDesktop: boolean): void => {
 	panelOpen = show;
 };
 
+const resolvePagefindClient = (module: unknown): PagefindClient => {
+	const candidate = module as PagefindClient | { default?: PagefindClient };
+	if (typeof (candidate as PagefindClient).search === "function") {
+		return candidate as PagefindClient;
+	}
+	if (typeof candidate.default?.search === "function") {
+		return candidate.default;
+	}
+	throw new Error("Pagefind client is unavailable.");
+};
+
+const loadPagefind = async (): Promise<boolean> => {
+	if (import.meta.env.DEV) return true;
+	if (pagefindLoaded && window.pagefind) return true;
+	if (pagefindLoadFailed) return false;
+
+	pagefindLoadPromise ??= (async () => {
+		try {
+			const module = await import(/* @vite-ignore */ pagefindScriptUrl);
+			const pagefind = resolvePagefindClient(module);
+			await pagefind.options?.({ excerptLength: 20 });
+			window.pagefind = pagefind;
+			pagefindLoaded = true;
+			return true;
+		} catch (error) {
+			console.error("Failed to load Pagefind:", error);
+			pagefindLoadFailed = true;
+			pagefindLoaded = false;
+			return false;
+		}
+	})();
+
+	return pagefindLoadPromise;
+};
+
 const search = async (keyword: string, isDesktop: boolean): Promise<void> => {
 	const requestId = ++searchRequestId;
 	if (!keyword) {
@@ -97,7 +137,8 @@ const search = async (keyword: string, isDesktop: boolean): Promise<void> => {
 	try {
 		let searchResults: SearchResult[] = [];
 
-		if (import.meta.env.PROD && pagefindLoaded && window.pagefind) {
+		if (import.meta.env.PROD && (await loadPagefind()) && window.pagefind) {
+			if (requestId !== searchRequestId) return;
 			const response = await window.pagefind.search(keyword);
 			searchResults = await Promise.all(
 				response.results.map((item) => item.data()),
@@ -131,22 +172,11 @@ onMount(() => {
 			typeof window !== "undefined" &&
 			!!window.pagefind &&
 			typeof window.pagefind.search === "function";
-		console.log("Pagefind status on init:", pagefindLoaded);
 		if (keywordDesktop) search(keywordDesktop, true);
 		if (keywordMobile) search(keywordMobile, false);
 	};
 	const handleKeydown = (event: KeyboardEvent) => {
 		if (event.key === "Escape") panelOpen = false;
-	};
-	const handlePagefindReady = () => {
-		console.log("Pagefind ready event received.");
-		initializeSearch();
-	};
-	const handlePagefindLoadError = () => {
-		console.warn(
-			"Pagefind load error event received. Search functionality will be limited.",
-		);
-		initializeSearch();
 	};
 
 	document.addEventListener("keydown", handleKeydown);
@@ -155,24 +185,11 @@ onMount(() => {
 		console.log(
 			"Pagefind is not available in development mode. Using mock data.",
 		);
-		initializeSearch();
-	} else {
-		document.addEventListener("pagefindready", handlePagefindReady);
-		document.addEventListener("pagefindloaderror", handlePagefindLoadError);
-
-		// Fallback in case events are not caught or pagefind is already loaded by the time this script runs
-		setTimeout(() => {
-			if (!initialized) {
-				console.log("Fallback: Initializing search after timeout.");
-				initializeSearch();
-			}
-		}, 2000); // Adjust timeout as needed
 	}
+	initializeSearch();
 
 	return () => {
 		document.removeEventListener("keydown", handleKeydown);
-		document.removeEventListener("pagefindready", handlePagefindReady);
-		document.removeEventListener("pagefindloaderror", handlePagefindLoadError);
 	};
 });
 

@@ -845,7 +845,7 @@ onDestroy(() => {
                     class={`btn-regular h-10 rounded-xl px-4 font-bold ${activeTab === "content" ? "!bg-[var(--btn-regular-bg-active)]" : ""}`}
                     on:click={openContentTab}
                 >
-                    Articles
+					文章
                 </button>
                 <button
                     class={`btn-regular h-10 rounded-xl px-4 font-bold ${activeTab === "friends" ? "!bg-[var(--btn-regular-bg-active)]" : ""}`}

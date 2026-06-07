@@ -28,6 +28,48 @@ let statsSchemaChecksSinceBootstrap = 0;
 const STATS_SCHEMA_RECHECK_INTERVAL = 1000;
 
 const STATS_RETENTION_DAYS = 2 * 365; // 2 years
+const PUBLIC_STATS_ORIGINS = new Set([
+	"https://blog.starshadow.cc",
+	"http://localhost:4321",
+]);
+
+export function statsCorsPreflight(request: Request): Response {
+	return withStatsCors(
+		request,
+		new Response(null, {
+			status: 204,
+			headers: { "cache-control": "no-store" },
+		}),
+	);
+}
+
+export function withStatsCors(request: Request, response: Response): Response {
+	const origin = request.headers.get("origin");
+	if (!origin || !PUBLIC_STATS_ORIGINS.has(origin)) return response;
+
+	const corsResponse = new Response(response.body, response);
+	corsResponse.headers.set("access-control-allow-origin", origin);
+	corsResponse.headers.set(
+		"access-control-allow-methods",
+		"GET, POST, OPTIONS",
+	);
+	corsResponse.headers.set("access-control-allow-headers", "content-type");
+	corsResponse.headers.set("access-control-max-age", "600");
+	appendVaryHeader(corsResponse.headers, "Origin");
+	return corsResponse;
+}
+
+function appendVaryHeader(headers: Headers, value: string): void {
+	const vary = headers.get("vary");
+	if (!vary) {
+		headers.set("vary", value);
+		return;
+	}
+	const values = vary.split(",").map((item) => item.trim().toLowerCase());
+	if (!values.includes(value.toLowerCase())) {
+		headers.set("vary", `${vary}, ${value}`);
+	}
+}
 
 async function ensureStatsReady(env: Env): Promise<Response | null> {
 	if (!env.DB) {

@@ -1,6 +1,5 @@
 <script lang="ts">
 import Icon from "@iconify/svelte";
-import { onDestroy, onMount } from "svelte";
 
 type StatsSummary = {
 	site: {
@@ -22,15 +21,11 @@ type StatsSummary = {
 };
 
 const VISITOR_ID_KEY = "starshadow-visitor-id";
-const MIN_HEARTBEAT_DELAY_MS = 60 * 1000;
-const MAX_HEARTBEAT_DELAY_MS = 120 * 1000;
+const STATS_API_BASE = import.meta.env.PROD ? "https://api.starshadow.cc" : "";
 
 let stats: StatsSummary | null = null;
-let isLoading = true;
+let isRefreshing = false;
 let error = "";
-let heartbeatTimer: number | undefined;
-let lastTrackedPath = "";
-let lastTrackedAt = 0;
 
 $: statCards = stats
 	? [
@@ -86,11 +81,7 @@ const getVisitorId = () => {
 
 const currentPath = () => window.location.pathname || "/";
 
-const randomHeartbeatDelay = () =>
-	MIN_HEARTBEAT_DELAY_MS +
-	Math.floor(
-		Math.random() * (MAX_HEARTBEAT_DELAY_MS - MIN_HEARTBEAT_DELAY_MS + 1),
-	);
+const statsApiUrl = (path: string) => `${STATS_API_BASE}${path}`;
 
 const statsPayload = (path: string) =>
 	JSON.stringify({
@@ -102,143 +93,36 @@ const applyStatsSummary = (data: StatsSummary, path = currentPath()) => {
 	if (path !== currentPath()) return;
 	stats = data;
 	error = "";
-	isLoading = false;
 };
 
-const sendStatsPost = async (
-	endpoint: "visit" | "heartbeat",
-	path = currentPath(),
-): Promise<StatsSummary | null> => {
-	const url = `/api/stats/${endpoint}`;
+const sendStatsVisit = async (path = currentPath()): Promise<StatsSummary> => {
+	const url = statsApiUrl("/api/stats/visit");
 	const body = statsPayload(path);
-
-	try {
-		const response = await fetch(url, {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body,
-			keepalive: true,
-			cache: "no-store",
-		});
-		const data = await response.json();
-		if (!response.ok) throw new Error(data.error ?? "统计加载失败。");
-		return data;
-	} catch {
-		try {
-			if (navigator.sendBeacon) {
-				const blob = new Blob([body], { type: "application/json" });
-				navigator.sendBeacon(url, blob);
-			}
-		} catch {
-			// Ignore write failures; stats must never block navigation or rendering.
-		}
-	}
-	return null;
-};
-
-const loadStatsSummary = async (path = currentPath()) => {
-	const response = await fetch(
-		`/api/stats/summary?path=${encodeURIComponent(path)}&_=${Date.now()}`,
-		{ cache: "no-store" },
-	);
+	const response = await fetch(url, {
+		method: "POST",
+		headers: { "content-type": "text/plain" },
+		body,
+		cache: "no-store",
+		credentials: "omit",
+	});
 	const data = await response.json();
 	if (!response.ok) throw new Error(data.error ?? "统计加载失败。");
-	if (path !== currentPath()) return;
+	return data;
+};
 
-	stats = data;
+const updateStats = async () => {
+	if (isRefreshing) return;
+	isRefreshing = true;
 	error = "";
-	isLoading = false;
-};
-
-const recordVisit = () => {
 	const path = currentPath();
-	const now = Date.now();
-	if (path === lastTrackedPath && now - lastTrackedAt < 1500) return;
-
-	lastTrackedPath = path;
-	lastTrackedAt = now;
-	void sendStatsPost("visit", path)
-		.then((summary) => {
-			if (summary) {
-				applyStatsSummary(summary, path);
-				return;
-			}
-			return loadStatsSummary(path);
-		})
-		.catch((err) => {
-			error = err instanceof Error ? err.message : "统计加载失败。";
-			isLoading = false;
-		});
-};
-
-const clearHeartbeat = () => {
-	if (heartbeatTimer) window.clearTimeout(heartbeatTimer);
-	heartbeatTimer = undefined;
-};
-
-const scheduleHeartbeat = () => {
-	clearHeartbeat();
-	if (document.hidden) return;
-
-	heartbeatTimer = window.setTimeout(() => {
-		if (document.hidden) return;
-		sendHeartbeat();
-		scheduleHeartbeat();
-	}, randomHeartbeatDelay());
-};
-
-const sendHeartbeat = () => {
-	const path = currentPath();
-	void sendStatsPost("heartbeat", path)
-		.then((summary) => {
-			if (summary) {
-				applyStatsSummary(summary, path);
-				return;
-			}
-			return loadStatsSummary(path);
-		})
-		.catch(() => {
-			// Keep the last visible stats; the next page view or heartbeat can recover.
-		});
-};
-
-const handleVisibilityChange = () => {
-	if (document.hidden) {
-		clearHeartbeat();
-		return;
+	try {
+		applyStatsSummary(await sendStatsVisit(path), path);
+	} catch (err) {
+		error = err instanceof Error ? err.message : "统计加载失败。";
+	} finally {
+		isRefreshing = false;
 	}
-
-	scheduleHeartbeat();
 };
-
-const setupSwupTracking = () => {
-	const swup = (
-		window as unknown as {
-			swup?: { hooks?: { on?: (event: string, handler: () => void) => void } };
-		}
-	).swup;
-	swup?.hooks?.on?.("page:view", () => {
-		recordVisit();
-	});
-};
-
-onMount(() => {
-	window.setTimeout(recordVisit, 0);
-	scheduleHeartbeat();
-	document.addEventListener("visibilitychange", handleVisibilityChange);
-
-	if ((window as unknown as { swup?: unknown }).swup) {
-		setupSwupTracking();
-	} else {
-		document.addEventListener("swup:enable", setupSwupTracking, { once: true });
-	}
-});
-
-onDestroy(() => {
-	if (typeof window === "undefined" || typeof document === "undefined") return;
-	clearHeartbeat();
-	document.removeEventListener("visibilitychange", handleVisibilityChange);
-});
 </script>
 
 <div class="visitor-card card-base p-4">
@@ -246,15 +130,20 @@ onDestroy(() => {
 		<div class="relative pl-4 text-lg font-bold text-90 before:absolute before:left-0 before:top-[5.5px] before:h-4 before:w-1 before:rounded-md before:bg-[var(--primary)]">
 			访客信息
 		</div>
-		<div class="flex items-center gap-1 text-xs font-bold text-30">
-			<Icon icon="material-symbols:sync-rounded" class="text-base text-[var(--primary)]" />
-			<span>已更新</span>
-		</div>
+		<button
+			type="button"
+			class="btn-plain flex h-8 items-center gap-1 rounded-lg px-2 text-xs font-bold text-[var(--primary)] active:scale-95 disabled:pointer-events-none disabled:opacity-60"
+			disabled={isRefreshing}
+			on:click={updateStats}
+		>
+			<Icon icon="material-symbols:sync-rounded" class="text-base" />
+			<span>{isRefreshing ? "更新中" : "更新"}</span>
+		</button>
 	</div>
 
-	{#if isLoading}
+	{#if isRefreshing && !stats}
 		<div class="rounded-xl bg-[var(--btn-plain-bg-hover)] px-3 py-4 text-center text-sm text-50">
-			加载中...
+			更新中...
 		</div>
 	{:else if error}
 		<div class="rounded-xl bg-[var(--btn-plain-bg-hover)] px-3 py-4 text-center text-sm text-50">
@@ -271,6 +160,10 @@ onDestroy(() => {
 					<div class="stat-value">{formatNumber(card.value)}</div>
 				</div>
 			{/each}
+		</div>
+	{:else}
+		<div class="rounded-xl bg-[var(--btn-plain-bg-hover)] px-3 py-4 text-center text-sm text-50">
+			暂无数据
 		</div>
 	{/if}
 </div>
