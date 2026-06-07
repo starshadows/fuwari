@@ -1,6 +1,6 @@
 # 星影的博客
 
-![Node.js 24.16.0](https://img.shields.io/badge/node.js-24.16.0-brightgreen)
+![Node.js 24.x](https://img.shields.io/badge/node.js-24.x-brightgreen)
 ![pnpm 9.14.4](https://img.shields.io/badge/pnpm-9.14.4-blue)
 ![Astro 6](https://img.shields.io/badge/Astro-6-orange)
 ![Cloudflare Worker](https://img.shields.io/badge/Cloudflare-Worker-f38020)
@@ -25,7 +25,7 @@
 ## 🧱 技术栈
 
 - **Frontend**: Astro 6, Svelte 5, Tailwind CSS, Pagefind
-- **Runtime**: Node.js 24.16.0
+- **Runtime**: Node.js 24.x
 - **Worker API**: Cloudflare Workers, TypeScript
 - **Database**: Cloudflare D1
 - **Object Storage**: Cloudflare R2
@@ -61,10 +61,10 @@ wrangler.jsonc         # Cloudflare Worker 配置
 
 环境要求：
 
-- Node.js `24.16.0`
+- Node.js `24.13.1`
 - pnpm `9.14.4`
 
-Node 版本由 `.node-version`、`.nvmrc`、`package.json#engines` 和 CI `NODE_VERSION` 共同固定；`.npmrc` 启用 `engine-strict`，请先切到 Node `24.16.0` 再安装依赖。
+本地和 CI 由 `.node-version`、`.nvmrc` 和 CI `NODE_VERSION` 固定到 Node `24.13.1`；`package.json#engines.node` 使用 Vercel 兼容的 `24.x`，`.npmrc` 启用 `engine-strict`，请先切到 Node 24 再安装依赖。
 
 安装依赖：
 

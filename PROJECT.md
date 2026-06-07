@@ -57,7 +57,7 @@
 | 语言 | TypeScript 6 | 全栈类型检查 |
 | 代码检查 | Biome 2.4 | 格式化和 lint，tab 缩进 |
 | 测试 | Vitest 4 | Worker-focused 测试，当前 178 个用例 |
-| Node | 24.16.0 | `.node-version`、`.nvmrc`、`package.json#engines` 和 CI 对齐；`.npmrc` 启用 `engine-strict` |
+| Node | 24.x | `.node-version`、`.nvmrc` 和 CI 固定 `24.13.1`；`package.json#engines.node` 用 Vercel 兼容的 `24.x`；`.npmrc` 启用 `engine-strict` |
 
 ---
 

@@ -1,7 +1,7 @@
 # AGENTS.md
 
 ## Runtime And Package Manager
-- Use Node `24.16.0` (`.node-version`, `.nvmrc`, `package.json#engines`, and CI) and pnpm `9.14.4` (`packageManager` pins pnpm); `.npmrc` enables `engine-strict`, and CI installs with `pnpm install --frozen-lockfile`.
+- Use Node `24.13.1` locally and in CI (`.node-version`, `.nvmrc`, and CI); `package.json#engines.node` is `24.x` for Vercel compatibility. Use pnpm `9.14.4` (`packageManager` pins pnpm); `.npmrc` enables `engine-strict`, and CI installs with `pnpm install --frozen-lockfile`.
 - Production is split: Vercel serves the Astro `dist/` frontend, while Cloudflare Worker `src/worker/index.ts` serves `/api/*`, `/media/*`, and the Access-protected `/friends/admin/` shell.
 
 ## Commands
