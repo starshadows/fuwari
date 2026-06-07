@@ -23,7 +23,7 @@
 这样做的好处：
 - 写文章可以继续使用 Markdown + Git Push，也可以通过后台上传文章 ZIP 到 R2。
 - 友链审核、添加音乐等频繁变动的内容不需要重新构建站点。
-- 后台内容变更后可以手动触发 Vercel Deploy Hook 重建前端，并通过 Vercel Webhook 回写部署状态。
+- 后台内容变更后可以手动触发 Vercel Deploy Hook 重建前端。
 - 音频和图片存在 R2，不污染 Git 仓库。
 - 访客统计数据实时生效。
 
@@ -56,7 +56,7 @@
 | 包管理器 | pnpm 9.14.4 | `packageManager` 和 CI 显式锁定 |
 | 语言 | TypeScript 6 | 全栈类型检查 |
 | 代码检查 | Biome 2.4 | 格式化和 lint，tab 缩进 |
-| 测试 | Vitest 4 | Worker-focused 测试，当前 182 个用例 |
+| 测试 | Vitest 4 | Worker-focused 测试，当前 179 个用例 |
 | Node | 24.x | `.node-version`、`.nvmrc` 和 CI 固定 `24.13.1`；`package.json#engines.node` 用 Vercel 兼容的 `24.x`；`.npmrc` 启用 `engine-strict` |
 
 ---
@@ -299,7 +299,6 @@ MEDIA_BUCKET → R2 对象存储
 ADMIN_TOKEN  → 后台管理口令，也是 Twikoo 管理员密码
 CONTENT_SYNC_TOKEN       → Vercel 构建同步 R2 文章和内部后台 shell token
 VERCEL_DEPLOY_HOOK_URL   → 后台手动触发 Vercel 重建
-VERCEL_WEBHOOK_SECRET    → 可选，用于校验 Vercel 部署状态 webhook 签名
 ```
 
 **关键后端模式：**
@@ -426,12 +425,11 @@ URL 参数中的 token 会被拒绝（安全原因）。
 #### 内容同步 API（需要 CONTENT_SYNC_TOKEN）
 
 ```text
-GET  /api/content/manifest          → Vercel 构建时读取文章清单
-GET  /api/content/object?key=       → Vercel 构建时下载文章对象
-POST /api/content/deploy-webhook    → Vercel 部署事件回写部署状态
+GET /api/content/manifest      → Vercel 构建时读取文章清单
+GET /api/content/object?key=   → Vercel 构建时下载文章对象
 ```
 
-Vercel 构建前会运行 `scripts/sync-posts.mjs`。脚本优先从 Worker/R2 拉取文章到 `src/content/posts/`；同步需要 `CONTENT_SYNC_BASE_URL` 或 `FUWARI_CONTENT_API_BASE_URL`，以及 `CONTENT_SYNC_TOKEN`。R2 文章清单为空、同步配置缺失或同步失败时，默认写出空的 `src/content/posts/.gitkeep` 并构建空文章列表。需要同步失败直接阻断构建时，设置 `CONTENT_SYNC_STRICT=true`。仅本地调试需要保留本地草稿时，可以设置 `CONTENT_SYNC_ENABLED=false` 跳过同步。部署状态回写需要在 Vercel Webhooks 中把部署事件发到 `https://api.starshadow.cc/api/content/deploy-webhook?token=<CONTENT_SYNC_TOKEN>`，或配置 `VERCEL_WEBHOOK_SECRET` 后使用 `x-vercel-signature` 校验。
+Vercel 构建前会运行 `scripts/sync-posts.mjs`。脚本优先从 Worker/R2 拉取文章到 `src/content/posts/`；同步需要 `CONTENT_SYNC_BASE_URL` 或 `FUWARI_CONTENT_API_BASE_URL`，以及 `CONTENT_SYNC_TOKEN`。R2 文章清单为空、同步配置缺失或同步失败时，默认写出空的 `src/content/posts/.gitkeep` 并构建空文章列表。需要同步失败直接阻断构建时，设置 `CONTENT_SYNC_STRICT=true`。仅本地调试需要保留本地草稿时，可以设置 `CONTENT_SYNC_ENABLED=false` 跳过同步。
 
 ---
 
@@ -690,7 +688,6 @@ Vercel 需要配置：
    - Secret `ADMIN_TOKEN`
    - Secret `CONTENT_SYNC_TOKEN`
    - Secret `VERCEL_DEPLOY_HOOK_URL`
-   - 可选 Secret `VERCEL_WEBHOOK_SECRET`
 
 ### 初始化数据库
 

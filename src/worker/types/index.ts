@@ -6,5 +6,4 @@ export type Env = {
 	ADMIN_TOKEN?: string;
 	CONTENT_SYNC_TOKEN?: string;
 	VERCEL_DEPLOY_HOOK_URL?: string;
-	VERCEL_WEBHOOK_SECRET?: string;
 };

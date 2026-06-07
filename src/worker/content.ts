@@ -3,7 +3,6 @@ import { parse as parseYaml } from "yaml";
 import {
 	apiError,
 	CONTENT_POSTS_PREFIX,
-	MAX_JSON_BODY_BYTES,
 	MAX_POST_EXPANDED_BYTES,
 	MAX_POST_FILE_COUNT,
 	MAX_POST_ZIP_UPLOAD_BYTES,
@@ -15,7 +14,6 @@ import type {
 	ContentFileInfo,
 	ContentPostDto,
 	ContentPostStatus,
-	JsonRecord,
 } from "./types/aliases";
 import {
 	auditAdminAction,
@@ -87,16 +85,6 @@ type ContentPostRow = {
 	updated_at?: string;
 };
 
-type VercelDeployWebhookAction = "triggered" | "succeeded" | "failed";
-
-type VercelDeployWebhookEvent = {
-	eventType: string;
-	action: VercelDeployWebhookAction | "ignored";
-	target: string;
-	eventAt: string;
-	message: string;
-};
-
 const ALLOWED_ASSET_EXTENSIONS = new Set([
 	"avif",
 	"gif",
@@ -107,8 +95,6 @@ const ALLOWED_ASSET_EXTENSIONS = new Set([
 ]);
 
 const decoder = new TextDecoder();
-const encoder = new TextEncoder();
-
 // ================================================================
 // Public build-sync API
 // ================================================================
@@ -118,13 +104,6 @@ export async function handleContentSyncApi(
 	env: Env,
 	requestUrl: URL,
 ): Promise<Response> {
-	if (requestUrl.pathname === "/api/content/deploy-webhook") {
-		if (request.method !== "POST") {
-			return json({ error: apiError("METHOD_NOT_ALLOWED") }, 405);
-		}
-		return handleContentDeployWebhook(request, env, requestUrl);
-	}
-
 	const auth = await requireContentSync(request, env);
 	if (auth) return auth;
 
@@ -148,7 +127,6 @@ export async function handleContentSyncApi(
 async function requireContentSync(
 	request: Request,
 	env: Env,
-	requestUrl?: URL,
 ): Promise<Response | null> {
 	const rateLimit = await enforceRateLimit(
 		request,
@@ -161,7 +139,9 @@ async function requireContentSync(
 	if (!configured)
 		return json({ error: apiError("CONTENT_SYNC_TOKEN_MISSING") }, 503);
 
-	const token = readContentSyncToken(request, requestUrl);
+	const token =
+		request.headers.get("x-content-sync-token")?.trim() ||
+		readBearerToken(request);
 	if (!token) {
 		return contentSyncAuthFailure(request, env, "CONTENT_SYNC_TOKEN_MISSING");
 	}
@@ -169,14 +149,6 @@ async function requireContentSync(
 		return contentSyncAuthFailure(request, env, "CONTENT_SYNC_TOKEN_INVALID");
 	}
 	return null;
-}
-
-function readContentSyncToken(request: Request, requestUrl?: URL): string {
-	return (
-		request.headers.get("x-content-sync-token")?.trim() ||
-		readBearerToken(request) ||
-		readString(requestUrl?.searchParams.get("token"), 4096)
-	);
 }
 
 async function contentSyncAuthFailure(
@@ -191,228 +163,6 @@ async function contentSyncAuthFailure(
 	);
 	if (rateLimit) return rateLimit;
 	return json({ error: apiError(errorKey) }, 401);
-}
-
-async function handleContentDeployWebhook(
-	request: Request,
-	env: Env,
-	requestUrl: URL,
-): Promise<Response> {
-	const bodyError = rejectOversizedBody(request, MAX_JSON_BODY_BYTES);
-	if (bodyError) return bodyError;
-
-	const rawBody = await request.text();
-	if (encoder.encode(rawBody).byteLength > MAX_JSON_BODY_BYTES) {
-		return json({ error: apiError("BODY_TOO_LARGE") }, 413);
-	}
-
-	const auth = await authenticateContentDeployWebhook(
-		request,
-		env,
-		requestUrl,
-		rawBody,
-	);
-	if (auth) return auth;
-
-	const payload = parseJsonRecord(rawBody);
-	if (payload instanceof Response) return payload;
-
-	const event = parseVercelDeployWebhookEvent(payload);
-	if (event.action === "ignored") {
-		return json({ ok: true, ignored: true, eventType: event.eventType });
-	}
-	if (event.target && event.target !== "production") {
-		return json({
-			ok: true,
-			ignored: true,
-			eventType: event.eventType,
-			target: event.target,
-		});
-	}
-
-	const schema = await ensureContentPostsSchema(env);
-	if (schema) return schema;
-
-	const updated = await applyContentDeployWebhookEvent(env, event);
-	return json({
-		ok: true,
-		eventType: event.eventType,
-		deployStatus: event.action,
-		updated,
-	});
-}
-
-async function authenticateContentDeployWebhook(
-	request: Request,
-	env: Env,
-	requestUrl: URL,
-	rawBody: string,
-): Promise<Response | null> {
-	const signatureSecret = env.VERCEL_WEBHOOK_SECRET?.trim();
-	const signature = request.headers.get("x-vercel-signature")?.trim() ?? "";
-	if (signatureSecret && signature) {
-		if (
-			await verifyVercelWebhookSignature(rawBody, signatureSecret, signature)
-		) {
-			return null;
-		}
-		return contentSyncAuthFailure(request, env, "CONTENT_SYNC_TOKEN_INVALID");
-	}
-	return requireContentSync(request, env, requestUrl);
-}
-
-async function verifyVercelWebhookSignature(
-	rawBody: string,
-	secret: string,
-	signature: string,
-): Promise<boolean> {
-	const key = await crypto.subtle.importKey(
-		"raw",
-		encoder.encode(secret),
-		{ name: "HMAC", hash: "SHA-1" },
-		false,
-		["sign"],
-	);
-	const digest = await crypto.subtle.sign("HMAC", key, encoder.encode(rawBody));
-	const expected = Array.from(new Uint8Array(digest))
-		.map((byte) => byte.toString(16).padStart(2, "0"))
-		.join("");
-	return timingSafeEqual(signature.toLowerCase(), expected);
-}
-
-function parseJsonRecord(rawBody: string): JsonRecord | Response {
-	try {
-		const value = JSON.parse(rawBody);
-		if (!value || typeof value !== "object" || Array.isArray(value)) {
-			return json({ error: apiError("INVALID_JSON") }, 400);
-		}
-		return value as JsonRecord;
-	} catch {
-		return json({ error: apiError("INVALID_JSON") }, 400);
-	}
-}
-
-function parseVercelDeployWebhookEvent(
-	body: JsonRecord,
-): VercelDeployWebhookEvent {
-	const eventType = readString(body.type, 80);
-	const payload = isJsonRecord(body.payload) ? body.payload : {};
-	const deployment = isJsonRecord(payload.deployment) ? payload.deployment : {};
-	const target =
-		readString(payload.target, 40) || readString(deployment.target, 40);
-	const eventAt = readVercelEventTime(body.createdAt);
-
-	if (eventType === "deployment.created") {
-		return {
-			eventType,
-			action: "triggered",
-			target,
-			eventAt,
-			message: "",
-		};
-	}
-	if (
-		eventType === "deployment.ready" ||
-		eventType === "deployment.succeeded" ||
-		eventType === "deployment.promoted"
-	) {
-		return {
-			eventType,
-			action: "succeeded",
-			target,
-			eventAt,
-			message: "",
-		};
-	}
-	if (eventType === "deployment.error" || eventType === "deployment.canceled") {
-		return {
-			eventType,
-			action: "failed",
-			target,
-			eventAt,
-			message: readDeployFailureMessage(body, payload, deployment, eventType),
-		};
-	}
-	return { eventType, action: "ignored", target, eventAt, message: "" };
-}
-
-function isJsonRecord(value: unknown): value is JsonRecord {
-	return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function readVercelEventTime(value: unknown): string {
-	if (typeof value === "number" && Number.isFinite(value)) {
-		const date = new Date(value);
-		if (!Number.isNaN(date.getTime())) return date.toISOString();
-	}
-	if (typeof value === "string") {
-		const date = new Date(value);
-		if (!Number.isNaN(date.getTime())) return date.toISOString();
-	}
-	return new Date().toISOString();
-}
-
-function readDeployFailureMessage(
-	body: JsonRecord,
-	payload: JsonRecord,
-	deployment: JsonRecord,
-	eventType: string,
-): string {
-	const links = isJsonRecord(payload.links) ? payload.links : {};
-	const detail =
-		readString(body.error, 500) ||
-		readString(body.message, 500) ||
-		readString(payload.error, 500) ||
-		readString(payload.errorMessage, 500) ||
-		readString(deployment.error, 500) ||
-		readString(deployment.errorMessage, 500) ||
-		`Vercel ${eventType}`;
-	const deploymentLink =
-		readString(links.deployment, 500) || readString(deployment.url, 500);
-	return deploymentLink ? `${detail} (${deploymentLink})` : detail;
-}
-
-async function applyContentDeployWebhookEvent(
-	env: Env,
-	event: VercelDeployWebhookEvent,
-): Promise<number> {
-	if (event.action === "triggered") {
-		return runContentDeployStatusUpdate(
-			env,
-			`UPDATE content_posts
-       SET deploy_status = 'triggered',
-           deployment_error = '',
-           last_deploy_triggered_at = ?
-       WHERE deploy_status IN ('pending', 'failed')`,
-			[event.eventAt],
-		);
-	}
-	if (event.action === "succeeded") {
-		return runContentDeployStatusUpdate(
-			env,
-			`UPDATE content_posts
-       SET deploy_status = 'succeeded', deployment_error = ''
-       WHERE deploy_status IN ('pending', 'triggered', 'failed')`,
-		);
-	}
-	return runContentDeployStatusUpdate(
-		env,
-		`UPDATE content_posts
-     SET deploy_status = 'failed', deployment_error = ?
-     WHERE deploy_status IN ('pending', 'triggered')`,
-		[event.message],
-	);
-}
-
-async function runContentDeployStatusUpdate(
-	env: Env,
-	sql: string,
-	bindings: unknown[] = [],
-): Promise<number> {
-	const result = await env.DB.prepare(sql)
-		.bind(...bindings)
-		.run();
-	return Number(result.meta.changes ?? 0);
 }
 
 async function getContentManifest(env: Env): Promise<Response> {

@@ -624,41 +624,6 @@ describe("Content sync API", () => {
 		} as unknown as D1Database;
 	}
 
-	function contentDeployWebhookDb() {
-		const preparedSql: string[] = [];
-		const boundValues: unknown[][] = [];
-		const stmt = (firstValue: unknown = null, changes = 0) => ({
-			bind: vi.fn((...values: unknown[]) => {
-				boundValues.push(values);
-				return stmt(firstValue, changes);
-			}),
-			first: vi.fn().mockResolvedValue(firstValue),
-			all: vi.fn().mockResolvedValue({ results: [] }),
-			run: vi.fn().mockResolvedValue({ success: true, meta: { changes } }),
-		});
-		const tableStmt = stmt({ name: "content_posts" });
-		const saltStmt = stmt({ value: "stable-salt" });
-		const countStmt = stmt({ count: 1 });
-		const writeStmt = stmt(null, 3);
-		const genericStmt = stmt();
-		const db = {
-			prepare: vi.fn((sql: string) => {
-				preparedSql.push(sql);
-				if (sql.includes("sqlite_master") && sql.includes("content_posts")) {
-					return tableStmt;
-				}
-				if (sql.includes("SELECT value FROM app_settings")) return saltStmt;
-				if (sql.includes("SELECT count FROM rate_limits")) return countStmt;
-				if (sql.includes("UPDATE content_posts")) return writeStmt;
-				return genericStmt;
-			}),
-			batch: vi.fn().mockResolvedValue([]),
-			exec: vi.fn().mockResolvedValue({ count: 0, duration: 0 }),
-			dump: vi.fn().mockResolvedValue([]),
-		} as unknown as D1Database;
-		return { db, preparedSql, boundValues };
-	}
-
 	it("rejects manifest requests without the content sync token", async () => {
 		const res = await worker.default.fetch(
 			new Request("https://blog.example.com/api/content/manifest"),
@@ -666,24 +631,6 @@ describe("Content sync API", () => {
 			mockCtx(),
 		);
 		expect(res.status).toBe(401);
-	});
-
-	it("rejects Vercel deploy webhooks without auth", async () => {
-		const { db, preparedSql } = contentDeployWebhookDb();
-		const res = await worker.default.fetch(
-			new Request("https://blog.example.com/api/content/deploy-webhook", {
-				method: "POST",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify({ type: "deployment.ready", payload: {} }),
-			}),
-			mockEnv({ DB: db }),
-			mockCtx(),
-		);
-
-		expect(res.status).toBe(401);
-		expect(
-			preparedSql.some((sql) => sql.includes("UPDATE content_posts")),
-		).toBe(false);
 	});
 
 	it("rate-limits content sync auth attempts before token errors", async () => {
@@ -710,75 +657,6 @@ describe("Content sync API", () => {
 		const body = (await res.json()) as { posts: Array<{ slug: string }> };
 		expect(body.posts).toHaveLength(1);
 		expect(body.posts[0].slug).toBe("published-post");
-	});
-
-	it("marks pending content as succeeded from Vercel deploy webhook", async () => {
-		const { db, preparedSql } = contentDeployWebhookDb();
-		const env = mockEnv({ DB: db });
-		const res = await worker.default.fetch(
-			new Request(
-				"https://blog.example.com/api/content/deploy-webhook?token=test-sync-token",
-				{
-					method: "POST",
-					headers: { "content-type": "application/json" },
-					body: JSON.stringify({
-						type: "deployment.ready",
-						createdAt: Date.parse("2026-01-01T00:00:00.000Z"),
-						payload: {
-							target: "production",
-							deployment: { id: "dpl_1" },
-						},
-					}),
-				},
-			),
-			env,
-			mockCtx(),
-		);
-
-		expect(res.status).toBe(200);
-		await expect(res.json()).resolves.toMatchObject({
-			ok: true,
-			deployStatus: "succeeded",
-			updated: 3,
-		});
-		expect(
-			preparedSql.some((sql) => sql.includes("deploy_status = 'succeeded'")),
-		).toBe(true);
-	});
-
-	it("marks in-flight content as failed from Vercel deploy webhook", async () => {
-		const { db, preparedSql, boundValues } = contentDeployWebhookDb();
-		const env = mockEnv({ DB: db });
-		const res = await worker.default.fetch(
-			new Request("https://blog.example.com/api/content/deploy-webhook", {
-				method: "POST",
-				headers: {
-					"content-type": "application/json",
-					authorization: "Bearer test-sync-token",
-				},
-				body: JSON.stringify({
-					type: "deployment.error",
-					payload: {
-						target: "production",
-						links: { deployment: "https://vercel.com/acme/fuwari/abc" },
-					},
-				}),
-			}),
-			env,
-			mockCtx(),
-		);
-
-		expect(res.status).toBe(200);
-		await expect(res.json()).resolves.toMatchObject({
-			ok: true,
-			deployStatus: "failed",
-		});
-		expect(
-			preparedSql.some((sql) => sql.includes("deploy_status = 'failed'")),
-		).toBe(true);
-		expect(boundValues.flat()).toContain(
-			"Vercel deployment.error (https://vercel.com/acme/fuwari/abc)",
-		);
 	});
 
 	it("downloads only published content objects with a valid token", async () => {
@@ -1442,8 +1320,6 @@ describe("Database initialization", () => {
 		]);
 		const auditLogSql =
 			"CREATE TABLE admin_audit_log (resource TEXT NOT NULL CHECK (resource IN ('friend', 'music', 'comment', 'telegram', 'init-db', 'content')))";
-		const contentPostsSql =
-			"CREATE TABLE content_posts (deploy_status TEXT NOT NULL CHECK (deploy_status IN ('idle', 'pending', 'triggered', 'succeeded', 'failed')))";
 		const indexStmt = {
 			index: "",
 			bind: vi.fn((index: string) => {
@@ -1458,21 +1334,9 @@ describe("Database initialization", () => {
 				.fn()
 				.mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
 		};
-		const sqliteSqlStmt = {
-			table: "",
-			bind: vi.fn((table: string) => {
-				sqliteSqlStmt.table = table;
-				return sqliteSqlStmt;
-			}),
-			first: vi.fn(async () => {
-				if (sqliteSqlStmt.table === "admin_audit_log") {
-					return { sql: auditLogSql };
-				}
-				if (sqliteSqlStmt.table === "content_posts") {
-					return { sql: contentPostsSql };
-				}
-				return null;
-			}),
+		const auditSqlStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue({ sql: auditLogSql }),
 			all: vi.fn().mockResolvedValue({ results: [] }),
 			run: vi
 				.fn()
@@ -1530,7 +1394,7 @@ describe("Database initialization", () => {
 					return appSettingWriteStmt;
 				}
 				if (sql.includes("SELECT sql FROM sqlite_master")) {
-					return sqliteSqlStmt;
+					return auditSqlStmt;
 				}
 				if (sql.includes("sqlite_master") && sql.includes("type = 'index'")) {
 					return indexStmt;
@@ -1569,9 +1433,9 @@ describe("Database initialization", () => {
 		await expect(res.json()).resolves.toMatchObject({
 			ok: true,
 			applied: [],
-			version: "0011",
+			version: "0010",
 		});
-		expect(versionWrites).toContainEqual(["db_migration_version", "0011"]);
+		expect(versionWrites).toContainEqual(["db_migration_version", "0010"]);
 		expect(preparedSql.some((sql) => sql.startsWith("ALTER TABLE"))).toBe(
 			false,
 		);

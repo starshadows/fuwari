@@ -56,12 +56,7 @@ type MusicUploadFailure = {
 };
 
 type ContentStatus = "draft" | "published";
-type ContentDeployStatus =
-	| "idle"
-	| "pending"
-	| "triggered"
-	| "succeeded"
-	| "failed";
+type ContentDeployStatus = "idle" | "pending" | "triggered" | "failed";
 
 type ContentPost = {
 	id: number;
@@ -202,14 +197,13 @@ const statusLabels: Record<FriendStatus, string> = {
 const contentPostStateLabel = (post: ContentPost) => {
 	if (post.status === "published") {
 		if (post.deployStatus === "pending") return "有改动待部署";
-		if (post.deployStatus === "triggered") return "部署中";
-		if (post.deployStatus === "failed") return "部署失败";
+		if (post.deployStatus === "triggered") return "部署已触发";
+		if (post.deployStatus === "failed") return "部署触发失败";
 		return "线上已发布";
 	}
 	if (post.deployStatus === "pending") return "已下线待部署";
-	if (post.deployStatus === "triggered") return "下线部署中";
-	if (post.deployStatus === "succeeded") return "已下线";
-	if (post.deployStatus === "failed") return "下线部署失败";
+	if (post.deployStatus === "triggered") return "下线部署已触发";
+	if (post.deployStatus === "failed") return "下线部署触发失败";
 	return "草稿";
 };
 
