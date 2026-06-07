@@ -24,6 +24,7 @@ import {
 
 const BLOG_ORIGIN = "https://blog.starshadow.cc";
 const ADMIN_PAGE_PATH = "/friends/admin/";
+const ADMIN_SHELL_PATH = "/worker-admin-shell/friends-admin/";
 const STATIC_ASSET_PATH_PREFIXES = [
 	"_astro",
 	"favicon",
@@ -55,7 +56,11 @@ export default {
 			}
 
 			if (requestUrl.pathname.startsWith("/friends/admin")) {
-				response = await handleAccessProtectedAdminPage(request, requestUrl);
+				response = await handleAccessProtectedAdminPage(
+					request,
+					env,
+					requestUrl,
+				);
 				return withServerTiming(withSecurityHeaders(response), startedAt);
 			}
 
@@ -96,6 +101,7 @@ export default {
 
 async function handleAccessProtectedAdminPage(
 	request: Request,
+	env: Env,
 	requestUrl: URL,
 ): Promise<Response> {
 	if (requestUrl.pathname === "/friends/admin") {
@@ -109,12 +115,16 @@ async function handleAccessProtectedAdminPage(
 	if (request.method !== "GET" && request.method !== "HEAD") {
 		return json({ error: apiError("METHOD_NOT_ALLOWED") }, 405);
 	}
+	if (!env.ADMIN_SHELL_TOKEN) {
+		return json({ error: apiError("SERVER_ERROR") }, 503);
+	}
 
-	const upstreamUrl = new URL(ADMIN_PAGE_PATH, BLOG_ORIGIN);
+	const upstreamUrl = new URL(ADMIN_SHELL_PATH, BLOG_ORIGIN);
 	upstreamUrl.search = requestUrl.search;
 	const upstream = await fetch(upstreamUrl, {
 		headers: {
 			accept: request.headers.get("accept") ?? "text/html",
+			"x-fuwari-admin-shell-token": env.ADMIN_SHELL_TOKEN,
 			"user-agent": request.headers.get("user-agent") ?? "fuwari-worker",
 		},
 	});

@@ -224,7 +224,8 @@ const MIGRATIONS: Migration[] = [
 		],
 		isApplied: async (env) =>
 			(await hasTable(env, "content_posts")) &&
-			(await hasIndex(env, "idx_content_posts_status_published")),
+			(await hasIndex(env, "idx_content_posts_status_published")) &&
+			(await adminAuditLogAllowsResource(env, "content")),
 	},
 ];
 
@@ -290,6 +291,31 @@ async function hasIndex(env: Env, indexName: string): Promise<boolean> {
 	}
 }
 
+async function adminAuditLogAllowsResource(
+	env: Env,
+	resource: string,
+): Promise<boolean> {
+	try {
+		const row = await env.DB.prepare(
+			"SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+		)
+			.bind("admin_audit_log")
+			.first<{ sql: string }>();
+		const sql = (row?.sql ?? "").replace(/\s+/g, " ");
+		if (!sql) return false;
+		const match = /CHECK\s*\(\s*"?resource"?\s*IN\s*\(([^)]*)\)\s*\)/i.exec(
+			sql,
+		);
+		if (!match) return true;
+		return match[1]
+			.split(",")
+			.map((entry) => entry.trim().replace(/^['"]|['"]$/g, ""))
+			.includes(resource);
+	} catch {
+		return false;
+	}
+}
+
 async function detectAppliedMigrationVersion(env: Env): Promise<string> {
 	let detected = "0000";
 	for (const migration of MIGRATIONS) {
@@ -302,6 +328,11 @@ async function detectAppliedMigrationVersion(env: Env): Promise<string> {
 async function getEffectiveAppliedMigrationVersion(env: Env): Promise<string> {
 	const recorded = await getAppliedMigrationVersion(env);
 	const detected = await detectAppliedMigrationVersion(env);
+	// Older runtime detection could record 0010 after content_posts was auto-created
+	// but before admin_audit_log accepted content resources. Re-run 0010 to repair it.
+	if (compareVersions(recorded, "0010") >= 0 && detected === "0009") {
+		return detected;
+	}
 	if (compareVersions(detected, recorded) <= 0) return recorded;
 
 	await setAppliedMigrationVersion(env, detected);

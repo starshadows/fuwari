@@ -169,6 +169,18 @@ export default defineConfig({
 		}),
 	},
 	vite: {
+		server: {
+			proxy: {
+				"/api": {
+					target: "http://localhost:8787",
+					changeOrigin: true,
+				},
+				"/media": {
+					target: "http://localhost:8787",
+					changeOrigin: true,
+				},
+			},
+		},
 		build: {
 			chunkSizeWarningLimit: 1000,
 			rollupOptions: {

@@ -632,8 +632,10 @@ export function normalizeHumanProofContext(
 // URL / origin / validation
 // ================================================================
 
-const TRUSTED_FRONTEND_ORIGINS = new Set(["https://blog.starshadow.cc"]);
-const API_WORKER_ORIGIN = "https://api.starshadow.cc";
+const TRUSTED_WRITE_ORIGINS_BY_TARGET = new Map([
+	["https://api.starshadow.cc", new Set(["https://blog.starshadow.cc"])],
+	["http://localhost:8787", new Set(["http://localhost:4321"])],
+]);
 
 export function isSameOrigin(value: string, requestUrl: string): boolean {
 	try {
@@ -649,8 +651,8 @@ function isTrustedWriteSource(value: string, requestUrl: string): boolean {
 		const targetOrigin = new URL(requestUrl).origin;
 		return (
 			sourceOrigin === targetOrigin ||
-			(targetOrigin === API_WORKER_ORIGIN &&
-				TRUSTED_FRONTEND_ORIGINS.has(sourceOrigin))
+			(TRUSTED_WRITE_ORIGINS_BY_TARGET.get(targetOrigin)?.has(sourceOrigin) ??
+				false)
 		);
 	} catch {
 		return false;

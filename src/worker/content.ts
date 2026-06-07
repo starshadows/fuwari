@@ -6,6 +6,7 @@ import {
 	MAX_POST_EXPANDED_BYTES,
 	MAX_POST_FILE_COUNT,
 	MAX_POST_ZIP_UPLOAD_BYTES,
+	RATE_LIMITS,
 } from "./constants";
 import { CONTENT_POSTS_STATEMENTS } from "./db-schema";
 import type { Env } from "./types";
@@ -16,6 +17,7 @@ import type {
 } from "./types/aliases";
 import {
 	auditAdminAction,
+	enforceRateLimit,
 	hashToken,
 	isD1ConstraintError,
 	isMissingD1SchemaError,
@@ -103,7 +105,7 @@ export async function handleContentSyncApi(
 	env: Env,
 	requestUrl: URL,
 ): Promise<Response> {
-	const auth = requireContentSync(request, env);
+	const auth = await requireContentSync(request, env);
 	if (auth) return auth;
 
 	if (
@@ -123,7 +125,17 @@ export async function handleContentSyncApi(
 	return json({ error: apiError("NOT_FOUND") }, 404);
 }
 
-function requireContentSync(request: Request, env: Env): Response | null {
+async function requireContentSync(
+	request: Request,
+	env: Env,
+): Promise<Response | null> {
+	const rateLimit = await enforceRateLimit(
+		request,
+		env,
+		RATE_LIMITS.contentSyncAuth,
+	);
+	if (rateLimit) return rateLimit;
+
 	const configured = env.CONTENT_SYNC_TOKEN?.trim();
 	if (!configured)
 		return json({ error: apiError("CONTENT_SYNC_TOKEN_MISSING") }, 503);
@@ -131,12 +143,27 @@ function requireContentSync(request: Request, env: Env): Response | null {
 	const token =
 		request.headers.get("x-content-sync-token")?.trim() ||
 		readBearerToken(request);
-	if (!token)
-		return json({ error: apiError("CONTENT_SYNC_TOKEN_MISSING") }, 401);
+	if (!token) {
+		return contentSyncAuthFailure(request, env, "CONTENT_SYNC_TOKEN_MISSING");
+	}
 	if (!timingSafeEqual(token, configured)) {
-		return json({ error: apiError("CONTENT_SYNC_TOKEN_INVALID") }, 401);
+		return contentSyncAuthFailure(request, env, "CONTENT_SYNC_TOKEN_INVALID");
 	}
 	return null;
+}
+
+async function contentSyncAuthFailure(
+	request: Request,
+	env: Env,
+	errorKey: "CONTENT_SYNC_TOKEN_MISSING" | "CONTENT_SYNC_TOKEN_INVALID",
+): Promise<Response> {
+	const rateLimit = await enforceRateLimit(
+		request,
+		env,
+		RATE_LIMITS.contentSyncAuthFail,
+	);
+	if (rateLimit) return rateLimit;
+	return json({ error: apiError(errorKey) }, 401);
 }
 
 async function getContentManifest(env: Env): Promise<Response> {
@@ -345,16 +372,18 @@ async function saveParsedPost(
 	parsed: ParsedPostZip,
 	status: ContentPostStatus,
 ): Promise<ContentPostDto | null> {
-	for (const file of parsed.files) {
-		await env.MEDIA_BUCKET.put(file.key, file.bytes, {
-			httpMetadata: { contentType: file.contentType },
-		});
-	}
-
 	const deployStatus = status === "published" ? "pending" : "idle";
+	const uploadedKeys: string[] = [];
 
 	let insertedId = 0;
 	try {
+		for (const file of parsed.files) {
+			await env.MEDIA_BUCKET.put(file.key, file.bytes, {
+				httpMetadata: { contentType: file.contentType },
+			});
+			uploadedKeys.push(file.key);
+		}
+
 		const result = await env.DB.prepare(
 			`INSERT INTO content_posts
        (slug, source_key, format, title, description, image, tags_json, category, lang,
@@ -381,6 +410,7 @@ async function saveParsedPost(
 			.run();
 		insertedId = Number(result.meta.last_row_id ?? 0);
 	} catch (error) {
+		await deleteUploadedContentObjects(env, uploadedKeys);
 		if (isD1ConstraintError(error)) {
 			return null;
 		}
@@ -389,6 +419,22 @@ async function saveParsedPost(
 
 	const row = await getContentRow(env, parsed.slug);
 	return row ? toContentPostDto(row) : ({ id: insertedId } as ContentPostDto);
+}
+
+async function deleteUploadedContentObjects(
+	env: Env,
+	keys: string[],
+): Promise<void> {
+	for (const key of keys) {
+		try {
+			await env.MEDIA_BUCKET.delete(key);
+		} catch (error) {
+			console.warn("Failed to clean up uploaded content object", {
+				key,
+				message: error instanceof Error ? error.message : String(error),
+			});
+		}
+	}
 }
 
 async function publishContentPost(

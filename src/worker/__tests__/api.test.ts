@@ -8,6 +8,7 @@
 
 import { strToU8, zipSync } from "fflate";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { RATE_LIMITS } from "../constants";
 import type { Env } from "../types";
 
 // ================================================================
@@ -50,6 +51,7 @@ function mockEnv(overrides: Partial<Env> = {}): Env {
 		DB: mockD1Result().db,
 		MEDIA_BUCKET: mockR2Bucket(),
 		ADMIN_TOKEN: "test-admin-token",
+		ADMIN_SHELL_TOKEN: "test-admin-shell-token",
 		CONTENT_SYNC_TOKEN: "test-sync-token",
 		VERCEL_DEPLOY_HOOK_URL: "https://vercel.example.com/deploy",
 		...overrides,
@@ -190,8 +192,13 @@ describe("Route dispatch", () => {
 			expect(res.headers.get("x-robots-tag")).toBe("noindex,nofollow");
 			expect(upstreamFetch).toHaveBeenCalledOnce();
 			expect(String(upstreamFetch.mock.calls[0]?.[0])).toBe(
-				"https://blog.starshadow.cc/friends/admin/",
+				"https://blog.starshadow.cc/worker-admin-shell/friends-admin/",
 			);
+			expect(upstreamFetch.mock.calls[0]?.[1]).toMatchObject({
+				headers: expect.objectContaining({
+					"x-fuwari-admin-shell-token": "test-admin-shell-token",
+				}),
+			});
 			const html = await res.text();
 			expect(html).toContain(
 				'src="https://blog.starshadow.cc/_astro/admin.js"',
@@ -252,6 +259,24 @@ describe("Route dispatch", () => {
 			);
 		} finally {
 			warnSpy.mockRestore();
+			vi.stubGlobal("fetch", originalFetch);
+		}
+	});
+
+	it("fails closed when the admin shell token is not configured", async () => {
+		const upstreamFetch = vi.fn();
+		const originalFetch = globalThis.fetch;
+		vi.stubGlobal("fetch", upstreamFetch);
+		const env = mockEnv({ ADMIN_SHELL_TOKEN: undefined });
+		try {
+			const res = await worker.default.fetch(
+				new Request("https://api.example.com/friends/admin/"),
+				env,
+				mockCtx(),
+			);
+			expect(res.status).toBe(503);
+			expect(upstreamFetch).not.toHaveBeenCalled();
+		} finally {
 			vi.stubGlobal("fetch", originalFetch);
 		}
 	});
@@ -546,6 +571,39 @@ describe("Content sync API", () => {
 		} as unknown as R2Bucket;
 	}
 
+	function rateLimitedContentSyncDb(): D1Database {
+		const saltStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue({ value: "stable-salt" }),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		const countStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi
+				.fn()
+				.mockResolvedValue({ count: RATE_LIMITS.contentSyncAuth.limit + 1 }),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		const genericStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		return {
+			prepare: vi.fn((sql: string) => {
+				if (sql.includes("SELECT value FROM app_settings")) return saltStmt;
+				if (sql.includes("SELECT count FROM rate_limits")) return countStmt;
+				return genericStmt;
+			}),
+			batch: vi.fn().mockResolvedValue([]),
+			exec: vi.fn().mockResolvedValue({ count: 0, duration: 0 }),
+			dump: vi.fn().mockResolvedValue([]),
+		} as unknown as D1Database;
+	}
+
 	it("rejects manifest requests without the content sync token", async () => {
 		const res = await worker.default.fetch(
 			new Request("https://blog.example.com/api/content/manifest"),
@@ -553,6 +611,17 @@ describe("Content sync API", () => {
 			mockCtx(),
 		);
 		expect(res.status).toBe(401);
+	});
+
+	it("rate-limits content sync auth attempts before token errors", async () => {
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/content/manifest"),
+			mockEnv({ DB: rateLimitedContentSyncDb() }),
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(429);
+		expect(res.headers.get("retry-after")).toBeTruthy();
 	});
 
 	it("returns the published manifest with a valid token", async () => {
@@ -616,6 +685,129 @@ describe("Content sync API", () => {
 		);
 		expect(res.status).toBe(404);
 		expect(bucket.get).not.toHaveBeenCalled();
+	});
+});
+
+// ================================================================
+// Admin content management
+// ================================================================
+describe("Admin content management", () => {
+	let worker: Awaited<typeof import("../index")>;
+
+	beforeAll(async () => {
+		worker = await import("../index");
+	});
+
+	function articleZip(entries: Record<string, string>): ArrayBuffer {
+		const zipped = zipSync(
+			Object.fromEntries(
+				Object.entries(entries).map(([name, value]) => [name, strToU8(value)]),
+			),
+		);
+		return zipped.buffer.slice(
+			zipped.byteOffset,
+			zipped.byteOffset + zipped.byteLength,
+		);
+	}
+
+	function contentInsertFailureDb(): D1Database {
+		const saltStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue({ value: "stable-salt" }),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		const countStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue({ count: 1 }),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		const contentTableStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue({ name: "content_posts" }),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		const existingPostStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		const insertStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi
+				.fn()
+				.mockRejectedValue(
+					new Error("UNIQUE constraint failed: content_posts.slug"),
+				),
+		};
+		const genericStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		return {
+			prepare: vi.fn((sql: string) => {
+				if (sql.includes("SELECT value FROM app_settings")) return saltStmt;
+				if (sql.includes("SELECT count FROM rate_limits")) return countStmt;
+				if (sql.includes("sqlite_master") && sql.includes("content_posts")) {
+					return contentTableStmt;
+				}
+				if (sql.includes("FROM content_posts WHERE slug = ?")) {
+					return existingPostStmt;
+				}
+				if (sql.includes("INSERT INTO content_posts")) return insertStmt;
+				return genericStmt;
+			}),
+			batch: vi.fn().mockResolvedValue([]),
+			exec: vi.fn().mockResolvedValue({ count: 0, duration: 0 }),
+			dump: vi.fn().mockResolvedValue([]),
+		} as unknown as D1Database;
+	}
+
+	it("cleans up uploaded R2 objects when the D1 insert fails", async () => {
+		const bucket = mockR2Bucket();
+		const formData = new FormData();
+		formData.append(
+			"file",
+			new File(
+				[
+					articleZip({
+						"hello/index.md": `---
+title: Hello
+published: 2026-01-01
+---
+# Hello`,
+						"hello/cover.webp": "image",
+					}),
+				],
+				"hello.zip",
+				{ type: "application/zip" },
+			),
+		);
+
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/admin/content", {
+				method: "POST",
+				headers: {
+					origin: "https://blog.example.com",
+					"x-fuwari-admin-token": "test-admin-token",
+				},
+				body: formData,
+			}),
+			mockEnv({ DB: contentInsertFailureDb(), MEDIA_BUCKET: bucket }),
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(409);
+		expect(bucket.put).toHaveBeenCalledTimes(2);
+		expect(bucket.delete).toHaveBeenCalledWith("posts/hello/index.md");
+		expect(bucket.delete).toHaveBeenCalledWith("posts/hello/cover.webp");
 	});
 });
 
@@ -723,6 +915,43 @@ describe("Cross-site protection", () => {
 		// Should be 400 (missing required fields passed through validation),
 		// NOT 403 (cross-site rejection)
 		expect(res.status).toBe(400);
+	});
+
+	it("rejects admin writes from a foreign origin", async () => {
+		const env = mockEnv();
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/admin/settings/comments", {
+				method: "POST",
+				headers: {
+					"content-type": "application/json",
+					origin: "https://evil.example.com",
+					"x-fuwari-admin-token": "test-admin-token",
+				},
+				body: JSON.stringify({ enabled: false }),
+			}),
+			env,
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(403);
+	});
+
+	it("allows non-browser admin writes with bearer auth", async () => {
+		const env = mockEnv();
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/admin/settings/comments", {
+				method: "POST",
+				headers: {
+					authorization: "Bearer test-admin-token",
+					"content-type": "application/json",
+				},
+				body: JSON.stringify({ enabled: false }),
+			}),
+			env,
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(200);
 	});
 });
 
@@ -966,6 +1195,8 @@ describe("Database initialization", () => {
 			"idx_music_tracks_content_hash_unique",
 			"idx_content_posts_status_published",
 		]);
+		const auditLogSql =
+			"CREATE TABLE admin_audit_log (resource TEXT NOT NULL CHECK (resource IN ('friend', 'music', 'comment', 'telegram', 'init-db', 'content')))";
 		const indexStmt = {
 			index: "",
 			bind: vi.fn((index: string) => {
@@ -975,6 +1206,14 @@ describe("Database initialization", () => {
 			first: vi.fn(async () =>
 				indexNames.has(indexStmt.index) ? { name: indexStmt.index } : null,
 			),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi
+				.fn()
+				.mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
+		};
+		const auditSqlStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue({ sql: auditLogSql }),
 			all: vi.fn().mockResolvedValue({ results: [] }),
 			run: vi
 				.fn()
@@ -1031,6 +1270,9 @@ describe("Database initialization", () => {
 				if (sql.includes("INSERT INTO app_settings")) {
 					return appSettingWriteStmt;
 				}
+				if (sql.includes("SELECT sql FROM sqlite_master")) {
+					return auditSqlStmt;
+				}
 				if (sql.includes("sqlite_master") && sql.includes("type = 'index'")) {
 					return indexStmt;
 				}
@@ -1076,7 +1318,7 @@ describe("Database initialization", () => {
 		);
 	});
 
-	it("applies migration 0010 when audit log already contains content resources", async () => {
+	it("repairs migration 0010 when content table exists but audit log is old", async () => {
 		const preparedSql: string[] = [];
 		const versionWrites: unknown[][] = [];
 		const tables = new Set([
@@ -1090,13 +1332,17 @@ describe("Database initialization", () => {
 			"config",
 			"counter",
 			"admin_audit_log",
+			"content_posts",
 		]);
 		const indexes = new Set([
 			"idx_friend_links_normalized_host_pending_approved_unique",
 			"idx_friend_links_submitter_pending_created",
 			"idx_music_tracks_object_key_unique",
 			"idx_music_tracks_content_hash_unique",
+			"idx_content_posts_status_published",
 		]);
+		const auditLogSql =
+			"CREATE TABLE admin_audit_log (resource TEXT NOT NULL CHECK (resource IN ('friend', 'music', 'comment', 'telegram', 'init-db')))";
 		const tableStmt = {
 			table: "",
 			bind: vi.fn((table: string) => {
@@ -1121,9 +1367,15 @@ describe("Database initialization", () => {
 			all: vi.fn().mockResolvedValue({ results: [] }),
 			run: vi.fn().mockResolvedValue({ success: true }),
 		};
+		const auditSqlStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue({ sql: auditLogSql }),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
 		const appSettingSelectStmt = {
 			bind: vi.fn().mockReturnThis(),
-			first: vi.fn().mockResolvedValue({ value: "0009" }),
+			first: vi.fn().mockResolvedValue({ value: "0010" }),
 			all: vi.fn().mockResolvedValue({ results: [] }),
 			run: vi.fn().mockResolvedValue({ success: true }),
 		};
@@ -1176,6 +1428,9 @@ describe("Database initialization", () => {
 				}
 				if (sql.includes("INSERT INTO app_settings")) {
 					return appSettingWriteStmt;
+				}
+				if (sql.includes("SELECT sql FROM sqlite_master")) {
+					return auditSqlStmt;
 				}
 				if (sql.includes("sqlite_master") && sql.includes("type = 'index'")) {
 					return indexStmt;
@@ -1648,7 +1903,10 @@ describe("Admin music management", () => {
 	});
 
 	function adminHeaders(): HeadersInit {
-		return { "x-fuwari-admin-token": "test-admin-token" };
+		return {
+			origin: "https://blog.example.com",
+			"x-fuwari-admin-token": "test-admin-token",
+		};
 	}
 
 	it("rejects manual music creation when the R2 object is missing", async () => {
@@ -1956,7 +2214,10 @@ describe("Admin music management", () => {
 		const res = await worker.default.fetch(
 			new Request("https://blog.example.com/api/admin/music/upload", {
 				method: "POST",
-				headers: { "x-fuwari-admin-token": "test-admin-token" },
+				headers: {
+					origin: "https://blog.example.com",
+					"x-fuwari-admin-token": "test-admin-token",
+				},
 				body: formData,
 			}),
 			env,
@@ -2011,6 +2272,7 @@ describe("Admin music management", () => {
 			new Request("https://blog.example.com/api/admin/music/upload", {
 				method: "POST",
 				headers: {
+					origin: "https://blog.example.com",
 					"content-length": "1024",
 					"x-fuwari-admin-token": "test-admin-token",
 				},
@@ -2089,6 +2351,7 @@ describe("Admin music management", () => {
 			new Request("https://blog.example.com/api/admin/music/upload", {
 				method: "POST",
 				headers: {
+					origin: "https://blog.example.com",
 					"content-length": "4096",
 					"x-fuwari-admin-token": "test-admin-token",
 				},
@@ -2161,6 +2424,7 @@ describe("Admin music management", () => {
 			new Request("https://blog.example.com/api/admin/music/upload", {
 				method: "POST",
 				headers: {
+					origin: "https://blog.example.com",
 					"content-length": "1024",
 					"x-fuwari-admin-token": "test-admin-token",
 				},
@@ -2218,7 +2482,10 @@ describe("Admin comments settings", () => {
 	});
 
 	function adminHeaders(): HeadersInit {
-		return { "x-fuwari-admin-token": "test-admin-token" };
+		return {
+			origin: "https://blog.example.com",
+			"x-fuwari-admin-token": "test-admin-token",
+		};
 	}
 
 	it("GET returns current comments enabled status", async () => {
@@ -2283,7 +2550,10 @@ describe("Admin Telegram notification settings", () => {
 	});
 
 	function adminHeaders(): HeadersInit {
-		return { "x-fuwari-admin-token": "test-admin-token" };
+		return {
+			origin: "https://blog.example.com",
+			"x-fuwari-admin-token": "test-admin-token",
+		};
 	}
 
 	function writableSettingsDb(values: Record<string, string | undefined>) {
@@ -2710,6 +2980,7 @@ describe("Twikoo security", () => {
 			new Request("https://blog.example.com/api/admin/music/upload", {
 				method: "POST",
 				headers: {
+					origin: "https://blog.example.com",
 					"content-length": String(50 * 1024 * 1024 + 1),
 					"x-fuwari-admin-token": "test-admin-token",
 				},

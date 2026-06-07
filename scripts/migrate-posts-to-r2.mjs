@@ -36,7 +36,7 @@ for (const article of articles) {
 
 	const response = await fetch(`${apiBase}/api/admin/content`, {
 		method: "POST",
-		headers: { "x-fuwari-admin-token": adminToken },
+		headers: { authorization: `Bearer ${adminToken}` },
 		body: form,
 	});
 	const data = await response.json().catch(() => ({}));
@@ -54,7 +54,7 @@ for (const article of articles) {
 
 const deployResponse = await fetch(`${apiBase}/api/admin/content/deploy`, {
 	method: "POST",
-	headers: { "x-fuwari-admin-token": adminToken },
+	headers: { authorization: `Bearer ${adminToken}` },
 });
 const deployData = await deployResponse.json().catch(() => ({}));
 if (!deployResponse.ok) {

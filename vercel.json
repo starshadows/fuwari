@@ -4,6 +4,23 @@
 	"framework": "astro",
 	"installCommand": "pnpm install --frozen-lockfile",
 	"outputDirectory": "dist",
+	"redirects": [
+		{
+			"source": "/friends/admin",
+			"destination": "https://api.starshadow.cc/friends/admin/",
+			"permanent": false
+		},
+		{
+			"source": "/friends/admin/",
+			"destination": "https://api.starshadow.cc/friends/admin/",
+			"permanent": false
+		},
+		{
+			"source": "/friends/admin/index.html",
+			"destination": "https://api.starshadow.cc/friends/admin/",
+			"permanent": false
+		}
+	],
 	"rewrites": [
 		{
 			"source": "/api/:path*",

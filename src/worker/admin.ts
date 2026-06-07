@@ -39,14 +39,18 @@ import {
 	isValidFriendUrl,
 	json,
 	normalizeFriendHostname,
+	readBearerToken,
 	readBoolean,
 	readInteger,
 	readJsonBody,
 	readString,
+	rejectCrossSiteWrite,
 	rejectOversizedBody,
 	requireAdmin,
 	setAppSetting,
 } from "./utils";
+
+const ADMIN_WRITE_METHODS = new Set(["POST", "PATCH", "DELETE"]);
 
 // ================================================================
 // Admin API dispatcher
@@ -60,6 +64,8 @@ export async function handleAdminApi(
 ): Promise<Response> {
 	const auth = await requireAdmin(request, env);
 	if (auth) return auth;
+	const originError = rejectAdminCrossSiteWrite(request);
+	if (originError) return originError;
 
 	const segments = requestUrl.pathname.split("/").filter(Boolean);
 
@@ -131,6 +137,15 @@ export async function handleAdminApi(
 		return handleAdminContentApi(request, env, requestUrl, ctx);
 	}
 	return json({ error: apiError("NOT_FOUND") }, 404);
+}
+
+function rejectAdminCrossSiteWrite(request: Request): Response | null {
+	if (!ADMIN_WRITE_METHODS.has(request.method)) return null;
+	const hasBrowserSource = Boolean(
+		request.headers.get("origin") || request.headers.get("referer"),
+	);
+	if (!hasBrowserSource && readBearerToken(request)) return null;
+	return rejectCrossSiteWrite(request);
 }
 
 // ================================================================

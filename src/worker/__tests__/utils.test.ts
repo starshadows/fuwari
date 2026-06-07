@@ -385,6 +385,14 @@ describe("rejectCrossSiteWrite", () => {
 		);
 		expect(rejectCrossSiteWrite(request)).toBeNull();
 	});
+
+	it("allows local Astro dev proxy writes to the local Worker", async () => {
+		const request = new Request("http://localhost:8787/api/friends", {
+			method: "POST",
+			headers: { origin: "http://localhost:4321" },
+		});
+		expect(rejectCrossSiteWrite(request)).toBeNull();
+	});
 });
 
 // ================================================================
