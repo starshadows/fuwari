@@ -56,8 +56,8 @@
 | 包管理器 | pnpm 9.14.4 | `packageManager` 和 CI 显式锁定 |
 | 语言 | TypeScript 6 | 全栈类型检查 |
 | 代码检查 | Biome 2.4 | 格式化和 lint，tab 缩进 |
-| 测试 | Vitest 4 | Worker-focused 测试，当前 172 个用例 |
-| Node | 22.22.3 | `.node-version`、`.nvmrc`、`package.json#engines` 和 CI 对齐 |
+| 测试 | Vitest 4 | Worker-focused 测试，当前 178 个用例 |
+| Node | 24.16.0 | `.node-version`、`.nvmrc`、`package.json#engines` 和 CI 对齐；`.npmrc` 启用 `engine-strict` |
 
 ---
 
@@ -67,6 +67,8 @@
 
 ```bash
 # 安装依赖
+nvm install
+nvm use
 corepack enable
 corepack pnpm install
 
@@ -171,8 +173,8 @@ corepack pnpm build    # 确保能正常构建
 │       ├── constants.ts        # 所有常量 + API 错误消息
 │       ├── types/              # Env + 类型定义
 │       └── __tests__/          # 测试文件
-│           ├── utils.test.ts   # Worker 工具函数测试（79 个）
-│           └── api.test.ts     # Worker API/集成测试（85 个）
+│           ├── utils.test.ts   # Worker 工具函数测试（80 个）
+│           └── api.test.ts     # Worker API/集成测试（98 个）
 ├── public/
 │   ├── favicon/                # 明暗两套 favicon
 │   ├── sakana/starshadow.webp  # 摇摇乐角色图
@@ -628,7 +630,7 @@ pnpm test:watch     # 监听模式
 
 ### 测试覆盖
 
-**utils.test.ts（79 个单元测试）：**
+**utils.test.ts（80 个单元测试）：**
 - readString / readInteger / readBoolean / clampInteger
 - safeNormalizeMediaKey / safeDecodeURIComponent / stripMediaPrefix
 - base64UrlEncode / base64UrlDecode
@@ -636,7 +638,7 @@ pnpm test:watch     # 监听模式
 - isSameOrigin / 可信前端到 API Worker 写入 / isHttpsUrl / isAvatarUrl
 - sanitizeFileName / isLikelyBot
 
-**api.test.ts（85 个集成测试）：**
+**api.test.ts（98 个集成测试）：**
 - 路由分发（API/静态/404/410）
 - 安全响应头（CSP/nosniff/referrer-policy）
 - 跨站请求保护

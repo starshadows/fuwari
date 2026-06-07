@@ -3,7 +3,7 @@
 	"type": "module",
 	"version": "0.0.1",
 	"engines": {
-		"node": "22.22.3"
+		"node": "24.16.0"
 	},
 	"scripts": {
 		"dev": "astro dev",
@@ -85,6 +85,7 @@
 		"@types/hast": "^3.0.4",
 		"@types/markdown-it": "^14.1.2",
 		"@types/mdast": "^4.0.4",
+		"@types/node": "24.13.1",
 		"@types/sanitize-html": "^2.16.1",
 		"miniflare": "^4.20260526.0",
 		"postcss-import": "^16.1.1",

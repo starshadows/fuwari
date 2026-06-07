@@ -1,6 +1,6 @@
 # 星影的博客
 
-![Node.js 22.22.3](https://img.shields.io/badge/node.js-22.22.3-brightgreen)
+![Node.js 24.16.0](https://img.shields.io/badge/node.js-24.16.0-brightgreen)
 ![pnpm 9.14.4](https://img.shields.io/badge/pnpm-9.14.4-blue)
 ![Astro 6](https://img.shields.io/badge/Astro-6-orange)
 ![Cloudflare Worker](https://img.shields.io/badge/Cloudflare-Worker-f38020)
@@ -25,6 +25,7 @@
 ## 🧱 技术栈
 
 - **Frontend**: Astro 6, Svelte 5, Tailwind CSS, Pagefind
+- **Runtime**: Node.js 24.16.0
 - **Worker API**: Cloudflare Workers, TypeScript
 - **Database**: Cloudflare D1
 - **Object Storage**: Cloudflare R2
@@ -60,12 +61,16 @@ wrangler.jsonc         # Cloudflare Worker 配置
 
 环境要求：
 
-- Node.js `22.22.3`
+- Node.js `24.16.0`
 - pnpm `9.14.4`
+
+Node 版本由 `.node-version`、`.nvmrc`、`package.json#engines` 和 CI `NODE_VERSION` 共同固定；`.npmrc` 启用 `engine-strict`，请先切到 Node `24.16.0` 再安装依赖。
 
 安装依赖：
 
 ```sh
+nvm install
+nvm use
 corepack enable
 pnpm install
 ```
