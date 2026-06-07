@@ -1,5 +1,6 @@
 <script lang="ts">
 import Icon from "@iconify/svelte";
+import { onMount } from "svelte";
 
 type StatsSummary = {
 	site: {
@@ -24,6 +25,7 @@ const VISITOR_ID_KEY = "starshadow-visitor-id";
 const STATS_API_BASE = import.meta.env.PROD ? "https://api.starshadow.cc" : "";
 
 let stats: StatsSummary | null = null;
+let isLoading = true;
 let isRefreshing = false;
 let error = "";
 
@@ -110,19 +112,53 @@ const sendStatsVisit = async (path = currentPath()): Promise<StatsSummary> => {
 	return data;
 };
 
+const loadStatsSummary = async (
+	path = currentPath(),
+): Promise<StatsSummary> => {
+	const response = await fetch(
+		statsApiUrl(
+			`/api/stats/summary?path=${encodeURIComponent(path)}&_=${Date.now()}`,
+		),
+		{
+			cache: "no-store",
+			credentials: "omit",
+		},
+	);
+	const data = await response.json();
+	if (!response.ok) throw new Error(data.error ?? "统计加载失败。");
+	return data;
+};
+
+const loadInitialStats = async () => {
+	const path = currentPath();
+	isLoading = true;
+	error = "";
+	try {
+		applyStatsSummary(await sendStatsVisit(path), path);
+	} catch (err) {
+		error = err instanceof Error ? err.message : "统计加载失败。";
+	} finally {
+		isLoading = false;
+	}
+};
+
 const updateStats = async () => {
-	if (isRefreshing) return;
+	if (isLoading || isRefreshing) return;
 	isRefreshing = true;
 	error = "";
 	const path = currentPath();
 	try {
-		applyStatsSummary(await sendStatsVisit(path), path);
+		applyStatsSummary(await loadStatsSummary(path), path);
 	} catch (err) {
 		error = err instanceof Error ? err.message : "统计加载失败。";
 	} finally {
 		isRefreshing = false;
 	}
 };
+
+onMount(() => {
+	void loadInitialStats();
+});
 </script>
 
 <div class="visitor-card card-base p-4">
@@ -133,7 +169,7 @@ const updateStats = async () => {
 		<button
 			type="button"
 			class="btn-plain flex h-8 items-center gap-1 rounded-lg px-2 text-xs font-bold text-[var(--primary)] active:scale-95 disabled:pointer-events-none disabled:opacity-60"
-			disabled={isRefreshing}
+			disabled={isLoading || isRefreshing}
 			on:click={updateStats}
 		>
 			<Icon icon="material-symbols:sync-rounded" class="text-base" />
@@ -141,9 +177,9 @@ const updateStats = async () => {
 		</button>
 	</div>
 
-	{#if isRefreshing && !stats}
+	{#if isLoading && !stats}
 		<div class="rounded-xl bg-[var(--btn-plain-bg-hover)] px-3 py-4 text-center text-sm text-50">
-			更新中...
+			加载中...
 		</div>
 	{:else if error}
 		<div class="rounded-xl bg-[var(--btn-plain-bg-hover)] px-3 py-4 text-center text-sm text-50">
