@@ -232,11 +232,18 @@ wrangler secret put CONTENT_SYNC_TOKEN
 wrangler secret put VERCEL_DEPLOY_HOOK_URL
 ```
 
+可选但推荐配置：
+
+```sh
+wrangler secret put VERCEL_WEBHOOK_SECRET
+```
+
 说明：
 
 - `ADMIN_TOKEN` 用于 `/api/admin/*`、`/api/setup/init-db` 和 Twikoo 管理员登录。
 - `CONTENT_SYNC_TOKEN` 用于 Vercel 构建时从 Worker 同步 R2 文章，也用于 Worker 拉取 Vercel 内部后台 shell。
-- `VERCEL_DEPLOY_HOOK_URL` 用于后台发布/删除文章后触发 Vercel 重新构建。
+- `VERCEL_DEPLOY_HOOK_URL` 用于后台手动触发 Vercel 重新构建。
+- `VERCEL_WEBHOOK_SECRET` 用于校验 Vercel 部署状态 webhook 的 `x-vercel-signature`。未配置时，webhook URL 必须带 `?token=<CONTENT_SYNC_TOKEN>` 或使用 Bearer/header token。
 - 生产环境建议像当前部署一样，用 Cloudflare Access 额外保护 `/friends/admin/` 和 `/api/admin/*`。
 - Cloudflare Access 是边缘层保护，`Authorization: Bearer <ADMIN_TOKEN>` 是应用层保护；不要因为开启 Access 就移除 Worker 内置认证。
 - 不要把 secret 写入 Git、`wrangler.jsonc` 或 GitHub Actions 明文环境变量。
@@ -273,6 +280,8 @@ pnpm worker:deploy
 ```
 
 Vercel 前端部署使用 `vercel.json` 中的 `buildCommand`：`pnpm build`。构建前会执行 `scripts/sync-posts.mjs`，优先从 Worker/R2 拉取文章到 `src/content/posts/`。同步需要 `CONTENT_SYNC_BASE_URL` 或 `FUWARI_CONTENT_API_BASE_URL`，以及 `CONTENT_SYNC_TOKEN`。Vercel 的 `CONTENT_SYNC_TOKEN` 还用于保护内部后台 shell，必须与 Worker 的 `CONTENT_SYNC_TOKEN` 一致。如果 R2 文章清单为空、同步配置缺失或同步失败，默认会构建空文章列表；需要让同步失败直接阻断构建时，设置 `CONTENT_SYNC_STRICT=true`。仅本地调试需要保留本地草稿时，可以设置 `CONTENT_SYNC_ENABLED=false` 跳过同步。
+
+后台内容部署状态依赖 Vercel Webhook 回写。请在 Vercel Dashboard 的 Webhooks 中选择当前前端项目和部署事件（Deployment Created / Succeeded 或 Ready / Error / Cancelled），Endpoint 填 `https://api.starshadow.cc/api/content/deploy-webhook?token=<CONTENT_SYNC_TOKEN>`。如果配置了 `VERCEL_WEBHOOK_SECRET`，也可以使用 Vercel 提供的 webhook secret 校验签名。
 
 GitHub Actions 中 Worker 部署会先尝试执行远端 D1 migrations，再部署 Worker；migration step 允许失败，避免权限或远端状态问题阻断 Worker 发布。
 

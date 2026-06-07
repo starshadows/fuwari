@@ -177,7 +177,7 @@ export const CONTENT_POSTS_STATEMENTS = [
     status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published')),
     content_hash TEXT NOT NULL DEFAULT '',
     assets_manifest TEXT NOT NULL DEFAULT '[]',
-    deploy_status TEXT NOT NULL DEFAULT 'idle' CHECK (deploy_status IN ('idle', 'pending', 'triggered', 'failed')),
+    deploy_status TEXT NOT NULL DEFAULT 'idle' CHECK (deploy_status IN ('idle', 'pending', 'triggered', 'succeeded', 'failed')),
     deployment_error TEXT NOT NULL DEFAULT '',
     last_deploy_triggered_at TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),

@@ -56,7 +56,12 @@ type MusicUploadFailure = {
 };
 
 type ContentStatus = "draft" | "published";
-type ContentDeployStatus = "idle" | "pending" | "triggered" | "failed";
+type ContentDeployStatus =
+	| "idle"
+	| "pending"
+	| "triggered"
+	| "succeeded"
+	| "failed";
 
 type ContentPost = {
 	id: number;
@@ -192,6 +197,20 @@ const statusLabels: Record<FriendStatus, string> = {
 	approved: "已通过",
 	rejected: "已拒绝",
 	all: "全部",
+};
+
+const contentPostStateLabel = (post: ContentPost) => {
+	if (post.status === "published") {
+		if (post.deployStatus === "pending") return "有改动待部署";
+		if (post.deployStatus === "triggered") return "部署中";
+		if (post.deployStatus === "failed") return "部署失败";
+		return "线上已发布";
+	}
+	if (post.deployStatus === "pending") return "已下线待部署";
+	if (post.deployStatus === "triggered") return "下线部署中";
+	if (post.deployStatus === "succeeded") return "已下线";
+	if (post.deployStatus === "failed") return "下线部署失败";
+	return "草稿";
 };
 
 const formatFileSize = (size: number) => {
@@ -931,7 +950,7 @@ onDestroy(() => {
                                         <div class="truncate font-bold text-90">{post.title || post.slug}</div>
                                         <div class="mt-1 break-all text-sm text-[var(--primary)]">/posts/{post.slug}/</div>
                                         <div class="mt-1 text-sm text-50">
-										{post.status} · {post.format.toUpperCase()} · {post.files.length} 个文件 · 部署 {post.deployStatus}
+										{contentPostStateLabel(post)} · {post.format.toUpperCase()} · {post.files.length} 个文件
                                         </div>
                                         {#if post.deploymentError}
                                             <div class="mt-1 break-all text-xs text-red-500">{post.deploymentError}</div>

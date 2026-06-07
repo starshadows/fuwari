@@ -115,7 +115,12 @@ export type MusicObjectInfo = MusicMetadata & {
 
 export type ContentPostStatus = "draft" | "published";
 
-export type ContentDeployStatus = "idle" | "pending" | "triggered" | "failed";
+export type ContentDeployStatus =
+	| "idle"
+	| "pending"
+	| "triggered"
+	| "succeeded"
+	| "failed";
 
 export type ContentFileInfo = {
 	path: string;
