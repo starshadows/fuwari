@@ -103,13 +103,15 @@ http://localhost:8787
 
 ## ✍️ 写文章
 
-创建新文章：
+生产文章以 Worker/D1/R2 内容后台为准，仓库里的 `src/content/posts/` 只保留 `.gitkeep`，Vercel 构建前会从 R2 同步文章到这个目录。
+
+临时创建本地草稿：
 
 ```sh
 pnpm new-post <filename>
 ```
 
-文章位于：
+本地草稿会写入：
 
 ```text
 src/content/posts/
@@ -140,7 +142,7 @@ draft: false
 |:--|:--|
 | `pnpm dev` | 启动 Astro 开发服务器 |
 | `pnpm worker:dev` | 启动 Cloudflare Worker 本地开发服务器 |
-| `pnpm build` | 先按需同步 R2 文章，再构建站点并生成 Pagefind 索引 |
+| `pnpm build` | 先同步 R2 文章，再构建站点并生成 Pagefind 索引 |
 | `pnpm preview` | 本地预览构建产物 |
 | `pnpm check` | Astro 类型检查 |
 | `pnpm type-check` | TypeScript 类型检查 |
@@ -270,7 +272,7 @@ Worker 部署命令：
 pnpm worker:deploy
 ```
 
-Vercel 前端部署使用 `vercel.json` 中的 `buildCommand`：`pnpm build`。构建前会执行 `scripts/sync-posts.mjs`；只有设置 `CONTENT_SYNC_ENABLED=true` 时才会从 Worker 拉取 R2 中的文章。同步需要 `CONTENT_SYNC_BASE_URL` 或 `FUWARI_CONTENT_API_BASE_URL`，以及 `CONTENT_SYNC_TOKEN`。Vercel 的 `CONTENT_SYNC_TOKEN` 还用于保护内部后台 shell，必须与 Worker 的 `CONTENT_SYNC_TOKEN` 一致。同步失败时默认保留本地文章继续构建；需要让同步失败阻断构建时，设置 `CONTENT_SYNC_STRICT=true`。
+Vercel 前端部署使用 `vercel.json` 中的 `buildCommand`：`pnpm build`。构建前会执行 `scripts/sync-posts.mjs`，优先从 Worker/R2 拉取文章到 `src/content/posts/`。同步需要 `CONTENT_SYNC_BASE_URL` 或 `FUWARI_CONTENT_API_BASE_URL`，以及 `CONTENT_SYNC_TOKEN`。Vercel 的 `CONTENT_SYNC_TOKEN` 还用于保护内部后台 shell，必须与 Worker 的 `CONTENT_SYNC_TOKEN` 一致。如果 R2 文章清单为空、同步配置缺失或同步失败，默认会构建空文章列表；需要让同步失败直接阻断构建时，设置 `CONTENT_SYNC_STRICT=true`。仅本地调试需要保留本地草稿时，可以设置 `CONTENT_SYNC_ENABLED=false` 跳过同步。
 
 GitHub Actions 中 Worker 部署会先尝试执行远端 D1 migrations，再部署 Worker；migration step 允许失败，避免权限或远端状态问题阻断 Worker 发布。
 

@@ -7,14 +7,14 @@
 ## Commands
 - Frontend dev: `pnpm dev` at `http://localhost:4321`.
 - Worker dev: `pnpm worker:dev` at `http://localhost:8787`; full local work usually needs this plus `pnpm dev`.
-- Build: `pnpm build` runs `scripts/sync-posts.mjs`, `astro build`, then `pagefind --site dist --force-language zh`. Content sync only runs when `CONTENT_SYNC_ENABLED=true`; set `CONTENT_SYNC_STRICT=true` if sync failures must fail the build.
+- Build: `pnpm build` runs `scripts/sync-posts.mjs`, `astro build`, then `pagefind --site dist --force-language zh`. The sync script prefers Worker/R2 content and writes an empty posts collection when R2 content/config is absent or non-strict sync fails. Set `CONTENT_SYNC_ENABLED=false` only for local draft builds; set `CONTENT_SYNC_STRICT=true` if sync failures must fail the build.
 - Focused tests: `pnpm vitest run src/worker/__tests__/utils.test.ts` or another `src/**/*.test.ts` path. Current tests are Worker-focused and mock D1/R2 bindings.
 - Fresh typecheck: run `pnpm astro sync` before `pnpm type-check` if `.astro` generated types may be missing; CI does this explicitly.
 - CI also runs `pnpm audit --audit-level=high`; include it when checking dependency/security-sensitive changes.
 - Pre-PR verification matching CI scripts: `pnpm lint`, `pnpm format:check`, `pnpm astro check`, `pnpm astro sync && pnpm type-check`, `pnpm test`, `pnpm build`.
 
 ## Content
-- Create posts with `pnpm new-post <safe-slug>`; the script writes under `src/content/posts/` and rejects unsafe path segments.
+- Production posts live in Worker/D1/R2. `src/content/posts/` is a build-time sync directory and should stay empty in Git except `.gitkeep`; `pnpm new-post <safe-slug>` is only for temporary local drafts and writes under `src/content/posts/`.
 - Post schema is in `src/content.config.ts`; required frontmatter is `title` and `published`, with optional/defaulted `updated`, `draft`, `description`, `image`, `tags`, `category`, and `lang`. `prevTitle`/`prevSlug`/`nextTitle`/`nextSlug` are internal defaults.
 - `src/content/spec/` is an empty-schema content collection; do not assume all content is under `posts`.
 - Site text/config entry points called out by the repo are `src/config.ts`, `src/i18n/`, and `src/content.config.ts`.

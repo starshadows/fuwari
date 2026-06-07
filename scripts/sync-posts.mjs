@@ -2,6 +2,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 const projectRoot = process.cwd();
+const astroGeneratedDir = path.join(projectRoot, ".astro");
+const astroCacheDir = path.join(projectRoot, "node_modules", ".astro");
 const postsDir = path.join(projectRoot, "src", "content", "posts");
 const postsTmpDir = path.join(projectRoot, "src", "content", ".posts-sync-tmp");
 const baseUrl = stripTrailingSlash(
@@ -11,19 +13,19 @@ const baseUrl = stripTrailingSlash(
 );
 const token = process.env.CONTENT_SYNC_TOKEN || "";
 const strict = process.env.CONTENT_SYNC_STRICT === "true";
-const enabled = process.env.CONTENT_SYNC_ENABLED === "true";
+const disabled = process.env.CONTENT_SYNC_ENABLED === "false";
 
-if (!enabled) {
+if (disabled) {
+	await fs.mkdir(postsDir, { recursive: true });
 	console.log(
-		"[sync-posts] CONTENT_SYNC_ENABLED is not true; keeping local posts unchanged.",
+		"[sync-posts] CONTENT_SYNC_ENABLED is false; leaving local posts unchanged.",
 	);
 	process.exit(0);
 }
 
 if (!baseUrl || !token) {
-	await fs.mkdir(postsDir, { recursive: true });
-	console.log(
-		"[sync-posts] CONTENT_SYNC_BASE_URL/FUWARI_CONTENT_API_BASE_URL or CONTENT_SYNC_TOKEN is not set; keeping local posts unchanged.",
+	await writeEmptyPosts(
+		"CONTENT_SYNC_BASE_URL/FUWARI_CONTENT_API_BASE_URL or CONTENT_SYNC_TOKEN is not set; building with an empty posts collection.",
 	);
 	process.exit(0);
 }
@@ -66,19 +68,34 @@ try {
 	}
 
 	await validateSyncedMarkdownAssets(postsTmpDir);
-	await fs.writeFile(path.join(postsTmpDir, ".gitkeep"), "");
-	await fs.rm(postsDir, { recursive: true, force: true });
-	await fs.rename(postsTmpDir, postsDir);
+	await fs.writeFile(path.join(postsTmpDir, ".gitkeep"), "\n");
+	await replacePostsDir(postsTmpDir);
 	console.log(
-		`[sync-posts] Synced ${posts.length} posts and ${fileCount} files.`,
+		posts.length > 0
+			? `[sync-posts] Synced ${posts.length} posts and ${fileCount} files from R2.`
+			: "[sync-posts] R2 content manifest is empty; building with an empty posts collection.",
 	);
 } catch (error) {
 	await fs.rm(postsTmpDir, { recursive: true, force: true });
 	if (strict) throw error;
-	await fs.mkdir(postsDir, { recursive: true });
-	console.warn(
-		`[sync-posts] Content sync failed; keeping local posts unchanged. Set CONTENT_SYNC_STRICT=true to fail the build. ${error instanceof Error ? error.message : String(error)}`,
+	await writeEmptyPosts(
+		`Content sync failed; building with an empty posts collection. Set CONTENT_SYNC_STRICT=true to fail the build. ${error instanceof Error ? error.message : String(error)}`,
 	);
+}
+
+async function replacePostsDir(sourceDir) {
+	await fs.rm(postsDir, { recursive: true, force: true });
+	await fs.rename(sourceDir, postsDir);
+	await fs.rm(astroGeneratedDir, { recursive: true, force: true });
+	await fs.rm(astroCacheDir, { recursive: true, force: true });
+}
+
+async function writeEmptyPosts(message) {
+	await fs.rm(postsTmpDir, { recursive: true, force: true });
+	await fs.mkdir(postsTmpDir, { recursive: true });
+	await fs.writeFile(path.join(postsTmpDir, ".gitkeep"), "\n");
+	await replacePostsDir(postsTmpDir);
+	console.log(`[sync-posts] ${message}`);
 }
 
 function stripTrailingSlash(value) {

@@ -95,7 +95,7 @@ pnpm test            # 运行所有测试
 pnpm test:watch      # 监听模式测试
 pnpm format          # Biome 格式化 + 可自动修复的 lint
 pnpm lint            # Biome CI 检查（不改文件）
-pnpm new-post <name> # 创建新文章
+pnpm new-post <name> # 创建临时本地草稿
 pnpm worker:dev      # Worker 本地开发
 pnpm worker:deploy   # 构建并部署 Worker
 ```
@@ -122,7 +122,7 @@ corepack pnpm build    # 确保能正常构建
 │   ├── config.ts               # 【总开关】站点标题/主题色/导航/头像/banner
 │   ├── content.config.ts       # Zod 校验的文章元数据 schema
 │   ├── content/
-│   │   ├── posts/              # 文章（Markdown + 本地图片）
+│   │   ├── posts/              # 构建时从 R2 同步的文章目录（仓库只保留 .gitkeep）
 │   │   └── spec/about.md       # 关于页面
 │   ├── pages/
 │   │   ├── [...page].astro     # 首页（分页，8 篇/页）
@@ -215,7 +215,8 @@ corepack pnpm build    # 确保能正常构建
 - `/robots.txt` → robots.txt
 
 **文章系统：** Astro Content Collections。
-- 文章存放在 `src/content/posts/`
+- 生产文章以 Worker/D1/R2 内容后台为准
+- `src/content/posts/` 是构建时同步目录，仓库只保留 `.gitkeep`
 - 支持单文件文章（`hello.md`）和目录文章（`some-post/index.md` + 本地图片）
 - Frontmatter 用 Zod schema 校验（title/published/description/tags/category/draft 等）
 - `draft: true` 的文章不会出现在生产构建中
@@ -428,7 +429,7 @@ GET /api/content/manifest      → Vercel 构建时读取文章清单
 GET /api/content/object?key=   → Vercel 构建时下载文章对象
 ```
 
-Vercel 构建前会运行 `scripts/sync-posts.mjs`。只有 `CONTENT_SYNC_ENABLED=true` 时才会尝试同步；同步还需要 `CONTENT_SYNC_BASE_URL` 或 `FUWARI_CONTENT_API_BASE_URL`，以及 `CONTENT_SYNC_TOKEN`。启用后会从 Worker 拉取 R2 中的文章到 `src/content/posts/` 再构建；同步失败默认保留本地文章继续构建。需要同步失败直接阻断构建时，设置 `CONTENT_SYNC_STRICT=true`。
+Vercel 构建前会运行 `scripts/sync-posts.mjs`。脚本优先从 Worker/R2 拉取文章到 `src/content/posts/`；同步需要 `CONTENT_SYNC_BASE_URL` 或 `FUWARI_CONTENT_API_BASE_URL`，以及 `CONTENT_SYNC_TOKEN`。R2 文章清单为空、同步配置缺失或同步失败时，默认写出空的 `src/content/posts/.gitkeep` 并构建空文章列表。需要同步失败直接阻断构建时，设置 `CONTENT_SYNC_STRICT=true`。仅本地调试需要保留本地草稿时，可以设置 `CONTENT_SYNC_ENABLED=false` 跳过同步。
 
 ---
 
@@ -441,7 +442,7 @@ Vercel 构建前会运行 `scripts/sync-posts.mjs`。只有 `CONTENT_SYNC_ENABLE
 pnpm new-post my-article-name
 ```
 
-这会创建 `src/content/posts/my-article-name.md`。
+这会创建 `src/content/posts/my-article-name.md`。生产文章仍应通过后台上传到 R2；本地草稿在正常构建同步时会被 R2 内容替换。
 
 **Frontmatter 格式：**
 ```yaml
@@ -666,7 +667,7 @@ Vercel 需要配置：
 - 自定义域名：`blog.starshadow.cc`
 - 环境变量：`CONTENT_SYNC_BASE_URL=https://api.starshadow.cc`
 - 环境变量：`CONTENT_SYNC_TOKEN`，必须与 Worker 的 `CONTENT_SYNC_TOKEN` 一致；同时用于保护 Vercel 内部后台 shell
-- 环境变量：`CONTENT_SYNC_ENABLED=true`，启用构建前从 Worker 同步 R2 文章
+- 可选环境变量：`CONTENT_SYNC_ENABLED=false`，仅本地调试时跳过 R2 同步并保留本地草稿
 - 可选环境变量：`CONTENT_SYNC_STRICT=true`，用于让内容同步失败时直接阻断构建
 
 `blog.starshadow.cc` 在 Cloudflare DNS 中可以使用：
@@ -772,7 +773,7 @@ pnpm build       # 生产构建
 - `astro.config.mjs` 的 `site` 必须是 `https://blog.starshadow.cc/`
 - `api.starshadow.cc` 必须绑定到 Worker 自定义域名或 Worker route，否则 Vercel rewrites 会转发失败
 - 纯 CNAME 到 Vercel 不能保证解决国内访问 Vercel Anycast IP 被墙的问题；DNS only 是纯 Vercel 线路，Proxied/CDN/反代才会改变入口线路
-- `scripts/sync-posts.mjs` 默认不启用同步；设置 `CONTENT_SYNC_ENABLED=true` 后才同步，设置 `CONTENT_SYNC_STRICT=true` 后同步失败才会阻断构建
+- `scripts/sync-posts.mjs` 默认优先从 R2 同步文章；无 R2 内容或非严格同步失败时会构建空文章列表，只有设置 `CONTENT_SYNC_ENABLED=false` 才保留本地草稿
 
 ---
 
@@ -782,7 +783,7 @@ pnpm build       # 生产构建
 
 - 前端改为 Vercel 托管，后端 Worker 绑定 `api.starshadow.cc/*`。
 - `vercel.json` 恢复前端构建配置，并通过 rewrites 将 `/api/*` 和 `/media/*` 转发到 `https://api.starshadow.cc`。
-- `scripts/sync-posts.mjs` 支持构建前从 Worker 同步 R2 文章；默认同步失败不阻断构建，可通过 `CONTENT_SYNC_STRICT=true` 切换为严格模式。
+- `scripts/sync-posts.mjs` 支持构建前从 Worker 同步 R2 文章；默认无 R2 内容或非严格同步失败时构建空文章列表，可通过 `CONTENT_SYNC_STRICT=true` 切换为严格模式。
 - Worker 部署 workflow 在执行远端 D1 migrations 后部署 Worker，migration step 允许失败以避免阻断发布。
 - 删除独立 Vercel deploy hook workflow，前端部署回到 Vercel Git 集成。
 - Worker 代理 `https://api.starshadow.cc/friends/admin/` 后台壳用于 Cloudflare Access 保护；导航里的“管理后台”覆盖当前页打开，其他外链仍新开页。
