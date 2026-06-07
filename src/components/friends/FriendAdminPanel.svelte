@@ -378,17 +378,12 @@ const unpublishContentPost = async (post: ContentPost) => {
 	}
 };
 
-const retryContentDeploy = async (post?: ContentPost) => {
+const retryContentDeploy = async () => {
 	isDeployingContent = true;
 	try {
-		const path = post
-			? `/api/admin/content/${encodeURIComponent(post.slug)}/deploy`
-			: "/api/admin/content/deploy";
-		await adminFetch(path, { method: "POST" });
+		await adminFetch("/api/admin/content/deploy", { method: "POST" });
 		await loadContentPosts();
-		setMessage(
-			post ? `已重新触发 ${post.slug} 的部署。` : "已触发 Vercel 部署。",
-		);
+		setMessage("已触发 Vercel 部署。");
 	} catch (err) {
 		await loadContentPosts();
 		setError(err instanceof Error ? err.message : "触发部署失败。");
@@ -954,11 +949,6 @@ onDestroy(() => {
 									{:else}
 										<button type="button" class="btn-regular h-9 rounded-lg px-3 text-sm font-bold" on:click={() => unpublishContentPost(post)}>
 											取消发布
-										</button>
-									{/if}
-		{#if post.deployStatus === "failed" || post.deployStatus === "pending"}
-										<button type="button" class="btn-plain h-9 rounded-lg px-3 text-sm font-bold" on:click={() => retryContentDeploy(post)}>
-											{post.deployStatus === "pending" ? "触发部署" : "重试部署"}
 										</button>
 									{/if}
 									<button type="button" class="btn-plain h-9 rounded-lg px-3 text-sm font-bold" on:click={() => deleteContentPost(post)}>
