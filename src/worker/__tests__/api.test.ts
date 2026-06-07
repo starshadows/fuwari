@@ -316,14 +316,35 @@ describe("Route dispatch", () => {
 		expect(res.status).toBe(404);
 	});
 
-	it("does not serve Astro static assets on the API Worker", async () => {
-		const env = mockEnv();
-		const res = await worker.default.fetch(
-			new Request("https://api.example.com/_astro/admin.js"),
-			env,
-			mockCtx(),
+	it("proxies Astro static assets needed by the admin shell", async () => {
+		const upstreamFetch = vi.fn().mockResolvedValue(
+			new Response(".twikoo{}", {
+				headers: {
+					"cache-control": "public, max-age=31536000, immutable",
+					"content-type": "text/css",
+					"set-cookie": "should-not-forward=1",
+				},
+			}),
 		);
-		expect(res.status).toBe(404);
+		const originalFetch = globalThis.fetch;
+		vi.stubGlobal("fetch", upstreamFetch);
+		const env = mockEnv();
+		try {
+			const res = await worker.default.fetch(
+				new Request("https://api.example.com/_astro/twikoo.BipqqlPV.css"),
+				env,
+				mockCtx(),
+			);
+			expect(res.status).toBe(200);
+			expect(String(upstreamFetch.mock.calls[0]?.[0])).toBe(
+				"https://blog.starshadow.cc/_astro/twikoo.BipqqlPV.css",
+			);
+			expect(res.headers.get("content-type")).toBe("text/css");
+			expect(res.headers.get("set-cookie")).toBeNull();
+			expect(await res.text()).toBe(".twikoo{}");
+		} finally {
+			vi.stubGlobal("fetch", originalFetch);
+		}
 	});
 });
 

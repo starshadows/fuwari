@@ -64,6 +64,11 @@ export default {
 				return withServerTiming(withSecurityHeaders(response), startedAt);
 			}
 
+			if (requestUrl.pathname.startsWith("/_astro/")) {
+				response = await proxyBlogStaticAsset(request, requestUrl);
+				return withServerTiming(withSecurityHeaders(response), startedAt);
+			}
+
 			if (requestUrl.pathname.startsWith("/api/")) {
 				response = await handleApi(request, env, requestUrl, ctx);
 				return withServerTiming(withSecurityHeaders(response), startedAt);
@@ -98,6 +103,31 @@ export default {
 		}
 	},
 };
+
+async function proxyBlogStaticAsset(
+	request: Request,
+	requestUrl: URL,
+): Promise<Response> {
+	if (request.method !== "GET" && request.method !== "HEAD") {
+		return json({ error: apiError("METHOD_NOT_ALLOWED") }, 405);
+	}
+
+	const upstreamUrl = new URL(requestUrl.pathname, BLOG_ORIGIN);
+	upstreamUrl.search = requestUrl.search;
+	const upstream = await fetch(upstreamUrl, {
+		headers: {
+			accept: request.headers.get("accept") ?? "*/*",
+			"user-agent": request.headers.get("user-agent") ?? "fuwari-worker",
+		},
+	});
+	const headers = new Headers(upstream.headers);
+	headers.delete("set-cookie");
+	return new Response(request.method === "HEAD" ? null : upstream.body, {
+		status: upstream.status,
+		statusText: upstream.statusText,
+		headers,
+	});
+}
 
 async function handleAccessProtectedAdminPage(
 	request: Request,
