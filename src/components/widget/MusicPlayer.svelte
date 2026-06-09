@@ -1,5 +1,6 @@
 <script lang="ts">
 import Icon from "@iconify/svelte";
+import { apiUrl } from "@utils/api-utils";
 import { onDestroy, onMount } from "svelte";
 
 type Track = {
@@ -180,7 +181,7 @@ const loadTracks = async () => {
 	error = "";
 
 	try {
-		const response = await fetch("/api/music/tracks", {
+		const response = await fetch(apiUrl("/api/music/tracks"), {
 			signal: controller.signal,
 		});
 		const data = await response.json();

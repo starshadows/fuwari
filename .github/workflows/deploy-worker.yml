@@ -50,7 +50,8 @@ jobs:
             echo "configured=true" >> "$GITHUB_OUTPUT"
           else
             echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "Cloudflare deployment skipped: CLOUDFLARE_ACCOUNT_ID or CLOUDFLARE_API_TOKEN is not configured."
+            echo "Cloudflare deployment failed: CLOUDFLARE_ACCOUNT_ID or CLOUDFLARE_API_TOKEN is not configured." >&2
+            exit 1
           fi
 
       - name: Apply D1 migrations

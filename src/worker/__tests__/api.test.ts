@@ -133,6 +133,53 @@ describe("Route dispatch", () => {
 		expect(body).toHaveProperty("error");
 	});
 
+	it("adds CORS headers for trusted public API origins", async () => {
+		const env = mockEnv();
+		const res = await worker.default.fetch(
+			new Request("https://api.starshadow.cc/api/anti-abuse/challenge", {
+				headers: { origin: "https://blog.starshadow.cc" },
+			}),
+			env,
+			mockCtx(),
+		);
+		expect(res.status).toBe(200);
+		expect(res.headers.get("access-control-allow-origin")).toBe(
+			"https://blog.starshadow.cc",
+		);
+		expect(res.headers.get("access-control-allow-credentials")).toBe("true");
+		expect(res.headers.get("vary")).toContain("Origin");
+	});
+
+	it("handles public API CORS preflight", async () => {
+		const env = mockEnv();
+		const res = await worker.default.fetch(
+			new Request("https://api.starshadow.cc/api/comments/session", {
+				method: "OPTIONS",
+				headers: { origin: "https://blog.starshadow.cc" },
+			}),
+			env,
+			mockCtx(),
+		);
+		expect(res.status).toBe(204);
+		expect(res.headers.get("access-control-allow-origin")).toBe(
+			"https://blog.starshadow.cc",
+		);
+		expect(res.headers.get("access-control-allow-methods")).toContain("POST");
+	});
+
+	it("does not add public API CORS headers for untrusted origins", async () => {
+		const env = mockEnv();
+		const res = await worker.default.fetch(
+			new Request("https://api.starshadow.cc/api/anti-abuse/challenge", {
+				headers: { origin: "https://attacker.example" },
+			}),
+			env,
+			mockCtx(),
+		);
+		expect(res.status).toBe(200);
+		expect(res.headers.get("access-control-allow-origin")).toBeNull();
+	});
+
 	it("old setup URL returns 410", async () => {
 		const env = mockEnv();
 		const res = await worker.default.fetch(

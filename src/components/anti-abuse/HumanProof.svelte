@@ -1,4 +1,5 @@
 <script lang="ts">
+import { apiUrl } from "@utils/api-utils";
 import { createEventDispatcher, onMount, tick } from "svelte";
 import "altcha/altcha.css";
 
@@ -38,7 +39,7 @@ const loadChallenge = async () => {
 
 	try {
 		const response = await fetch(
-			`/api/anti-abuse/challenge?context=${context}`,
+			apiUrl(`/api/anti-abuse/challenge?context=${context}`),
 		);
 		const data = (await response.json()) as ChallengeResponse;
 		if (!response.ok) {

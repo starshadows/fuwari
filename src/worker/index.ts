@@ -30,6 +30,10 @@ import {
 const BLOG_ORIGIN = "https://blog.starshadow.cc";
 const ADMIN_PAGE_PATH = "/friends/admin/";
 const ADMIN_SHELL_PATH = "/worker-admin-shell/friends-admin/";
+const PUBLIC_API_CORS_ORIGINS = new Set([
+	"https://blog.starshadow.cc",
+	"http://localhost:4321",
+]);
 const STATIC_ASSET_PATH_PREFIXES = [
 	"_astro",
 	"favicon",
@@ -264,6 +268,9 @@ async function handleApi(
 	ctx: ExecutionContext,
 ): Promise<Response> {
 	const { pathname } = requestUrl;
+	if (request.method === "OPTIONS" && isPublicCorsApiPath(pathname)) {
+		return publicApiCorsPreflight(request);
+	}
 
 	// Database initialization
 	if (pathname === "/api/setup/init-db") {
@@ -272,38 +279,59 @@ async function handleApi(
 
 	// Anti-abuse challenge
 	if (pathname === "/api/anti-abuse/challenge" && request.method === "GET") {
-		return getAntiAbuseChallenge(request, env, requestUrl);
+		return withPublicApiCors(
+			request,
+			await getAntiAbuseChallenge(request, env, requestUrl),
+		);
 	}
 
 	// Comments
 	if (pathname === "/api/comments/config" && request.method === "GET") {
-		return cachedResponseV(request, ctx, 300, env, "commentsConfig", () =>
-			getCommentsConfig(env),
+		return withPublicApiCors(
+			request,
+			await cachedResponseV(request, ctx, 300, env, "commentsConfig", () =>
+				getCommentsConfig(env),
+			),
 		);
 	}
 	if (pathname === "/api/comments/session" && request.method === "POST") {
-		return createCommentsSession(request, env);
+		return withPublicApiCors(
+			request,
+			await createCommentsSession(request, env),
+		);
 	}
 	if (pathname === "/api/twikoo") {
-		return handleTwikooRequest(request, env, requestUrl, ctx);
+		return withPublicApiCors(
+			request,
+			await handleTwikooRequest(request, env, requestUrl, ctx),
+		);
 	}
 
 	// Friends
 	if (pathname === "/api/friends") {
 		if (request.method === "GET") {
-			return cachedResponseV(request, ctx, 300, env, "friends", () =>
-				getApprovedFriends(env),
+			return withPublicApiCors(
+				request,
+				await cachedResponseV(request, ctx, 300, env, "friends", () =>
+					getApprovedFriends(env),
+				),
 			);
 		}
 		if (request.method === "POST") {
-			return submitFriendLink(request, env, ctx);
+			return withPublicApiCors(
+				request,
+				await submitFriendLink(request, env, ctx),
+			);
 		}
 	}
 
 	// Music
 	if (pathname === "/api/music/tracks" && request.method === "GET") {
-		return cachedResponseV(request, ctx, 300, env, "music", () =>
-			getPublicMusicTracks(env),
+		return withPublicApiCors(
+			request,
+			await cachedResponseV(request, ctx, 300, env, "music", () =>
+				getPublicMusicTracks(env),
+			),
 		);
 	}
 
@@ -341,4 +369,57 @@ async function handleApi(
 	}
 
 	return json({ error: apiError("NOT_FOUND") }, 404);
+}
+
+function isPublicCorsApiPath(pathname: string): boolean {
+	return (
+		pathname === "/api/anti-abuse/challenge" ||
+		pathname === "/api/comments/config" ||
+		pathname === "/api/comments/session" ||
+		pathname === "/api/twikoo" ||
+		pathname === "/api/friends" ||
+		pathname === "/api/music/tracks"
+	);
+}
+
+function publicApiCorsPreflight(request: Request): Response {
+	return withPublicApiCors(
+		request,
+		new Response(null, {
+			status: 204,
+			headers: { "cache-control": "no-store" },
+		}),
+	);
+}
+
+function withPublicApiCors(request: Request, response: Response): Response {
+	const origin = request.headers.get("origin");
+	if (!origin || !PUBLIC_API_CORS_ORIGINS.has(origin)) return response;
+
+	const corsResponse = new Response(response.body, response);
+	corsResponse.headers.set("access-control-allow-origin", origin);
+	corsResponse.headers.set("access-control-allow-credentials", "true");
+	corsResponse.headers.set(
+		"access-control-allow-methods",
+		"GET, POST, OPTIONS",
+	);
+	corsResponse.headers.set(
+		"access-control-allow-headers",
+		"content-type, x-requested-with",
+	);
+	corsResponse.headers.set("access-control-max-age", "600");
+	appendVaryHeader(corsResponse.headers, "Origin");
+	return corsResponse;
+}
+
+function appendVaryHeader(headers: Headers, value: string): void {
+	const vary = headers.get("vary");
+	if (!vary) {
+		headers.set("vary", value);
+		return;
+	}
+	const values = vary.split(",").map((item) => item.trim().toLowerCase());
+	if (!values.includes(value.toLowerCase())) {
+		headers.set("vary", `${vary}, ${value}`);
+	}
 }

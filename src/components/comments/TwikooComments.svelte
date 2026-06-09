@@ -1,5 +1,6 @@
 <script lang="ts">
 import HumanProof from "@components/anti-abuse/HumanProof.svelte";
+import { apiUrl } from "@utils/api-utils";
 import { onDestroy, onMount, tick } from "svelte";
 import "twikoo/dist/twikoo.css";
 
@@ -32,7 +33,7 @@ export let adminMode = false;
 export let adminToken = "";
 export let embedded = false;
 
-const publicTwikooEndpoint = "/api/twikoo";
+const publicTwikooEndpoint = apiUrl("/api/twikoo");
 const adminTwikooEndpoint = "/api/admin/twikoo";
 const twikooHostSelector = "#twikoo-comments";
 const twikooMountSelector = "#twikoo-comments-mount";
@@ -41,7 +42,9 @@ let restoreAdminRequestBridge: (() => void) | null = null;
 const loadConfig = async () => {
 	isLoadingConfig = true;
 	try {
-		const response = await fetch("/api/comments/config");
+		const response = await fetch(apiUrl("/api/comments/config"), {
+			credentials: "include",
+		});
 		const data = await response.json();
 		if (!response.ok) throw new Error(data.error ?? "评论配置加载失败。");
 		enabled = Boolean(data.enabled);
@@ -230,8 +233,71 @@ const shouldAutoLoadPublicComments = () =>
 		window.location.hash,
 	);
 
+const installPublicRequestBridge = () => {
+	if (adminMode || restoreAdminRequestBridge) return;
+
+	const publicEndpoint = new URL(publicTwikooEndpoint, window.location.origin);
+	if (publicEndpoint.origin === window.location.origin) return;
+
+	const originalFetch = window.fetch.bind(window);
+	const originalOpen = window.XMLHttpRequest.prototype.open;
+
+	const isPublicTwikooRequest = (rawUrl: string | URL) => {
+		try {
+			const url = new URL(rawUrl, window.location.origin);
+			return (
+				url.origin === publicEndpoint.origin &&
+				url.pathname === publicEndpoint.pathname
+			);
+		} catch {
+			return false;
+		}
+	};
+
+	window.fetch = (input, init) => {
+		const rawUrl =
+			typeof input === "string"
+				? input
+				: input instanceof URL
+					? input.href
+					: input.url;
+		if (!isPublicTwikooRequest(rawUrl)) return originalFetch(input, init);
+
+		if (input instanceof Request) {
+			return originalFetch(
+				new Request(input, { ...init, credentials: "include" }),
+			);
+		}
+		return originalFetch(input, { ...init, credentials: "include" });
+	};
+
+	window.XMLHttpRequest.prototype.open = function (
+		method: string,
+		url: string | URL,
+		async = true,
+		username?: string | null,
+		password?: string | null,
+	) {
+		const shouldIncludeCredentials = isPublicTwikooRequest(url);
+		if (username !== undefined) {
+			originalOpen.call(this, method, url, async, username, password);
+			if (shouldIncludeCredentials) this.withCredentials = true;
+			return;
+		}
+		originalOpen.call(this, method, url, async);
+		if (shouldIncludeCredentials) this.withCredentials = true;
+	};
+
+	restoreAdminRequestBridge = () => {
+		window.fetch = originalFetch;
+		window.XMLHttpRequest.prototype.open = originalOpen;
+		restoreAdminRequestBridge = null;
+	};
+};
+
 const initializeTwikooComments = async (forceReload = false) => {
 	try {
+		installPublicRequestBridge();
 		await loadTwikoo(forceReload);
 		if (!adminMode) showVerification = true;
 	} catch (err) {
@@ -260,9 +326,10 @@ const createSession = async (humanProof: HumanProofDetail) => {
 	message = "";
 
 	try {
-		const response = await fetch("/api/comments/session", {
+		const response = await fetch(apiUrl("/api/comments/session"), {
 			method: "POST",
 			headers: { "content-type": "application/json" },
+			credentials: "include",
 			body: JSON.stringify({ humanProof }),
 		});
 		const data = await response.json();

@@ -1,5 +1,6 @@
 <script lang="ts">
 import HumanProof from "@components/anti-abuse/HumanProof.svelte";
+import { apiUrl } from "@utils/api-utils";
 import { onMount } from "svelte";
 
 type Friend = {
@@ -41,7 +42,7 @@ const loadFriends = async () => {
 	error = "";
 
 	try {
-		const response = await fetch("/api/friends");
+		const response = await fetch(apiUrl("/api/friends"));
 		const data = await response.json();
 		if (!response.ok) throw new Error(data.error ?? "友链加载失败。");
 		friends = data.friends ?? [];
@@ -68,7 +69,7 @@ const submit = async () => {
 	error = "";
 
 	try {
-		const response = await fetch("/api/friends", {
+		const response = await fetch(apiUrl("/api/friends"), {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ ...form, humanProof }),
