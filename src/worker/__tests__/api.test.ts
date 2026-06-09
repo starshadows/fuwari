@@ -843,6 +843,77 @@ describe("Admin content management", () => {
 		} as unknown as D1Database;
 	}
 
+	function contentDeleteCleanupFailureDb() {
+		const contentRow = {
+			id: 1,
+			slug: "published-post",
+			sourceKey: "posts/published-post/index.md",
+			format: "md",
+			title: "Published",
+			description: "",
+			image: "",
+			tagsJson: "[]",
+			category: "",
+			lang: "",
+			published: "2026-01-01",
+			updated: "",
+			status: "published",
+			contentHash: "abc",
+			assetsManifest: JSON.stringify([
+				{
+					path: "index.md",
+					key: "posts/published-post/index.md",
+					size: 42,
+					contentType: "text/markdown; charset=utf-8",
+				},
+			]),
+			deployStatus: "triggered",
+			deploymentError: "",
+			lastDeployTriggeredAt: "",
+			createdAt: "2026-01-01T00:00:00.000Z",
+			updatedAt: "2026-01-01T00:00:00.000Z",
+		};
+		const stmt = (firstValue: unknown = null) => ({
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(firstValue),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi.fn().mockResolvedValue({ success: true, meta: { changes: 1 } }),
+		});
+		const contentTableStmt = stmt({ name: "content_posts" });
+		const contentRowStmt = stmt(contentRow);
+		const appSettingStmt = stmt({ value: "stable-salt" });
+		const rateCountStmt = stmt({ count: 1 });
+		const draftStmt = stmt();
+		const pendingStmt = stmt();
+		const triggeredStmt = stmt();
+		const failedStmt = stmt();
+		const genericStmt = stmt();
+		const db = {
+			prepare: vi.fn((sql: string) => {
+				if (sql.includes("sqlite_master") && sql.includes("content_posts")) {
+					return contentTableStmt;
+				}
+				if (sql.includes("FROM content_posts WHERE slug = ?")) {
+					return contentRowStmt;
+				}
+				if (sql.includes("SELECT value FROM app_settings")) {
+					return appSettingStmt;
+				}
+				if (sql.includes("SELECT count FROM rate_limits")) return rateCountStmt;
+				if (sql.includes("SET status = 'draft'")) return draftStmt;
+				if (sql.includes("SET deploy_status = 'pending'")) return pendingStmt;
+				if (sql.includes("SET deploy_status = 'triggered'"))
+					return triggeredStmt;
+				if (sql.includes("SET deploy_status = 'failed'")) return failedStmt;
+				return genericStmt;
+			}),
+			batch: vi.fn().mockResolvedValue([]),
+			exec: vi.fn().mockResolvedValue({ count: 0, duration: 0 }),
+			dump: vi.fn().mockResolvedValue([]),
+		} as unknown as D1Database;
+		return { db, failedStmt };
+	}
+
 	it("cleans up uploaded R2 objects when the D1 insert fails", async () => {
 		const bucket = mockR2Bucket();
 		const formData = new FormData();
@@ -928,6 +999,48 @@ published: 2026-01-01
 			);
 			expect(deployRes.status).toBe(200);
 			expect(fetchSpy).toHaveBeenCalledTimes(1);
+		} finally {
+			vi.stubGlobal("fetch", originalFetch);
+		}
+	});
+
+	it("marks content delete cleanup failures as failed", async () => {
+		const fetchSpy = vi
+			.fn()
+			.mockResolvedValue(new Response(null, { status: 204 }));
+		const originalFetch = globalThis.fetch;
+		vi.stubGlobal("fetch", fetchSpy);
+		try {
+			const bucket = mockR2Bucket();
+			vi.mocked(bucket.delete).mockRejectedValue(new Error("R2 unavailable"));
+			const { db, failedStmt } = contentDeleteCleanupFailureDb();
+			const res = await worker.default.fetch(
+				new Request(
+					"https://blog.example.com/api/admin/content/published-post",
+					{
+						method: "DELETE",
+						headers: {
+							origin: "https://blog.example.com",
+							"x-fuwari-admin-token": "test-admin-token",
+						},
+					},
+				),
+				mockEnv({ DB: db, MEDIA_BUCKET: bucket }),
+				mockCtx(),
+			);
+
+			expect(res.status).toBe(500);
+			expect(await res.json()).toMatchObject({
+				detail: "R2 unavailable",
+			});
+			expect(fetchSpy).toHaveBeenCalledTimes(1);
+			expect(bucket.delete).toHaveBeenCalledWith(
+				"posts/published-post/index.md",
+			);
+			expect(failedStmt.bind).toHaveBeenCalledWith(
+				"R2 unavailable",
+				"published-post",
+			);
 		} finally {
 			vi.stubGlobal("fetch", originalFetch);
 		}

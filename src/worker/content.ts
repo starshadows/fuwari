@@ -503,14 +503,40 @@ async function deleteContentPost(
 	const deploy = await runVercelDeploy(env, slug, "delete");
 	if (deploy instanceof Response) return deploy;
 
-	for (const file of post.files) {
-		await env.MEDIA_BUCKET.delete(file.key);
+	try {
+		for (const file of post.files) {
+			await env.MEDIA_BUCKET.delete(file.key);
+		}
+		await env.DB.prepare("DELETE FROM content_posts WHERE slug = ?")
+			.bind(slug)
+			.run();
+	} catch (error) {
+		return markContentDeleteCleanupFailed(env, slug, error);
 	}
-	await env.DB.prepare("DELETE FROM content_posts WHERE slug = ?")
-		.bind(slug)
-		.run();
 	ctx.waitUntil(auditAdminAction(env, request, "delete", "content", slug));
 	return json({ ok: true, deployment: deploy });
+}
+
+async function markContentDeleteCleanupFailed(
+	env: Env,
+	slug: string,
+	error: unknown,
+): Promise<Response> {
+	const detail = error instanceof Error ? error.message : String(error);
+	const message = detail || apiError("CONTENT_DELETE_FAILED");
+	try {
+		await markDeployFailed(env, slug, message);
+	} catch (markError) {
+		console.error("Failed to mark content delete cleanup failure", {
+			slug,
+			message:
+				markError instanceof Error ? markError.message : String(markError),
+		});
+	}
+	return json(
+		{ error: apiError("CONTENT_DELETE_FAILED"), detail: message },
+		500,
+	);
 }
 
 async function triggerContentDeploy(

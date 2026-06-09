@@ -188,6 +188,7 @@ export const API_ERROR = {
 	CONTENT_OBJECT_NOT_FOUND: "文章对象不存在。",
 	CONTENT_DEPLOY_HOOK_MISSING: "Vercel 部署钩子未配置。",
 	CONTENT_DEPLOY_FAILED: "Vercel 部署钩子调用失败。",
+	CONTENT_DELETE_FAILED: "文章删除清理失败，请稍后重试。",
 	TELEGRAM_INCOMPLETE: "Telegram 通知未完整配置。",
 	TELEGRAM_FAILED: "Telegram API 返回错误。",
 	TWIKOO_SESSION_REQUIRED: "请先完成评论人机验证。",
