@@ -150,7 +150,7 @@ let uploadResults: {
 let musicSectionsOpen = {
 	upload: true,
 	scan: false,
-	tracks: false,
+	tracks: true,
 };
 const musicSectionPanelIds = {
 	upload: "friend-admin-music-upload-panel",
@@ -724,11 +724,12 @@ const patchTrack = async (track: Track, patch: Record<string, unknown>) => {
 };
 
 const deleteTrack = async (track: Track) => {
-	if (!confirm(`删除歌曲：${track.title}？`)) return;
+	if (!confirm(`删除歌曲 ${track.title} 及其 R2 音频文件？`)) return;
 
 	try {
 		await adminFetch(`/api/admin/music/${track.id}`, { method: "DELETE" });
 		await loadMusic();
+		await loadMusicObjects();
 		setMessage("歌曲已删除。");
 	} catch (err) {
 		setError(err instanceof Error ? err.message : "删除失败。");
@@ -1048,7 +1049,64 @@ onDestroy(() => {
                     </div>
                 {/each}
             </div>
-        {:else if activeTab === "music"}
+		{:else if activeTab === "music"}
+			<section class="mb-4 rounded-xl bg-[var(--btn-plain-bg-hover)] p-4">
+				<div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+					<div>
+						<div class="font-bold text-75">已入库音乐</div>
+						<div class="mt-1 text-sm text-50">共 {tracks.length} 首，可编辑信息、停用或删除歌曲和 R2 文件</div>
+					</div>
+					<div class="flex flex-wrap gap-2">
+						<button type="button" class="btn-plain h-10 rounded-xl px-4 font-bold" disabled={isNormalizingMusicSort} on:click={normalizeTrackSort}>
+							{isNormalizingMusicSort ? "整理中" : "整理排序"}
+						</button>
+						<button
+							type="button"
+							class="admin-collapse-button"
+							aria-expanded={musicSectionsOpen.tracks}
+							aria-controls={musicSectionPanelIds.tracks}
+							on:click={() => toggleMusicSection("tracks")}
+						>
+							{musicSectionsOpen.tracks ? "收起" : "展开"}
+						</button>
+					</div>
+				</div>
+
+				{#if musicSectionsOpen.tracks}
+					<div id={musicSectionPanelIds.tracks} class="flex max-h-[52rem] flex-col gap-3 overflow-y-auto pr-1">
+						{#each tracks as track}
+							<div class="rounded-xl bg-[var(--card-bg)] p-4">
+								<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+									<input value={track.title} class="admin-input" on:change={(event) => patchTrack(track, { title: (event.currentTarget as HTMLInputElement).value })} />
+									<input value={track.artist} class="admin-input" on:change={(event) => patchTrack(track, { artist: (event.currentTarget as HTMLInputElement).value })} />
+									<input value={track.objectKey} class="admin-input" on:change={(event) => patchTrack(track, { objectKey: (event.currentTarget as HTMLInputElement).value })} />
+									<input value={track.coverUrl} class="admin-input" placeholder="封面 URL" on:change={(event) => patchTrack(track, { coverUrl: (event.currentTarget as HTMLInputElement).value })} />
+									<label class="flex items-center gap-2 text-sm text-75">
+										<input
+											type="checkbox"
+											checked={Boolean(track.isActive)}
+											on:change={(event) => patchTrack(track, { isActive: (event.currentTarget as HTMLInputElement).checked })}
+										/>
+										启用
+									</label>
+									<div class="flex flex-wrap gap-2">
+										<input
+											type="number"
+											value={track.sortOrder}
+											class="admin-input w-28"
+											on:change={(event) => patchTrack(track, { sortOrder: Number((event.currentTarget as HTMLInputElement).value) })}
+										/>
+										<button type="button" class="btn-plain h-10 rounded-xl px-4 font-bold" on:click={() => deleteTrack(track)}>
+											删除歌曲和文件
+										</button>
+									</div>
+								</div>
+							</div>
+						{/each}
+					</div>
+				{/if}
+			</section>
+
 			<section class="mb-4 rounded-xl bg-[var(--btn-plain-bg-hover)] p-4">
 				<div class="flex items-center justify-between gap-3">
 					<button
@@ -1199,68 +1257,6 @@ onDestroy(() => {
 				{/if}
 			</section>
 
-			<section class="rounded-xl bg-[var(--btn-plain-bg-hover)] p-4">
-				<div class="mb-3 flex flex-wrap items-center justify-between gap-3">
-					<button
-						type="button"
-						class="min-w-0 flex-1 text-left"
-						aria-expanded={musicSectionsOpen.tracks}
-						aria-controls={musicSectionPanelIds.tracks}
-						on:click={() => toggleMusicSection("tracks")}
-					>
-						<div class="font-bold text-75">已入库音乐</div>
-						<div class="mt-1 text-sm text-50">共 {tracks.length} 首</div>
-					</button>
-					<div class="flex flex-wrap gap-2">
-						<button type="button" class="btn-plain h-10 rounded-xl px-4 font-bold" disabled={isNormalizingMusicSort} on:click={normalizeTrackSort}>
-							{isNormalizingMusicSort ? "整理中" : "整理排序"}
-						</button>
-						<button
-							type="button"
-							class="admin-collapse-button"
-							aria-expanded={musicSectionsOpen.tracks}
-							aria-controls={musicSectionPanelIds.tracks}
-							on:click={() => toggleMusicSection("tracks")}
-						>
-							{musicSectionsOpen.tracks ? "收起" : "展开"}
-						</button>
-					</div>
-				</div>
-
-				{#if musicSectionsOpen.tracks}
-					<div id={musicSectionPanelIds.tracks} class="flex max-h-[52rem] flex-col gap-3 overflow-y-auto pr-1">
-						{#each tracks as track}
-							<div class="rounded-xl bg-[var(--card-bg)] p-4">
-								<div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-									<input value={track.title} class="admin-input" on:change={(event) => patchTrack(track, { title: (event.currentTarget as HTMLInputElement).value })} />
-									<input value={track.artist} class="admin-input" on:change={(event) => patchTrack(track, { artist: (event.currentTarget as HTMLInputElement).value })} />
-									<input value={track.objectKey} class="admin-input" on:change={(event) => patchTrack(track, { objectKey: (event.currentTarget as HTMLInputElement).value })} />
-									<input value={track.coverUrl} class="admin-input" placeholder="封面 URL" on:change={(event) => patchTrack(track, { coverUrl: (event.currentTarget as HTMLInputElement).value })} />
-									<label class="flex items-center gap-2 text-sm text-75">
-										<input
-											type="checkbox"
-											checked={Boolean(track.isActive)}
-											on:change={(event) => patchTrack(track, { isActive: (event.currentTarget as HTMLInputElement).checked })}
-										/>
-										启用
-									</label>
-									<div class="flex gap-2">
-										<input
-											type="number"
-											value={track.sortOrder}
-											class="admin-input w-28"
-											on:change={(event) => patchTrack(track, { sortOrder: Number((event.currentTarget as HTMLInputElement).value) })}
-										/>
-										<button type="button" class="btn-plain h-10 rounded-xl px-4 font-bold" on:click={() => deleteTrack(track)}>
-											删除
-										</button>
-									</div>
-								</div>
-							</div>
-						{/each}
-					</div>
-				{/if}
-			</section>
 		{:else if activeTab === "comments"}
             <section class="mb-4 rounded-xl bg-[var(--btn-plain-bg-hover)] p-4">
                 <div class="mb-3 font-bold text-75">评论区开关</div>
@@ -1278,7 +1274,7 @@ onDestroy(() => {
                 </button>
             </section>
 
-            <section class="rounded-xl bg-[var(--btn-plain-bg-hover)] p-4">
+			<section class="rounded-xl bg-[var(--btn-plain-bg-hover)] p-4">
                 <div class="mb-3 font-bold text-75">Twikoo 评论管理</div>
                 <div class="rounded-xl bg-[var(--card-bg)] p-4">
                     <TwikooComments adminMode={true} adminToken={token} embedded={true} />

@@ -2755,6 +2755,7 @@ describe("Admin music management", () => {
 			dump: vi.fn().mockResolvedValue([]),
 		} as unknown as D1Database;
 		const bucket = mockR2Bucket();
+		vi.mocked(bucket.head).mockResolvedValue({} as R2Object);
 		const env = mockEnv({ DB: db, MEDIA_BUCKET: bucket });
 		const formData = new FormData();
 		formData.append(
@@ -2789,6 +2790,149 @@ describe("Admin music management", () => {
 			objectKey: "music/existing.mp3",
 		});
 		expect(bucket.put).not.toHaveBeenCalled();
+	});
+
+	it("reuploads music when the matching D1 track points to a missing R2 object", async () => {
+		const bytes = new TextEncoder().encode("same audio");
+		const digest = await crypto.subtle.digest("SHA-256", bytes);
+		const hash = Array.from(new Uint8Array(digest))
+			.map((byte) => byte.toString(16).padStart(2, "0"))
+			.join("");
+		const schemaStmt = {
+			all: vi.fn().mockResolvedValue({ results: [{ name: "content_hash" }] }),
+		};
+		const maxSortStmt = {
+			first: vi.fn().mockResolvedValue({ maxSort: 5 }),
+		};
+		const hashStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue({
+				id: 7,
+				objectKey: "music/stale.mp3",
+				coverUrl: "/media/covers/stale.jpg",
+			}),
+		};
+		const objectKeyStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+		};
+		const deleteStmt = {
+			bind: vi.fn().mockReturnThis(),
+			run: vi.fn().mockResolvedValue({ success: true, meta: { changes: 1 } }),
+		};
+		const insertStmt = {
+			bind: vi.fn().mockReturnThis(),
+			run: vi
+				.fn()
+				.mockResolvedValue({ success: true, meta: { last_row_id: 12 } }),
+		};
+		const genericStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi
+				.fn()
+				.mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
+		};
+		const db = {
+			prepare: vi.fn((sql: string) => {
+				if (sql.includes("PRAGMA table_info(music_tracks)")) return schemaStmt;
+				if (sql.includes("MAX(sort_order)")) return maxSortStmt;
+				if (sql.includes("content_hash = ?")) return hashStmt;
+				if (sql.includes("WHERE object_key = ?")) return objectKeyStmt;
+				if (sql.includes("DELETE FROM music_tracks")) return deleteStmt;
+				if (sql.includes("INSERT INTO music_tracks")) return insertStmt;
+				return genericStmt;
+			}),
+			batch: vi.fn().mockResolvedValue([]),
+			exec: vi.fn().mockResolvedValue({ count: 0, duration: 0 }),
+			dump: vi.fn().mockResolvedValue([]),
+		} as unknown as D1Database;
+		const bucket = mockR2Bucket();
+		const env = mockEnv({ DB: db, MEDIA_BUCKET: bucket });
+		const formData = new FormData();
+		formData.append(
+			"files",
+			new File([bytes], "song.mp3", { type: "audio/mpeg" }),
+		);
+
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/admin/music/upload", {
+				method: "POST",
+				headers: {
+					origin: "https://blog.example.com",
+					"content-length": "1024",
+					"x-fuwari-admin-token": "test-admin-token",
+				},
+				body: formData,
+			}),
+			env,
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(201);
+		const body = (await res.json()) as {
+			uploaded: Array<{ hash: string; trackId: number; objectKey: string }>;
+			duplicates: unknown[];
+			failed: unknown[];
+		};
+		expect(body.uploaded).toHaveLength(1);
+		expect(body.uploaded[0]).toMatchObject({ hash, trackId: 12 });
+		expect(body.duplicates).toHaveLength(0);
+		expect(body.failed).toHaveLength(0);
+		expect(deleteStmt.bind).toHaveBeenCalledWith(7);
+		expect(bucket.delete).toHaveBeenCalledWith("music/stale.mp3");
+		expect(bucket.delete).toHaveBeenCalledWith("covers/stale.jpg");
+		expect(bucket.put).toHaveBeenCalledTimes(1);
+	});
+
+	it("deletes stored music objects when deleting an admin music track", async () => {
+		const selectStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue({
+				id: 3,
+				objectKey: "music/song.mp3",
+				coverUrl: "/media/covers/song.jpg",
+			}),
+		};
+		const deleteStmt = {
+			bind: vi.fn().mockReturnThis(),
+			run: vi.fn().mockResolvedValue({ success: true, meta: { changes: 1 } }),
+		};
+		const genericStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi
+				.fn()
+				.mockResolvedValue({ success: true, meta: { last_row_id: 1 } }),
+		};
+		const db = {
+			prepare: vi.fn((sql: string) => {
+				if (sql.includes("SELECT id, object_key")) return selectStmt;
+				if (sql.includes("DELETE FROM music_tracks")) return deleteStmt;
+				return genericStmt;
+			}),
+			batch: vi.fn().mockResolvedValue([]),
+			exec: vi.fn().mockResolvedValue({ count: 0, duration: 0 }),
+			dump: vi.fn().mockResolvedValue([]),
+		} as unknown as D1Database;
+		const bucket = mockR2Bucket();
+
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/admin/music/3", {
+				method: "DELETE",
+				headers: adminHeaders(),
+			}),
+			mockEnv({ DB: db, MEDIA_BUCKET: bucket }),
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { deletedObjects: string[] };
+		expect(body.deletedObjects).toEqual(["music/song.mp3", "covers/song.jpg"]);
+		expect(bucket.delete).toHaveBeenCalledWith("music/song.mp3");
+		expect(bucket.delete).toHaveBeenCalledWith("covers/song.jpg");
 	});
 
 	it("accepts more than 10 files and processes them in backend batches", async () => {

@@ -301,6 +301,8 @@ export async function uploadMusicFiles(
 		return json({ error: apiError("MUSIC_UPLOAD_TOO_MANY") }, 400);
 	}
 
+	await ensureMusicContentHashSchema(env);
+
 	const maxSortRow = await env.DB.prepare(
 		"SELECT COALESCE(MAX(sort_order), 0) AS maxSort FROM music_tracks",
 	).first<{ maxSort: number }>();
@@ -337,32 +339,41 @@ export async function uploadMusicFiles(
 				hash = await sha256Hex(bytes);
 				const existing = await findMusicTrackByHash(env, hash);
 				if (existing) {
-					duplicates.push({
-						fileName,
-						objectKey: existing.objectKey,
-						hash,
-						size: file.size,
-						trackId: existing.id,
-						status: "duplicate",
-					});
-					continue;
+					const existingObject = await env.MEDIA_BUCKET.head(
+						existing.objectKey,
+					);
+					if (!existingObject) {
+						await deleteStoredMusicTrack(env, existing);
+					} else {
+						duplicates.push({
+							fileName,
+							objectKey: existing.objectKey,
+							hash,
+							size: file.size,
+							trackId: existing.id,
+							status: "duplicate",
+						});
+						continue;
+					}
 				}
 
 				objectKey = buildUploadedMusicKey(fileName, hash, ext);
 				const objectExists = await env.MEDIA_BUCKET.head(objectKey);
-				const existingByKey = objectExists
-					? await findMusicTrackByObjectKey(env, objectKey)
-					: null;
+				const existingByKey = await findMusicTrackByObjectKey(env, objectKey);
 				if (existingByKey) {
-					duplicates.push({
-						fileName,
-						objectKey,
-						hash,
-						size: file.size,
-						trackId: existingByKey.id,
-						status: "duplicate",
-					});
-					continue;
+					if (!objectExists) {
+						await deleteStoredMusicTrack(env, existingByKey);
+					} else {
+						duplicates.push({
+							fileName,
+							objectKey,
+							hash,
+							size: file.size,
+							trackId: existingByKey.id,
+							status: "duplicate",
+						});
+						continue;
+					}
 				}
 
 				if (!objectExists) {
@@ -612,16 +623,25 @@ export async function deleteMusicTrack(
 ): Promise<Response> {
 	if (!Number.isInteger(id))
 		return json({ error: apiError("MUSIC_ID_INVALID") }, 400);
+	const track = await env.DB.prepare(
+		`SELECT id, object_key AS objectKey, cover_url AS coverUrl
+		 FROM music_tracks WHERE id = ?`,
+	)
+		.bind(id)
+		.first<MusicTrackStorageRef>();
+	if (!track) return json({ error: apiError("MUSIC_NOT_FOUND") }, 404);
+
 	const result = await env.DB.prepare("DELETE FROM music_tracks WHERE id = ?")
 		.bind(id)
 		.run();
 	if ((result.meta.changes ?? 0) === 0) {
 		return json({ error: apiError("MUSIC_NOT_FOUND") }, 404);
 	}
+	const deletedObjects = await deleteMusicTrackStorage(env, track);
 	invalidateScanCache();
 	await incrementCacheVersion(env, "music");
 	ctx.waitUntil(auditAdminAction(env, request, "delete", "music", id));
-	return json({ ok: true });
+	return json({ ok: true, deletedObjects });
 }
 
 type MusicUploadResult = {
@@ -642,7 +662,103 @@ type MusicUploadFailure = {
 type ExistingMusicTrackRef = {
 	id: number;
 	objectKey: string;
+	coverUrl?: string;
 };
+
+type MusicTrackStorageRef = {
+	id: number;
+	objectKey: string;
+	coverUrl?: string;
+};
+
+let musicContentHashSchemaReady = false;
+
+async function ensureMusicContentHashSchema(env: Env): Promise<void> {
+	if (musicContentHashSchemaReady) return;
+
+	const columns = await env.DB.prepare("PRAGMA table_info(music_tracks)").all<{
+		name: string;
+	}>();
+	const hasContentHash = (columns.results ?? []).some(
+		(column) => column.name === "content_hash",
+	);
+	if (!hasContentHash) {
+		try {
+			await env.DB.prepare(
+				"ALTER TABLE music_tracks ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''",
+			).run();
+		} catch (error) {
+			if (!isDuplicateColumnError(error)) throw error;
+		}
+	}
+
+	await env.DB.prepare(
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_music_tracks_content_hash_unique
+		 ON music_tracks (content_hash)
+		 WHERE content_hash <> ''`,
+	).run();
+	await env.DB.prepare(
+		`CREATE INDEX IF NOT EXISTS idx_music_tracks_content_hash
+		 ON music_tracks (content_hash)`,
+	).run();
+	musicContentHashSchemaReady = true;
+}
+
+function isDuplicateColumnError(error: unknown): boolean {
+	const message = error instanceof Error ? error.message : String(error ?? "");
+	return message.toLowerCase().includes("duplicate column");
+}
+
+async function deleteStoredMusicTrack(
+	env: Env,
+	track: MusicTrackStorageRef,
+): Promise<void> {
+	await env.DB.prepare("DELETE FROM music_tracks WHERE id = ?")
+		.bind(track.id)
+		.run();
+	await deleteMusicTrackStorage(env, track);
+}
+
+async function deleteMusicTrackStorage(
+	env: Env,
+	track: MusicTrackStorageRef,
+): Promise<string[]> {
+	if (!env.MEDIA_BUCKET) return [];
+	const keys = musicStorageKeys(track);
+	const results = await Promise.allSettled(
+		keys.map(async (key) => {
+			await env.MEDIA_BUCKET.delete(key);
+			return key;
+		}),
+	);
+	const deleted: string[] = [];
+	for (const result of results) {
+		if (result.status === "fulfilled") {
+			deleted.push(result.value);
+		} else {
+			console.warn("Failed to delete music object", result.reason);
+		}
+	}
+	return deleted;
+}
+
+function musicStorageKeys(track: MusicTrackStorageRef): string[] {
+	const keys = new Set<string>();
+	const objectKey = safeNormalizeMediaKey(track.objectKey, "music");
+	if (objectKey) keys.add(objectKey);
+	const coverKey = generatedCoverObjectKey(track.coverUrl ?? "");
+	if (coverKey) keys.add(coverKey);
+	return [...keys];
+}
+
+function generatedCoverObjectKey(coverUrl: string): string | null {
+	if (!coverUrl.startsWith("/media/covers/")) return null;
+	if (coverUrl.startsWith("/media/covers/from-music/")) return null;
+	return safeNormalizeMediaKey(
+		coverUrl.slice("/media/covers/".length),
+		"covers",
+	);
+}
 
 function musicCoverUrl(value: string, objectKey = ""): string {
 	if (value) return value;
@@ -709,15 +825,20 @@ async function findMusicTrackByHash(
 	env: Env,
 	hash: string,
 ): Promise<ExistingMusicTrackRef | null> {
-	const track = await env.DB.prepare(
-		`SELECT id, object_key AS objectKey
+	try {
+		const track = await env.DB.prepare(
+			`SELECT id, object_key AS objectKey, cover_url AS coverUrl
 	     FROM music_tracks
 	     WHERE content_hash = ? AND content_hash != ''
 	     LIMIT 1`,
-	)
-		.bind(hash)
-		.first<ExistingMusicTrackRef>();
-	return track ?? null;
+		)
+			.bind(hash)
+			.first<ExistingMusicTrackRef>();
+		return track ?? null;
+	} catch (error) {
+		if (isMissingD1SchemaError(error)) return null;
+		throw error;
+	}
 }
 
 async function findMusicTrackByObjectKey(
@@ -725,7 +846,7 @@ async function findMusicTrackByObjectKey(
 	objectKey: string,
 ): Promise<ExistingMusicTrackRef | null> {
 	const track = await env.DB.prepare(
-		`SELECT id, object_key AS objectKey
+		`SELECT id, object_key AS objectKey, cover_url AS coverUrl
 	     FROM music_tracks
 	     WHERE object_key = ?
 	     LIMIT 1`,
