@@ -12,7 +12,7 @@ async function hasLocalPostFiles(dir = postsDir): Promise<boolean> {
 		for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
 			if (entry.name.startsWith(".")) continue;
 			const entryPath = path.join(dir, entry.name);
-			if (entry.isFile() && /\.(md|mdx)$/i.test(entry.name)) return true;
+			if (entry.isFile() && /\.md$/i.test(entry.name)) return true;
 			if (entry.isDirectory() && (await hasLocalPostFiles(entryPath))) {
 				return true;
 			}

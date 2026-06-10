@@ -31,7 +31,7 @@ import {
 export type ParsedPostZip = {
 	slug: string;
 	sourceKey: string;
-	format: "md" | "mdx";
+	format: "md";
 	markdown: string;
 	frontmatter: ContentFrontmatter;
 	contentHash: string;
@@ -305,7 +305,9 @@ async function uploadContentPost(
 		return json({ error: apiError("CONTENT_ZIP_TYPE_INVALID") }, 400);
 	}
 
-	const bodyError = rejectOversizedBody(request, MAX_POST_ZIP_UPLOAD_BYTES);
+	const bodyError = rejectOversizedBody(request, MAX_POST_ZIP_UPLOAD_BYTES, {
+		requireContentLength: true,
+	});
 	if (bodyError) return bodyError;
 
 	const formData = await request.formData();
@@ -376,13 +378,6 @@ async function saveParsedPost(
 
 	let insertedId = 0;
 	try {
-		for (const file of parsed.files) {
-			await env.MEDIA_BUCKET.put(file.key, file.bytes, {
-				httpMetadata: { contentType: file.contentType },
-			});
-			uploadedKeys.push(file.key);
-		}
-
 		const result = await env.DB.prepare(
 			`INSERT INTO content_posts
        (slug, source_key, format, title, description, image, tags_json, category, lang,
@@ -401,15 +396,31 @@ async function saveParsedPost(
 				parsed.frontmatter.lang,
 				parsed.frontmatter.published,
 				parsed.frontmatter.updated,
-				status,
+				"draft",
 				parsed.contentHash,
 				JSON.stringify(stripBytes(parsed.files)),
-				deployStatus,
+				"idle",
 			)
 			.run();
 		insertedId = Number(result.meta.last_row_id ?? 0);
+
+		for (const file of parsed.files) {
+			await env.MEDIA_BUCKET.put(file.key, file.bytes, {
+				httpMetadata: { contentType: file.contentType },
+			});
+			uploadedKeys.push(file.key);
+		}
+
+		await env.DB.prepare(
+			`UPDATE content_posts
+       SET status = ?, deploy_status = ?, deployment_error = ''
+       WHERE id = ?`,
+		)
+			.bind(status, deployStatus, insertedId)
+			.run();
 	} catch (error) {
 		await deleteUploadedContentObjects(env, uploadedKeys);
+		if (insertedId > 0) await deleteInsertedContentRow(env, insertedId);
 		if (isD1ConstraintError(error)) {
 			return null;
 		}
@@ -418,6 +429,21 @@ async function saveParsedPost(
 
 	const row = await getContentRow(env, parsed.slug);
 	return row ? toContentPostDto(row) : ({ id: insertedId } as ContentPostDto);
+}
+
+async function deleteInsertedContentRow(env: Env, id: number): Promise<void> {
+	try {
+		await env.DB.prepare(
+			"DELETE FROM content_posts WHERE id = ? AND status = 'draft'",
+		)
+			.bind(id)
+			.run();
+	} catch (error) {
+		console.warn("Failed to clean up inserted content row", {
+			id,
+			message: error instanceof Error ? error.message : String(error),
+		});
+	}
 }
 
 async function deleteUploadedContentObjects(
@@ -637,9 +663,37 @@ export async function parsePostArchive(
 	bytes: ArrayBuffer,
 ): Promise<ParsedPostZip[] | Response> {
 	let entries: Record<string, Uint8Array>;
+	const archiveError: {
+		key: "CONTENT_ZIP_INVALID" | "CONTENT_ZIP_TOO_LARGE" | "";
+	} = { key: "" };
 	try {
-		entries = unzipSync(new Uint8Array(bytes));
+		let announcedExpandedBytes = 0;
+		let announcedFileCount = 0;
+		entries = unzipSync(new Uint8Array(bytes), {
+			filter(file) {
+				const path = normalizeZipPath(file.name);
+				if (!path) {
+					if (isIgnorableZipEntry(file.name)) return false;
+					archiveError.key = "CONTENT_ZIP_INVALID";
+					throw new Error(archiveError.key);
+				}
+				announcedExpandedBytes += file.originalSize;
+				if (announcedExpandedBytes > MAX_POST_EXPANDED_BYTES) {
+					archiveError.key = "CONTENT_ZIP_TOO_LARGE";
+					throw new Error(archiveError.key);
+				}
+				announcedFileCount += 1;
+				if (announcedFileCount > MAX_POST_FILE_COUNT) {
+					archiveError.key = "CONTENT_ZIP_INVALID";
+					throw new Error(archiveError.key);
+				}
+				return true;
+			},
+		});
 	} catch {
+		if (archiveError.key === "CONTENT_ZIP_TOO_LARGE") {
+			return json({ error: apiError("CONTENT_ZIP_TOO_LARGE") }, 413);
+		}
 		return json({ error: apiError("CONTENT_ZIP_INVALID") }, 400);
 	}
 
@@ -695,8 +749,8 @@ function groupArchiveEntries(
 	>();
 	for (const entry of cleanEntries) {
 		const parts = entry.path.split("/");
-		if (parts.length === 1 && /\.(md|mdx)$/i.test(parts[0])) {
-			const slug = parts[0].replace(/\.(md|mdx)$/i, "");
+		if (parts.length === 1 && /\.md$/i.test(parts[0])) {
+			const slug = parts[0].replace(/\.md$/i, "");
 			if (!isValidContentSlug(slug)) {
 				return json({ error: apiError("CONTENT_SLUG_INVALID") }, 400);
 			}
@@ -758,7 +812,7 @@ async function parseArticleEntries(
 
 	const indexFiles = normalized.filter((entry) => {
 		const parts = entry.path.split("/");
-		return parts.length === 1 && /^index\.(md|mdx)$/i.test(parts[0]);
+		return parts.length === 1 && /^index\.md$/i.test(parts[0]);
 	});
 	if (indexFiles.length !== 1) {
 		return json({ error: apiError("CONTENT_ZIP_INVALID") }, 400);
@@ -788,15 +842,17 @@ async function parseArticleEntries(
 		});
 	}
 
-	const index = files.find((file) => /^index\.(md|mdx)$/i.test(file.path));
+	const index = files.find((file) => /^index\.md$/i.test(file.path));
 	if (!index) return json({ error: apiError("CONTENT_ZIP_INVALID") }, 400);
 	const markdown = decoder.decode(index.bytes);
-	const format = extensionOf(index.path) as "md" | "mdx";
+	const format = "md";
 	const frontmatter = parseFrontmatter(markdown);
 	if (frontmatter instanceof Response) return frontmatter;
 	if (!frontmatter.title || !frontmatter.published) {
 		return json({ error: apiError("CONTENT_ZIP_INVALID") }, 400);
 	}
+	const imageError = validateFrontmatterImage(frontmatter.image, files);
+	if (imageError) return imageError;
 	const contentHash = await hashParsedFiles(files);
 
 	return {
@@ -866,8 +922,6 @@ function contentTypeForPath(value: string): string {
 			return "image/jpeg";
 		case "md":
 			return "text/markdown; charset=utf-8";
-		case "mdx":
-			return "text/markdown; charset=utf-8";
 		case "png":
 			return "image/png";
 		case "webp":
@@ -875,6 +929,30 @@ function contentTypeForPath(value: string): string {
 		default:
 			return "application/octet-stream";
 	}
+}
+
+function validateFrontmatterImage(
+	image: string,
+	files: ParsedZipFile[],
+): Response | null {
+	const value = image.trim();
+	if (!value) return null;
+	if (/^(?:https?:\/\/|data:|\/)/i.test(value)) return null;
+	if (/^[a-z][a-z0-9+.-]*:/i.test(value)) {
+		return json({ error: apiError("CONTENT_ZIP_INVALID") }, 400);
+	}
+
+	const reference = safeDecodePathSegment(value.split(/[?#]/, 1)[0] ?? "")
+		.replace(/^\.\//, "")
+		.trim();
+	const normalized = normalizeZipPath(reference);
+	if (!normalized || !ALLOWED_ASSET_EXTENSIONS.has(extensionOf(normalized))) {
+		return json({ error: apiError("CONTENT_ZIP_INVALID") }, 400);
+	}
+	if (!files.some((file) => file.path === normalized)) {
+		return json({ error: apiError("CONTENT_ZIP_INVALID") }, 400);
+	}
+	return null;
 }
 
 function parseFrontmatter(markdown: string): ContentFrontmatter | Response {

@@ -224,9 +224,17 @@ export async function recordStatsVisit(
 // ================================================================
 
 export async function getStatsSummaryResponse(
+	request: Request,
 	env: Env,
 	requestUrl: URL,
 ): Promise<Response> {
+	const rateLimit = await enforceRateLimit(
+		request,
+		env,
+		RATE_LIMITS.statsSummary,
+	);
+	if (rateLimit) return rateLimit;
+
 	const readyError = await ensureStatsReady(env);
 	if (readyError) return readyError;
 

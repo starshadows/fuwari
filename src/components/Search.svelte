@@ -39,6 +39,14 @@ const fakeResult: SearchResult[] = [
 	},
 ];
 
+const escapeHtml = (text: string): string =>
+	text
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;")
+		.replace(/'/g, "&#39;");
+
 // Strip all HTML tags except <mark> (used by pagefind for highlighting).
 // Defence-in-depth: pagefind indexes only site-owned content, but { @html }
 // should never render unsanitized markup from an external data source.
@@ -54,7 +62,7 @@ const sanitizeExcerpt = (html: string): string => {
 		const doc = new DOMParser().parseFromString(html, "text/html");
 		const walk = (node: ChildNode): string => {
 			if (node.nodeType === Node.TEXT_NODE) {
-				return node.textContent ?? "";
+				return escapeHtml(node.textContent ?? "");
 			}
 			if (node.nodeType === Node.ELEMENT_NODE) {
 				const el = node as Element;
@@ -72,7 +80,7 @@ const sanitizeExcerpt = (html: string): string => {
 		return Array.from(doc.body.childNodes).map(walk).join("");
 	} catch {
 		// If DOMParser fails for any reason, strip all HTML as a safe fallback.
-		return html.replace(/<[^>]*>/g, "");
+		return escapeHtml(html.replace(/<[^>]*>/g, ""));
 	}
 };
 

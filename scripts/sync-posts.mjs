@@ -12,7 +12,9 @@ const baseUrl = stripTrailingSlash(
 		"",
 );
 const token = process.env.CONTENT_SYNC_TOKEN || "";
-const strict = process.env.CONTENT_SYNC_STRICT === "true";
+const strict =
+	process.env.CONTENT_SYNC_STRICT === "true" ||
+	(process.env.VERCEL === "1" && process.env.CONTENT_SYNC_STRICT !== "false");
 const disabled = process.env.CONTENT_SYNC_ENABLED === "false";
 
 if (disabled) {
@@ -24,6 +26,11 @@ if (disabled) {
 }
 
 if (!baseUrl || !token) {
+	if (strict) {
+		throw new Error(
+			"CONTENT_SYNC_BASE_URL/FUWARI_CONTENT_API_BASE_URL and CONTENT_SYNC_TOKEN are required in strict content sync mode.",
+		);
+	}
 	await writeEmptyPosts(
 		"CONTENT_SYNC_BASE_URL/FUWARI_CONTENT_API_BASE_URL or CONTENT_SYNC_TOKEN is not set; building with an empty posts collection.",
 	);
@@ -164,16 +171,28 @@ async function collectMarkdownFiles(dir, files) {
 			continue;
 		}
 
-		if (stat.isFile() && /\.(md|mdx)$/i.test(entry)) files.push(entryPath);
+		if (stat.isFile() && /\.mdx$/i.test(entry)) {
+			throw new Error(
+				`Synced MDX post is not supported without @astrojs/mdx: ${path.relative(rootDir, entryPath)}`,
+			);
+		}
+		if (stat.isFile() && /\.md$/i.test(entry)) files.push(entryPath);
 	}
 }
 
 function markdownRelativeReferences(markdown) {
 	const references = new Set();
+	const frontmatterImage = readFrontmatterImage(markdown);
 	const markdownImagePattern = /!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
 	const htmlSourcePattern = /\b(?:src|href)=["'](\.\.?\/[^"']+)["']/g;
 	const relativeImagePattern =
 		/(?:^|[\s"'(:])((?:\.\.?\/)[^\s"'<>)]*\.(?:avif|gif|jpe?g|png|svg|webp)(?:[?#][^\s"'<>)]*)?)/gim;
+
+	if (isLocalRelativeReference(frontmatterImage))
+		references.add(frontmatterImage);
+	if (frontmatterImage && !isExternalReference(frontmatterImage)) {
+		references.add(`./${frontmatterImage}`);
+	}
 
 	for (const match of markdown.matchAll(markdownImagePattern)) {
 		const value = normalizeMarkdownUrl(match[1]);
@@ -199,4 +218,19 @@ function normalizeMarkdownUrl(value) {
 
 function isLocalRelativeReference(value) {
 	return value.startsWith("./") || value.startsWith("../");
+}
+
+function isExternalReference(value) {
+	return /^(?:[a-z][a-z0-9+.-]*:|\/)/i.test(value);
+}
+
+function readFrontmatterImage(markdown) {
+	const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(markdown);
+	const raw = match?.[1] ?? "";
+	for (const line of raw.split(/\r?\n/)) {
+		const field = /^image\s*:\s*(.*)$/.exec(line);
+		if (!field) continue;
+		return normalizeMarkdownUrl(field[1].replace(/^['"]|['"]$/g, ""));
+	}
+	return "";
 }

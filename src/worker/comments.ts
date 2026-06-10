@@ -303,6 +303,14 @@ export async function handleTwikooRequest(
 		});
 		if (rl) return rl;
 	}
+	if (event === "COMMENT_GET") {
+		const rl = await enforceRateLimit(
+			request,
+			env,
+			RATE_LIMITS.twikooCommentGet,
+		);
+		if (rl) return rl;
+	}
 	if (event === "GET_COMMENTS_COUNT") {
 		const rl = await enforceRateLimit(
 			request,

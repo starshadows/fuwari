@@ -16,23 +16,44 @@ function stripInvalidXmlChars(str: string): string {
 	);
 }
 
+function absolutizeFeedUrls(html: string, postUrl: URL, siteUrl: URL): string {
+	return html.replace(
+		/\b(src|href)=("|')([^"']+)\2/g,
+		(_, attr: string, quote: string, rawValue: string) => {
+			if (/^(?:[a-z][a-z0-9+.-]*:|#)/i.test(rawValue)) {
+				return `${attr}=${quote}${rawValue}${quote}`;
+			}
+			const baseUrl = rawValue.startsWith("/") ? siteUrl : postUrl;
+			return `${attr}=${quote}${new URL(rawValue, baseUrl).toString()}${quote}`;
+		},
+	);
+}
+
 export async function GET(context: APIContext): Promise<Response> {
 	const blog = await getSortedPosts();
+	const siteUrl = new URL(context.site ?? "https://blog.starshadow.cc/");
 
 	return rss({
 		title: siteConfig.title,
 		description: siteConfig.subtitle || "No description",
-		site: context.site ?? "https://fuwari.vercel.app",
+		site: siteUrl,
 		items: blog.map((post) => {
 			const content =
 				typeof post.body === "string" ? post.body : String(post.body || "");
 			const cleanedContent = stripInvalidXmlChars(content);
+			const postPath = url(`/posts/${getPostSlugById(post.id)}/`);
+			const postUrl = new URL(postPath, siteUrl);
+			const renderedContent = absolutizeFeedUrls(
+				parser.render(cleanedContent),
+				postUrl,
+				siteUrl,
+			);
 			return {
 				title: post.data.title,
 				pubDate: post.data.published,
 				description: post.data.description || "",
-				link: url(`/posts/${getPostSlugById(post.id)}/`),
-				content: sanitizeHtml(parser.render(cleanedContent), {
+				link: postPath,
+				content: sanitizeHtml(renderedContent, {
 					allowedTags: sanitizeHtml.defaults.allowedTags.concat(["img"]),
 				}),
 			};

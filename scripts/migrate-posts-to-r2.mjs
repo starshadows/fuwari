@@ -74,9 +74,9 @@ async function discoverArticles(baseDir) {
 	for (const entry of entries) {
 		if (entry.name.startsWith(".")) continue;
 		const fullPath = path.join(baseDir, entry.name);
-		if (entry.isFile() && /\.(md|mdx)$/i.test(entry.name)) {
+		if (entry.isFile() && /\.md$/i.test(entry.name)) {
 			articles.push({
-				slug: entry.name.replace(/\.(md|mdx)$/i, ""),
+				slug: entry.name.replace(/\.md$/i, ""),
 				root: baseDir,
 				files: [
 					{ absolute: fullPath, relative: `index${path.extname(entry.name)}` },
@@ -97,7 +97,7 @@ async function discoverArticles(baseDir) {
 }
 
 async function findIndexFile(dir) {
-	for (const name of ["index.md", "index.mdx"]) {
+	for (const name of ["index.md"]) {
 		const candidate = path.join(dir, name);
 		try {
 			const stat = await fs.stat(candidate);

@@ -341,7 +341,7 @@ async function handleApi(
 		if (pathname === "/api/stats/summary" && request.method === "GET") {
 			return withStatsCors(
 				request,
-				await getStatsSummaryResponse(env, requestUrl),
+				await getStatsSummaryResponse(request, env, requestUrl),
 			);
 		}
 		if (pathname === "/api/stats/visit" && request.method === "POST") {

@@ -49,8 +49,11 @@ if (segments.some((s) => !s || s === "." || s === ".." || s.startsWith("."))) {
 }
 
 // Add .md extension if not present
-const fileExtensionRegex = /\.(md|mdx)$/i;
-if (!fileExtensionRegex.test(fileName)) {
+if (/\.mdx$/i.test(fileName)) {
+	console.error("Error: MDX posts are not supported. Use a .md filename.");
+	process.exit(1);
+}
+if (!/\.md$/i.test(fileName)) {
 	fileName += ".md";
 }
 

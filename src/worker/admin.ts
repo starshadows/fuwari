@@ -102,12 +102,15 @@ export async function handleAdminApi(
 
 	// Friends
 	if (segments[2] === "friends") {
-		const id = segments[3] ? Number.parseInt(segments[3], 10) : null;
-		if (request.method === "GET" && !id)
+		const id = segments[3] ? parseAdminRouteId(segments[3]) : null;
+		if (segments[3] && id === null) {
+			return json({ error: apiError("FRIEND_ID_INVALID") }, 400);
+		}
+		if (request.method === "GET" && !segments[3])
 			return listAdminFriends(env, requestUrl);
-		if (request.method === "PATCH" && id)
+		if (request.method === "PATCH" && id !== null)
 			return updateFriend(request, env, id, ctx);
-		if (request.method === "DELETE" && id)
+		if (request.method === "DELETE" && id !== null)
 			return deleteFriend(request, env, id, ctx);
 	}
 
@@ -122,13 +125,16 @@ export async function handleAdminApi(
 		if (segments[3] === "upload" && request.method === "POST")
 			return uploadMusicFiles(request, env, ctx);
 
-		const id = segments[3] ? Number.parseInt(segments[3], 10) : null;
-		if (request.method === "GET" && !id) return listAdminMusic(env);
-		if (request.method === "POST" && !id)
+		const id = segments[3] ? parseAdminRouteId(segments[3]) : null;
+		if (segments[3] && id === null) {
+			return json({ error: apiError("MUSIC_ID_INVALID") }, 400);
+		}
+		if (request.method === "GET" && !segments[3]) return listAdminMusic(env);
+		if (request.method === "POST" && !segments[3])
 			return createMusicTrack(request, env, ctx);
-		if (request.method === "PATCH" && id)
+		if (request.method === "PATCH" && id !== null)
 			return updateMusicTrack(request, env, id, ctx);
-		if (request.method === "DELETE" && id)
+		if (request.method === "DELETE" && id !== null)
 			return deleteMusicTrack(request, env, id, ctx);
 	}
 
@@ -137,6 +143,12 @@ export async function handleAdminApi(
 		return handleAdminContentApi(request, env, requestUrl, ctx);
 	}
 	return json({ error: apiError("NOT_FOUND") }, 404);
+}
+
+function parseAdminRouteId(value: string): number | null {
+	if (!/^[1-9]\d{0,15}$/.test(value)) return null;
+	const id = Number(value);
+	return Number.isSafeInteger(id) ? id : null;
 }
 
 function rejectAdminCrossSiteWrite(request: Request): Response | null {

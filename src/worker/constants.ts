@@ -78,6 +78,7 @@ export const RATE_LIMITS: Record<string, RateLimitConfig> = {
 		windowSeconds: 10 * 60,
 	},
 	statsWrite: { scope: "stats-write", limit: 240, windowSeconds: 10 * 60 },
+	statsSummary: { scope: "stats-summary", limit: 240, windowSeconds: 10 * 60 },
 	setupInitDb: { scope: "setup-init-db", limit: 5, windowSeconds: 10 * 60 },
 	contentSyncAuth: {
 		scope: "content-sync-auth",
@@ -92,6 +93,11 @@ export const RATE_LIMITS: Record<string, RateLimitConfig> = {
 	twikooCommentsCount: {
 		scope: "twikoo-comments-count",
 		limit: 120,
+		windowSeconds: 10 * 60,
+	},
+	twikooCommentGet: {
+		scope: "twikoo-comment-get",
+		limit: 240,
 		windowSeconds: 10 * 60,
 	},
 	twikooRecentComments: {

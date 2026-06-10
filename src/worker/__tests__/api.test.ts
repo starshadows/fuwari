@@ -549,6 +549,30 @@ published: 2026-01-01
 		if (parsed instanceof Response) expect(parsed.status).toBe(400);
 	});
 
+	it("rejects MDX index files until MDX is configured", async () => {
+		const parsed = await content.parsePostZip(
+			articleZip({
+				"hello/index.mdx": "---\ntitle: Hello\npublished: 2026-01-01\n---",
+			}),
+		);
+		expect(parsed).toBeInstanceOf(Response);
+		if (parsed instanceof Response) expect(parsed.status).toBe(400);
+	});
+
+	it("rejects missing local frontmatter images", async () => {
+		const parsed = await content.parsePostZip(
+			articleZip({
+				"hello/index.md": `---
+title: Hello
+published: 2026-01-01
+image: cover.webp
+---`,
+			}),
+		);
+		expect(parsed).toBeInstanceOf(Response);
+		if (parsed instanceof Response) expect(parsed.status).toBe(400);
+	});
+
 	it("rejects ZIPs with more than one index document", async () => {
 		const parsed = await content.parsePostZip(
 			articleZip({
@@ -961,7 +985,44 @@ describe("Admin content management", () => {
 		return { db, failedStmt };
 	}
 
-	it("cleans up uploaded R2 objects when the D1 insert fails", async () => {
+	it("rejects content upload without content-length", async () => {
+		const bucket = mockR2Bucket();
+		const formData = new FormData();
+		formData.append(
+			"file",
+			new File(
+				[
+					articleZip({
+						"hello/index.md": `---
+title: Hello
+published: 2026-01-01
+---
+# Hello`,
+					}),
+				],
+				"hello.zip",
+				{ type: "application/zip" },
+			),
+		);
+
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/admin/content", {
+				method: "POST",
+				headers: {
+					origin: "https://blog.example.com",
+					"x-fuwari-admin-token": "test-admin-token",
+				},
+				body: formData,
+			}),
+			mockEnv({ DB: contentAdminDb(), MEDIA_BUCKET: bucket }),
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(411);
+		expect(bucket.put).not.toHaveBeenCalled();
+	});
+
+	it("does not write R2 objects when the D1 insert fails", async () => {
 		const bucket = mockR2Bucket();
 		const formData = new FormData();
 		formData.append(
@@ -987,6 +1048,7 @@ published: 2026-01-01
 				method: "POST",
 				headers: {
 					origin: "https://blog.example.com",
+					"content-length": "1024",
 					"x-fuwari-admin-token": "test-admin-token",
 				},
 				body: formData,
@@ -996,9 +1058,90 @@ published: 2026-01-01
 		);
 
 		expect(res.status).toBe(409);
-		expect(bucket.put).toHaveBeenCalledTimes(2);
-		expect(bucket.delete).toHaveBeenCalledWith("posts/hello/index.md");
-		expect(bucket.delete).toHaveBeenCalledWith("posts/hello/cover.webp");
+		expect(bucket.put).not.toHaveBeenCalled();
+		expect(bucket.delete).not.toHaveBeenCalled();
+	});
+
+	it("cleans up the draft row when R2 upload fails", async () => {
+		const bucket = mockR2Bucket();
+		vi.mocked(bucket.put).mockRejectedValue(new Error("R2 unavailable"));
+		const deleteStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		const contentTableStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue({ name: "content_posts" }),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		const existingPostStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		const genericStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi
+				.fn()
+				.mockResolvedValue({ success: true, meta: { last_row_id: 7 } }),
+		};
+		const db = {
+			prepare: vi.fn((sql: string) => {
+				if (sql.includes("sqlite_master") && sql.includes("content_posts")) {
+					return contentTableStmt;
+				}
+				if (sql.includes("FROM content_posts WHERE slug = ?")) {
+					return existingPostStmt;
+				}
+				if (sql.includes("DELETE FROM content_posts WHERE id = ?")) {
+					return deleteStmt;
+				}
+				return genericStmt;
+			}),
+			batch: vi.fn().mockResolvedValue([]),
+			exec: vi.fn().mockResolvedValue({ count: 0, duration: 0 }),
+			dump: vi.fn().mockResolvedValue([]),
+		} as unknown as D1Database;
+		const formData = new FormData();
+		formData.append(
+			"file",
+			new File(
+				[
+					articleZip({
+						"hello/index.md": `---
+title: Hello
+published: 2026-01-01
+---
+# Hello`,
+					}),
+				],
+				"hello.zip",
+				{ type: "application/zip" },
+			),
+		);
+
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/admin/content", {
+				method: "POST",
+				headers: {
+					origin: "https://blog.example.com",
+					"content-length": "1024",
+					"x-fuwari-admin-token": "test-admin-token",
+				},
+				body: formData,
+			}),
+			mockEnv({ DB: db, MEDIA_BUCKET: bucket }),
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(500);
+		expect(deleteStmt.bind).toHaveBeenCalledWith(7);
 	});
 
 	it("unpublishes content without triggering Vercel until deploy is requested", async () => {
@@ -1835,6 +1978,74 @@ describe("Admin auth", () => {
 		);
 
 		expect(res.status).toBe(200);
+	});
+
+	it("rejects malformed admin route ids", async () => {
+		const env = mockEnv();
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/admin/friends/1abc", {
+				method: "DELETE",
+				headers: {
+					origin: "https://blog.example.com",
+					"x-fuwari-admin-token": "test-admin-token",
+				},
+			}),
+			env,
+			mockCtx(),
+		);
+		expect(res.status).toBe(400);
+	});
+});
+
+// ================================================================
+// Public stats rate limiting
+// ================================================================
+describe("Stats API", () => {
+	let worker: Awaited<typeof import("../index")>;
+
+	beforeAll(async () => {
+		worker = await import("../index");
+	});
+
+	it("rate-limits public stats summary reads", async () => {
+		const saltStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue({ value: "stable-salt" }),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		const countStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi
+				.fn()
+				.mockResolvedValue({ count: RATE_LIMITS.statsSummary.limit + 1 }),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		const genericStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		const db = {
+			prepare: vi.fn((sql: string) => {
+				if (sql.includes("SELECT value FROM app_settings")) return saltStmt;
+				if (sql.includes("SELECT count FROM rate_limits")) return countStmt;
+				return genericStmt;
+			}),
+			batch: vi.fn().mockResolvedValue([]),
+			exec: vi.fn().mockResolvedValue({ count: 0, duration: 0 }),
+			dump: vi.fn().mockResolvedValue([]),
+		} as unknown as D1Database;
+
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/stats/summary"),
+			mockEnv({ DB: db }),
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(429);
 	});
 });
 
@@ -3294,6 +3505,47 @@ describe("Twikoo security", () => {
 		expect(res.status).toBe(200);
 		const body = (await res.json()) as { version: string };
 		expect(body).toHaveProperty("version");
+	});
+
+	it("rate-limits public COMMENT_GET reads", async () => {
+		const saltStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue({ value: "stable-salt" }),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		const countStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi
+				.fn()
+				.mockResolvedValue({ count: RATE_LIMITS.twikooCommentGet.limit + 1 }),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		const genericStmt = {
+			bind: vi.fn().mockReturnThis(),
+			first: vi.fn().mockResolvedValue(null),
+			all: vi.fn().mockResolvedValue({ results: [] }),
+			run: vi.fn().mockResolvedValue({ success: true }),
+		};
+		const db = {
+			prepare: vi.fn((sql: string) => {
+				if (sql.includes("SELECT value FROM app_settings")) return saltStmt;
+				if (sql.includes("SELECT count FROM rate_limits")) return countStmt;
+				return genericStmt;
+			}),
+			batch: vi.fn().mockResolvedValue([]),
+			exec: vi.fn().mockResolvedValue({ count: 0, duration: 0 }),
+			dump: vi.fn().mockResolvedValue([]),
+		} as unknown as D1Database;
+
+		const res = await worker.default.fetch(
+			twikooRequest("COMMENT_GET", { url: "/posts/test/" }),
+			mockEnv({ DB: db }),
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(429);
 	});
 
 	it("rejects Twikoo admin login on the public comments endpoint", async () => {
