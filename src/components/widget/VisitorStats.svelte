@@ -1,5 +1,6 @@
 <script lang="ts">
 import Icon from "@iconify/svelte";
+import { apiUrl } from "@utils/api-utils";
 import { onMount } from "svelte";
 
 type StatsSummary = {
@@ -22,7 +23,6 @@ type StatsSummary = {
 };
 
 const VISITOR_ID_KEY = "starshadow-visitor-id";
-const STATS_API_BASE = import.meta.env.PROD ? "https://api.starshadow.cc" : "";
 
 let stats: StatsSummary | null = null;
 let isLoading = true;
@@ -83,8 +83,6 @@ const getVisitorId = () => {
 
 const currentPath = () => window.location.pathname || "/";
 
-const statsApiUrl = (path: string) => `${STATS_API_BASE}${path}`;
-
 const statsPayload = (path: string) =>
 	JSON.stringify({
 		path,
@@ -98,7 +96,7 @@ const applyStatsSummary = (data: StatsSummary, path = currentPath()) => {
 };
 
 const sendStatsVisit = async (path = currentPath()): Promise<StatsSummary> => {
-	const url = statsApiUrl("/api/stats/visit");
+	const url = apiUrl("/api/stats/visit");
 	const body = statsPayload(path);
 	const response = await fetch(url, {
 		method: "POST",
@@ -116,7 +114,7 @@ const loadStatsSummary = async (
 	path = currentPath(),
 ): Promise<StatsSummary> => {
 	const response = await fetch(
-		statsApiUrl(
+		apiUrl(
 			`/api/stats/summary?path=${encodeURIComponent(path)}&_=${Date.now()}`,
 		),
 		{
