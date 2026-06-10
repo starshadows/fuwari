@@ -22,7 +22,8 @@ type StoredPlayerState = {
 	updatedAt: number;
 };
 
-const DEFAULT_VOLUME = 0.72;
+const MAX_AUDIO_VOLUME = 0.3;
+const DEFAULT_VOLUME = 0.8;
 const PLAYER_STORAGE_KEY = "fuwari:music-player:v1";
 const PLAYER_STATE_SAVE_INTERVAL_MS = 1000;
 const RESUME_END_BUFFER_SECONDS = 3;
@@ -78,6 +79,8 @@ $: currentPlayMode =
 
 const clamp = (value: number, min: number, max: number) =>
 	Math.min(max, Math.max(min, value));
+
+const toAudioVolume = (value: number) => clamp(value, 0, 1) * MAX_AUDIO_VOLUME;
 
 const isPlayMode = (value: unknown): value is PlayMode =>
 	value === "shuffle" || value === "repeat-one" || value === "order";
@@ -294,7 +297,7 @@ const seek = (event: Event) => {
 const changeVolume = (event: Event) => {
 	const input = event.currentTarget as HTMLInputElement;
 	volume = clamp(Number(input.value) / 100, 0, 1);
-	if (audio) audio.volume = volume;
+	if (audio) audio.volume = toAudioVolume(volume);
 	savePlayerState(true);
 };
 
@@ -338,7 +341,7 @@ onMount(() => {
 
 	audio = new Audio();
 	audio.preload = "metadata";
-	audio.volume = volume;
+	audio.volume = toAudioVolume(volume);
 
 	const handleTimeUpdate = () => {
 		currentTime = audio.currentTime;
