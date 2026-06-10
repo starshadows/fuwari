@@ -150,7 +150,7 @@ let uploadResults: {
 let musicSectionsOpen = {
 	upload: true,
 	scan: false,
-	tracks: true,
+	tracks: false,
 };
 const musicSectionPanelIds = {
 	upload: "friend-admin-music-upload-panel",
