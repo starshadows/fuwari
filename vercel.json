@@ -3,5 +3,27 @@
 	"buildCommand": "pnpm build",
 	"framework": "astro",
 	"installCommand": "pnpm install --frozen-lockfile",
-	"outputDirectory": "dist"
+	"outputDirectory": "dist",
+	"rewrites": [
+		{
+			"source": "/friends/admin",
+			"destination": "/api/friends-admin"
+		},
+		{
+			"source": "/friends/admin/",
+			"destination": "/api/friends-admin"
+		},
+		{
+			"source": "/friends/admin/index.html",
+			"destination": "/api/friends-admin"
+		},
+		{
+			"source": "/worker-admin-shell/:path*",
+			"destination": "/api/admin-shell?path=:path*"
+		},
+		{
+			"source": "/media/:path*",
+			"destination": "/api/media-proxy?path=:path*"
+		}
+	]
 }

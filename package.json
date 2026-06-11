@@ -14,7 +14,7 @@
 		"build": "node scripts/sync-posts.mjs && astro build && pagefind --site dist --force-language zh",
 		"preview": "astro preview",
 		"worker:dev": "wrangler dev --port 8787",
-		"worker:deploy": "wrangler deploy",
+		"worker:deploy": "node scripts/worker-deploy.mjs",
 		"d1:migrate:local": "node scripts/d1-migrate.mjs --local",
 		"d1:migrate:remote": "node scripts/d1-migrate.mjs --remote",
 		"astro": "astro",

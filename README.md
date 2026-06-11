@@ -185,18 +185,22 @@ Worker 只负责后端 API 和 R2 媒体访问，不再承载前端静态站点�
 - D1 数据库，binding 名称必须是 `DB`
 - R2 bucket，binding 名称必须是 `MEDIA_BUCKET`
 
-`wrangler.jsonc` 只声明 Worker 入口，不声明 route、D1 或 R2，避免 Cloudflare Git 集成或 Wrangler 根据仓库配置自动创建/绑定资源：
+`wrangler.jsonc` 只保留通用 Worker 入口配置和 binding 名称，不提交具体 Cloudflare 资源 ID：
 
 ```jsonc
-"main": "src/worker/index.ts"
+"main": "src/worker/index.ts",
+"d1_databases": [{ "binding": "DB" }],
+"r2_buckets": [{ "binding": "MEDIA_BUCKET" }]
 ```
 
-在 Dashboard 的 Worker 绑定页面手动添加：
+生产部署必须显式提供真实资源绑定。绑定名固定，资源名/ID 按你的 Cloudflare 实际资源填写：
 
-- D1 数据库绑定：变量名 `DB`，数据库名称按实际资源选择。
-- R2 存储桶绑定：变量名 `MEDIA_BUCKET`，bucket 名称按实际资源选择。
+- D1 数据库绑定：变量名 `DB`，部署变量 `D1_DATABASE_ID` 填 D1 database UUID，`D1_DATABASE_NAME` 可选但建议填写实际名称。
+- R2 存储桶绑定：变量名 `MEDIA_BUCKET`，部署变量 `R2_BUCKET_NAME` 填实际 bucket 名称。
 
-资源名称可以不同，代码只依赖 binding 名称。如果未来改回完全由 Wrangler CLI 部署，再在 `wrangler.jsonc` 中补充真实的：
+`pnpm worker:deploy` 会用这些变量生成临时 `.wrangler/deploy-wrangler.jsonc`，再执行 Wrangler 部署。缺少 `D1_DATABASE_ID` 或 `R2_BUCKET_NAME` 时会直接失败，避免发布一个没有 `DB` / `MEDIA_BUCKET` 的 Worker 版本，把 Dashboard 绑定清空。不要直接运行 `wrangler deploy`；原始 `wrangler.jsonc` 没有资源 ID，不作为生产部署配置。
+
+资源名称可以不同，代码只依赖 binding 名称。如果未来改回把资源写进 `wrangler.jsonc`，再补充真实的：
 
 - `database_name`
 - `database_id`
@@ -252,7 +256,7 @@ curl -H "Authorization: Bearer <ADMIN_TOKEN>" \
 
 ### 4. 构建与部署
 
-当前生产建议使用 Cloudflare Workers Git 集成 / Dashboard 部署，并在 Dashboard 中保留 `DB`、`MEDIA_BUCKET` 绑定。`wrangler.jsonc` 不声明 D1/R2，因此直接执行 `pnpm worker:deploy` 会上传一个不带 D1/R2 绑定的 Worker 版本；只有在确认目标环境的绑定不会被覆盖，或已经改回 Wrangler 显式绑定配置后再使用该命令。
+当前生产必须使用 `pnpm worker:deploy` 作为 Cloudflare Workers Git 集成或 CI 的部署命令，不要使用默认 `wrangler deploy`。部署环境必须提供 `D1_DATABASE_ID` 和 `R2_BUCKET_NAME`，否则命令会失败退出，防止无绑定版本覆盖线上 Worker。
 
 Worker CLI 部署命令：
 
@@ -260,14 +264,15 @@ Worker CLI 部署命令：
 pnpm worker:deploy
 ```
 
-Vercel 前端部署使用 `vercel.json` 中的 `buildCommand`：`pnpm build`。构建前会执行 `scripts/sync-posts.mjs`，优先从 Worker/R2 拉取文章到 `src/content/posts/`。同步需要 `CONTENT_SYNC_BASE_URL` 或 `FUWARI_CONTENT_API_BASE_URL`，以及 `CONTENT_SYNC_TOKEN`。Vercel 的 `CONTENT_SYNC_TOKEN` 还用于保护内部后台 shell，必须与 Worker 的 `CONTENT_SYNC_TOKEN` 一致。如果 R2 文章清单为空、同步配置缺失或同步失败，默认会构建空文章列表；需要让同步失败直接阻断构建时，设置 `CONTENT_SYNC_STRICT=true`。仅本地调试需要保留本地草稿时，可以设置 `CONTENT_SYNC_ENABLED=false` 跳过同步。
+Vercel 前端部署使用 `vercel.json` 中的 `buildCommand`：`pnpm build`。构建前会执行 `scripts/sync-posts.mjs`，优先从 Worker/R2 拉取文章到 `src/content/posts/`。同步需要一个 Worker origin（`PUBLIC_API_ORIGIN`、`WORKER_ORIGIN`、`FUWARI_WORKER_ORIGIN`、`CONTENT_SYNC_BASE_URL` 或 `FUWARI_CONTENT_API_BASE_URL`）以及 `CONTENT_SYNC_TOKEN`。Vercel 的 `CONTENT_SYNC_TOKEN` 还用于保护内部后台 shell和代理写请求，必须与 Worker 的 `CONTENT_SYNC_TOKEN` 一致。如果 R2 文章清单为空、同步配置缺失或同步失败，默认会构建空文章列表；需要让同步失败直接阻断构建时，设置 `CONTENT_SYNC_STRICT=true`。仅本地调试需要保留本地草稿时，可以设置 `CONTENT_SYNC_ENABLED=false` 跳过同步。
 
 推荐的通用环境变量：
 
-- Vercel：`PUBLIC_SITE_ORIGIN` 设为前端 origin，`PUBLIC_API_ORIGIN` 设为 Worker origin，`CONTENT_SYNC_TOKEN` 与 Worker 保持一致。
-- Worker：`PUBLIC_SITE_ORIGIN` 设为前端 origin，用于跨域 CORS；`ADMIN_SHELL_ORIGIN` 可选，未设置时复用 `PUBLIC_SITE_ORIGIN`。
+- Vercel：`PUBLIC_SITE_ORIGIN` 设为前端 origin，`PUBLIC_API_ORIGIN` 设为 Worker origin，`CONTENT_SYNC_TOKEN` 与 Worker 保持一致。未设置 `PUBLIC_API_ORIGIN` 时，前端会走 Vercel `/api/*` 函数代理，但仍需要至少配置一个 Worker origin 变量。
+- Worker runtime：`PUBLIC_SITE_ORIGIN` 设为前端 origin，用于跨域 CORS；`ADMIN_SHELL_ORIGIN` 可选，未设置时复用 `PUBLIC_SITE_ORIGIN`。
+- Worker deploy：`D1_DATABASE_ID`、`R2_BUCKET_NAME` 必填，`D1_DATABASE_NAME` 可选。
 
-GitHub Actions 中不需要知道 D1/R2 资源名称；Worker 运行时会通过绑定名自动初始化 D1 schema。
+GitHub Actions 或 Cloudflare Git 集成需要知道 D1/R2 资源标识来声明绑定；Worker 运行时仍只通过绑定名 `DB` / `MEDIA_BUCKET` 使用资源，并自动初始化 D1 schema。
 
 ### 5. 部署后检查
 

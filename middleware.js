@@ -105,8 +105,14 @@ function firstForwardedIp(value) {
 }
 
 function missingWorkerOriginResponse() {
-	return new Response("Worker origin is not configured.", {
-		status: 503,
-		headers: { "cache-control": "no-store" },
-	});
+	return new Response(
+		JSON.stringify({ error: "WORKER_ORIGIN_NOT_CONFIGURED" }),
+		{
+			status: 503,
+			headers: {
+				"cache-control": "no-store",
+				"content-type": "application/json; charset=utf-8",
+			},
+		},
+	);
 }

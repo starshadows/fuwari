@@ -25,6 +25,9 @@ jobs:
     env:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID || vars.D1_DATABASE_ID }}
+      D1_DATABASE_NAME: ${{ vars.D1_DATABASE_NAME || secrets.D1_DATABASE_NAME }}
+      R2_BUCKET_NAME: ${{ vars.R2_BUCKET_NAME || secrets.R2_BUCKET_NAME }}
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -55,7 +58,7 @@ jobs:
 
       - name: Apply D1 migrations
         if: steps.cloudflare-credentials.outputs.configured == 'true'
-        run: pnpm wrangler d1 migrations apply fuwari-data --remote --yes
+        run: pnpm d1:migrate:remote
 
       - name: Deploy Worker
         if: steps.cloudflare-credentials.outputs.configured == 'true'

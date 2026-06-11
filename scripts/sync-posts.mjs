@@ -9,6 +9,9 @@ const postsTmpDir = path.join(projectRoot, "src", "content", ".posts-sync-tmp");
 const baseUrl = stripTrailingSlash(
 	process.env.CONTENT_SYNC_BASE_URL ||
 		process.env.FUWARI_CONTENT_API_BASE_URL ||
+		process.env.PUBLIC_API_ORIGIN ||
+		process.env.WORKER_ORIGIN ||
+		process.env.FUWARI_WORKER_ORIGIN ||
 		"",
 );
 const token = process.env.CONTENT_SYNC_TOKEN || "";

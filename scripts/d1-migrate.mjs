@@ -14,7 +14,16 @@ if (!databaseName) {
 const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 const child = spawn(
 	pnpm,
-	["exec", "wrangler", "d1", "migrations", "apply", databaseName, mode],
+	[
+		"exec",
+		"wrangler",
+		"d1",
+		"migrations",
+		"apply",
+		databaseName,
+		mode,
+		"--yes",
+	],
 	{ stdio: "inherit" },
 );
 

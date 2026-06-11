@@ -17,14 +17,17 @@
 - Worker secret：`ADMIN_TOKEN`
 - Worker/Vercel shared secret：`CONTENT_SYNC_TOKEN`
 - 可选 Worker secret：`VERCEL_DEPLOY_HOOK_URL`
+- Worker 部署变量：`D1_DATABASE_ID` 和 `R2_BUCKET_NAME`，用于生成带绑定的临时 Wrangler 配置，避免部署清空绑定。
 
 ## 常用环境变量
 
 - `PUBLIC_SITE_ORIGIN`：前端 origin，用于 Astro `site`、Worker CORS 和后台壳代理。
-- `PUBLIC_API_ORIGIN`：Worker origin，用于前端直连 API，也会被 Vercel middleware 用作代理目标。
-- `WORKER_ORIGIN` / `FUWARI_WORKER_ORIGIN`：Vercel middleware 代理目标的备用名称。
-- `CONTENT_SYNC_BASE_URL` / `FUWARI_CONTENT_API_BASE_URL`：内容同步 API origin，也可作为 Vercel middleware 代理目标。
-- `D1_DATABASE_NAME` / `CLOUDFLARE_D1_DATABASE_NAME`：仅手动运行 Wrangler D1 migration 时需要；运行时自动迁移不需要。
+- `PUBLIC_API_ORIGIN`：Worker origin，用于前端直连 API，也会被 Vercel Functions / middleware 用作代理目标。
+- `WORKER_ORIGIN` / `FUWARI_WORKER_ORIGIN`：Vercel 代理目标的备用名称。
+- `CONTENT_SYNC_BASE_URL` / `FUWARI_CONTENT_API_BASE_URL`：内容同步 API origin，也可作为 Vercel 代理目标。
+- `D1_DATABASE_ID` / `CLOUDFLARE_D1_DATABASE_ID`：Worker 部署时声明 `DB` 绑定需要。
+- `D1_DATABASE_NAME` / `CLOUDFLARE_D1_DATABASE_NAME`：手动运行 Wrangler D1 migration 时需要；部署时可选。
+- `R2_BUCKET_NAME` / `CLOUDFLARE_R2_BUCKET_NAME` / `MEDIA_BUCKET_NAME`：Worker 部署时声明 `MEDIA_BUCKET` 绑定需要。
 
 ## 维护入口
 
