@@ -12,9 +12,7 @@ const baseUrl = stripTrailingSlash(
 		"",
 );
 const token = process.env.CONTENT_SYNC_TOKEN || "";
-const strict =
-	process.env.CONTENT_SYNC_STRICT === "true" ||
-	(process.env.VERCEL === "1" && process.env.CONTENT_SYNC_STRICT !== "false");
+const strict = process.env.CONTENT_SYNC_STRICT === "true";
 const disabled = process.env.CONTENT_SYNC_ENABLED === "false";
 
 if (disabled) {
