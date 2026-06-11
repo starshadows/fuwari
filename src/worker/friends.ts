@@ -140,7 +140,7 @@ export async function submitFriendLink(
 		)
 			.bind(submitterHash)
 			.first<{ count: number }>();
-		if ((pendingCount?.count ?? 0) > 10) {
+		if ((pendingCount?.count ?? 0) >= 10) {
 			return json({ error: apiError("FRIEND_PENDING_LIMIT") }, 429);
 		}
 

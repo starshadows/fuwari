@@ -71,7 +71,7 @@ export async function verifyHumanProof(
 		windowSeconds: RATE_LIMITS.humanProofFailure.windowSeconds,
 	};
 	const failCount = await getRateLimitCount(request, env, failConfig);
-	if (failCount > failConfig.limit) {
+	if (failCount >= failConfig.limit) {
 		const response = json({ error: apiError("RATE_LIMITED") }, 429);
 		const nowSeconds = Math.floor(Date.now() / 1000);
 		const windowStart =

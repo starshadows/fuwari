@@ -18,7 +18,7 @@
 - 友链系统，支持公开申请、后台审核和 Telegram 通知。
 - 音乐列表，支持从 R2 `music/` 前缀扫描音频并读取 ID3 元数据。
 - 访问统计，支持 PV / UV / 今日 / 昨日 / 月访问量和实时在线人数。
-- Vercel + Cloudflare Worker 分离部署：前端走 Vercel，`/api/*` 和 `/media/*` 通过 Vercel rewrites 转发到 Worker 自定义域名；Access 保护的 `/friends/admin/` 壳由 Worker 代理前端页面。
+- Vercel + Cloudflare Worker 分离部署：前端走 Vercel，生产浏览器端 `/api/*` 直接请求 Worker 自定义域名，`/media/*` 通过 Vercel rewrites 转发到 Worker；Access 保护的 `/friends/admin/` 壳由 Worker 代理前端页面。
 - 内容后台支持上传文章 ZIP 到 R2，并通过 Vercel Deploy Hook 触发前端重新部署。
 - 安全加固：Origin/Referer 写保护、公开写接口限流、ALTCHA、D1 prepared statements、R2 key 规范化、安全响应头。
 
@@ -163,7 +163,9 @@ blog.starshadow.cc  -> Vercel 前端
 api.starshadow.cc   -> Cloudflare Worker 后端
 ```
 
-Vercel 通过 `vercel.json` 构建 Astro 静态站点，并把同源请求转发到 Worker：
+Vercel 通过 `vercel.json` 构建 Astro 静态站点，并把媒体同源请求转发到 Worker。生产浏览器端 API 请求会直接访问 `https://api.starshadow.cc`，避免 Vercel 中转影响 Worker 侧真实 IP、限流和访客识别。
+
+`vercel.json` 仍保留 `/api/*` rewrite 作为非生产域名、预览环境和非浏览器请求的兜底：
 
 ```json
 {
@@ -186,13 +188,13 @@ Worker 只负责后端 API 和 R2 媒体访问，不再承载前端静态站点�
 
 ### 1. 创建 Cloudflare 资源
 
-需要准备：
+需要在 Cloudflare Workers Dashboard 中准备并绑定：
 
 - Cloudflare Worker
 - D1 数据库，binding 名称必须是 `DB`
 - R2 bucket，binding 名称必须是 `MEDIA_BUCKET`
 
-`wrangler.jsonc` 当前声明了 Worker 路由、binding 名称和 migrations 目录：
+`wrangler.jsonc` 只声明 Worker 入口和路由，不声明 D1/R2 资源，避免 Cloudflare Git 集成或 Wrangler 根据仓库配置自动创建新的 D1/R2：
 
 ```jsonc
 "routes": [
@@ -200,21 +202,15 @@ Worker 只负责后端 API 和 R2 媒体访问，不再承载前端静态站点�
     "pattern": "api.starshadow.cc/*",
     "zone_name": "starshadow.cc"
   }
-],
-"d1_databases": [
-  {
-    "binding": "DB",
-    "migrations_dir": "./migrations"
-  }
-],
-"r2_buckets": [
-  {
-    "binding": "MEDIA_BUCKET"
-  }
 ]
 ```
 
-如果希望部署完全可复现，可以在确认 Cloudflare 资源后补充真实的：
+在 Dashboard 的 Worker 绑定页面手动添加：
+
+- D1 数据库绑定：变量名 `DB`，数据库名称按实际资源选择。
+- R2 存储桶绑定：变量名 `MEDIA_BUCKET`，bucket 名称按实际资源选择。
+
+资源名称可以不同，代码只依赖 binding 名称。如果未来改回完全由 Wrangler CLI 部署，再在 `wrangler.jsonc` 中补充真实的：
 
 - `database_name`
 - `database_id`
@@ -266,7 +262,9 @@ pnpm d1:migrate:local
 
 ### 4. 构建与部署
 
-Worker 部署命令：
+当前生产建议使用 Cloudflare Workers Git 集成 / Dashboard 部署，并在 Dashboard 中保留 `DB`、`MEDIA_BUCKET` 绑定。`wrangler.jsonc` 不声明 D1/R2，因此直接执行 `pnpm worker:deploy` 会上传一个不带 D1/R2 绑定的 Worker 版本；只有在确认目标环境的绑定不会被覆盖，或已经改回 Wrangler 显式绑定配置后再使用该命令。
+
+Worker CLI 部署命令：
 
 ```sh
 pnpm worker:deploy

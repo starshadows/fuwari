@@ -53,6 +53,9 @@ CREATE TABLE IF NOT EXISTS stats_page_daily_visitors (
 	PRIMARY KEY (path, day, visitor_hash)
 );
 
+CREATE INDEX IF NOT EXISTS idx_stats_page_daily_visitors_day
+ON stats_page_daily_visitors (day);
+
 CREATE TABLE IF NOT EXISTS stats_active_visitors (
 	visitor_hash TEXT PRIMARY KEY,
 	path TEXT NOT NULL,

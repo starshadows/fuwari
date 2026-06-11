@@ -156,7 +156,9 @@ const installAdminRequestBridge = () => {
 	const shouldAttachAdminToken = (rawUrl: string | URL) => {
 		try {
 			const url = new URL(rawUrl, window.location.origin);
-			return url.pathname === adminPath;
+			return (
+				url.origin === window.location.origin && url.pathname === adminPath
+			);
 		} catch {
 			return false;
 		}
@@ -171,7 +173,7 @@ const installAdminRequestBridge = () => {
 					: input.url;
 		const url = new URL(rawUrl, window.location.origin);
 
-		if (url.pathname !== adminPath) {
+		if (!shouldAttachAdminToken(url)) {
 			return originalFetch(input, init);
 		}
 

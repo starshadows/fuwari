@@ -101,8 +101,6 @@ type TelegramCommentSettings = TelegramSettings & {
 	useFriendSettings: boolean;
 };
 
-const tokenKey = "fuwari-admin-token";
-const tokenLoginTimeKey = "fuwari-admin-login-time";
 const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 let inactivityTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -231,11 +229,6 @@ const setError = (value: string) => {
 	message = "";
 };
 
-const rememberLoginActivity = () => {
-	if (!token) return;
-	sessionStorage.setItem(tokenLoginTimeKey, String(Date.now()));
-};
-
 const adminFetch = async (path: string, init: RequestInit = {}) => {
 	const headers = new Headers(init.headers);
 	headers.set("x-fuwari-admin-token", token);
@@ -270,8 +263,6 @@ const login = async () => {
 	try {
 		activeTab = "music";
 		await loadMusic();
-		sessionStorage.setItem(tokenKey, token);
-		rememberLoginActivity();
 		isAuthed = true;
 		setMessage("已登录。");
 		startInactivityTimer();
@@ -286,8 +277,6 @@ const logout = () => {
 	token = "";
 	tokenInput = "";
 	isAuthed = false;
-	sessionStorage.removeItem(tokenKey);
-	sessionStorage.removeItem(tokenLoginTimeKey);
 	stopInactivityTimer();
 };
 
@@ -758,7 +747,6 @@ const normalizeTrackSort = async () => {
 
 const resetInactivityTimer = () => {
 	if (inactivityTimer) clearTimeout(inactivityTimer);
-	rememberLoginActivity();
 	inactivityTimer = setTimeout(logout, INACTIVITY_TIMEOUT_MS);
 };
 
@@ -783,24 +771,8 @@ const startInactivityTimer = () => {
 	resetInactivityTimer();
 };
 
-onMount(async () => {
-	try {
-		tokenInput = sessionStorage.getItem(tokenKey) ?? "";
-		if (tokenInput) {
-			const loginTimeStr = sessionStorage.getItem(tokenLoginTimeKey);
-			const loginTime = loginTimeStr ? Number(loginTimeStr) : 0;
-			if (loginTime && Date.now() - loginTime > INACTIVITY_TIMEOUT_MS) {
-				sessionStorage.removeItem(tokenKey);
-				sessionStorage.removeItem(tokenLoginTimeKey);
-				tokenInput = "";
-				setError("登录已过期，请重新登录。");
-			} else {
-				await login();
-			}
-		}
-	} finally {
-		isInitializingSession = false;
-	}
+onMount(() => {
+	isInitializingSession = false;
 });
 
 onDestroy(() => {
