@@ -4,11 +4,5 @@
 	"compatibility_date": "2026-05-19",
 	"compatibility_flags": [],
 	"main": "src/worker/index.ts",
-	"keep_vars": true,
-	"routes": [
-		{
-			"pattern": "api.starshadow.cc/*",
-			"zone_name": "starshadow.cc"
-		}
-	]
+	"keep_vars": true
 }

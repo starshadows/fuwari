@@ -9,7 +9,7 @@ import {
 } from "./comments";
 import { apiError } from "./constants";
 import { handleContentSyncApi } from "./content";
-import { initializeDatabase } from "./db";
+import { ensureDatabaseReady, initializeDatabase } from "./db";
 import { getApprovedFriends, submitFriendLink } from "./friends";
 import { handleMedia } from "./media";
 import { getPublicMusicTracks } from "./music";
@@ -27,13 +27,9 @@ import {
 	withServerTiming,
 } from "./utils";
 
-const BLOG_ORIGIN = "https://blog.starshadow.cc";
 const ADMIN_PAGE_PATH = "/friends/admin/";
 const ADMIN_SHELL_PATH = "/worker-admin-shell/friends-admin/";
-const PUBLIC_API_CORS_ORIGINS = new Set([
-	"https://blog.starshadow.cc",
-	"http://localhost:4321",
-]);
+const LOCAL_FRONTEND_ORIGIN = "http://localhost:4321";
 const STATIC_ASSET_PATH_PREFIXES = [
 	"_astro",
 	"favicon",
@@ -74,7 +70,7 @@ export default {
 			}
 
 			if (requestUrl.pathname.startsWith("/_astro/")) {
-				response = await proxyBlogStaticAsset(request, requestUrl);
+				response = await proxyFrontendStaticAsset(request, env, requestUrl);
 				return withServerTiming(withSecurityHeaders(response), startedAt);
 			}
 
@@ -113,15 +109,19 @@ export default {
 	},
 };
 
-async function proxyBlogStaticAsset(
+async function proxyFrontendStaticAsset(
 	request: Request,
+	env: Env,
 	requestUrl: URL,
 ): Promise<Response> {
 	if (request.method !== "GET" && request.method !== "HEAD") {
 		return json({ error: apiError("METHOD_NOT_ALLOWED") }, 405);
 	}
 
-	const upstreamUrl = new URL(requestUrl.pathname, BLOG_ORIGIN);
+	const frontendOrigin = getFrontendOrigin(env);
+	if (!frontendOrigin) return json({ error: apiError("SERVER_ERROR") }, 503);
+
+	const upstreamUrl = new URL(requestUrl.pathname, frontendOrigin);
 	upstreamUrl.search = requestUrl.search;
 	const upstream = await fetch(upstreamUrl, {
 		headers: {
@@ -158,8 +158,10 @@ async function handleAccessProtectedAdminPage(
 	if (!adminShellToken) {
 		return json({ error: apiError("SERVER_ERROR") }, 503);
 	}
+	const frontendOrigin = getFrontendOrigin(env);
+	if (!frontendOrigin) return json({ error: apiError("SERVER_ERROR") }, 503);
 
-	const upstreamUrl = new URL(ADMIN_SHELL_PATH, BLOG_ORIGIN);
+	const upstreamUrl = new URL(ADMIN_SHELL_PATH, frontendOrigin);
 	upstreamUrl.search = requestUrl.search;
 	const upstream = await fetch(upstreamUrl, {
 		headers: {
@@ -188,7 +190,9 @@ async function handleAccessProtectedAdminPage(
 
 	const html = await upstream.text();
 	return new Response(
-		request.method === "HEAD" ? null : rewriteAdminPageHtml(html),
+		request.method === "HEAD"
+			? null
+			: rewriteAdminPageHtml(html, frontendOrigin),
 		{
 			status: upstream.status,
 			headers,
@@ -196,21 +200,22 @@ async function handleAccessProtectedAdminPage(
 	);
 }
 
-function rewriteAdminPageHtml(html: string): string {
+function rewriteAdminPageHtml(html: string, frontendOrigin: string): string {
 	const rewritten = html
 		.replace(
 			/\bsrcset=("|')([^"']+)\1/g,
 			(_, quote: string, value: string) =>
-				`srcset=${quote}${rewriteSrcsetUrls(value)}${quote}`,
+				`srcset=${quote}${rewriteSrcsetUrls(value, frontendOrigin)}${quote}`,
 		)
 		.replace(
 			/\b(href|src|content|poster|component-url|renderer-url)=("|')\/(?!\/)([^"']*)/g,
 			(_, attr: string, quote: string, path: string) =>
-				`${attr}=${quote}${toBlogUrl(path)}`,
+				`${attr}=${quote}${toFrontendUrl(frontendOrigin, path)}`,
 		)
 		.replace(
 			staticAssetStringPattern(),
-			(_, quote: string, prefix: string) => `${quote}${BLOG_ORIGIN}/${prefix}/`,
+			(_, quote: string, prefix: string) =>
+				`${quote}${frontendOrigin}/${prefix}/`,
 		);
 	const unreplacedAsset = findUnrewrittenAdminAssetReference(rewritten);
 	if (unreplacedAsset) {
@@ -221,8 +226,8 @@ function rewriteAdminPageHtml(html: string): string {
 	return rewritten;
 }
 
-function rewriteSrcsetUrls(value: string): string {
-	return value.replace(/(^|,\s*)\/(?!\/)/g, `$1${BLOG_ORIGIN}/`);
+function rewriteSrcsetUrls(value: string, frontendOrigin = ""): string {
+	return value.replace(/(^|,\s*)\/(?!\/)/g, `$1${frontendOrigin}/`);
 }
 
 function staticAssetStringPattern(): RegExp {
@@ -257,8 +262,15 @@ function findUnrewrittenAdminAssetReference(html: string): string | null {
 	return null;
 }
 
-function toBlogUrl(path: string): string {
-	return `${BLOG_ORIGIN}/${path.replace(/^\/+/, "")}`;
+function toFrontendUrl(frontendOrigin: string, path: string): string {
+	return `${frontendOrigin}/${path.replace(/^\/+/, "")}`;
+}
+
+function getFrontendOrigin(env: Env): string {
+	return (
+		normalizeOrigin(env.ADMIN_SHELL_ORIGIN) ||
+		normalizeOrigin(env.PUBLIC_SITE_ORIGIN)
+	);
 }
 
 async function handleApi(
@@ -269,7 +281,7 @@ async function handleApi(
 ): Promise<Response> {
 	const { pathname } = requestUrl;
 	if (request.method === "OPTIONS" && isPublicCorsApiPath(pathname)) {
-		return publicApiCorsPreflight(request);
+		return publicApiCorsPreflight(request, env);
 	}
 
 	// Database initialization
@@ -277,10 +289,14 @@ async function handleApi(
 		return initializeDatabase(request, env, requestUrl);
 	}
 
+	const databaseError = await ensureDatabaseReady(env);
+	if (databaseError) return databaseError;
+
 	// Anti-abuse challenge
 	if (pathname === "/api/anti-abuse/challenge" && request.method === "GET") {
 		return withPublicApiCors(
 			request,
+			env,
 			await getAntiAbuseChallenge(request, env, requestUrl),
 		);
 	}
@@ -289,6 +305,7 @@ async function handleApi(
 	if (pathname === "/api/comments/config" && request.method === "GET") {
 		return withPublicApiCors(
 			request,
+			env,
 			await cachedResponseV(request, ctx, 300, env, "commentsConfig", () =>
 				getCommentsConfig(env),
 			),
@@ -297,12 +314,14 @@ async function handleApi(
 	if (pathname === "/api/comments/session" && request.method === "POST") {
 		return withPublicApiCors(
 			request,
+			env,
 			await createCommentsSession(request, env),
 		);
 	}
 	if (pathname === "/api/twikoo") {
 		return withPublicApiCors(
 			request,
+			env,
 			await handleTwikooRequest(request, env, requestUrl, ctx),
 		);
 	}
@@ -312,6 +331,7 @@ async function handleApi(
 		if (request.method === "GET") {
 			return withPublicApiCors(
 				request,
+				env,
 				await cachedResponseV(request, ctx, 300, env, "friends", () =>
 					getApprovedFriends(env),
 				),
@@ -320,6 +340,7 @@ async function handleApi(
 		if (request.method === "POST") {
 			return withPublicApiCors(
 				request,
+				env,
 				await submitFriendLink(request, env, ctx),
 			);
 		}
@@ -329,6 +350,7 @@ async function handleApi(
 	if (pathname === "/api/music/tracks" && request.method === "GET") {
 		return withPublicApiCors(
 			request,
+			env,
 			await cachedResponseV(request, ctx, 300, env, "music", () =>
 				getPublicMusicTracks(env),
 			),
@@ -337,22 +359,25 @@ async function handleApi(
 
 	// Stats
 	if (pathname.startsWith("/api/stats/")) {
-		if (request.method === "OPTIONS") return statsCorsPreflight(request);
+		if (request.method === "OPTIONS") return statsCorsPreflight(request, env);
 		if (pathname === "/api/stats/summary" && request.method === "GET") {
 			return withStatsCors(
 				request,
+				env,
 				await getStatsSummaryResponse(request, env, requestUrl),
 			);
 		}
 		if (pathname === "/api/stats/visit" && request.method === "POST") {
 			return withStatsCors(
 				request,
+				env,
 				await recordStatsVisit(request, env, false, ctx),
 			);
 		}
 		if (pathname === "/api/stats/heartbeat" && request.method === "POST") {
 			return withStatsCors(
 				request,
+				env,
 				await recordStatsVisit(request, env, true, ctx),
 			);
 		}
@@ -382,9 +407,10 @@ function isPublicCorsApiPath(pathname: string): boolean {
 	);
 }
 
-function publicApiCorsPreflight(request: Request): Response {
+function publicApiCorsPreflight(request: Request, env: Env): Response {
 	return withPublicApiCors(
 		request,
+		env,
 		new Response(null, {
 			status: 204,
 			headers: { "cache-control": "no-store" },
@@ -392,9 +418,13 @@ function publicApiCorsPreflight(request: Request): Response {
 	);
 }
 
-function withPublicApiCors(request: Request, response: Response): Response {
+function withPublicApiCors(
+	request: Request,
+	env: Env,
+	response: Response,
+): Response {
 	const origin = request.headers.get("origin");
-	if (!origin || !PUBLIC_API_CORS_ORIGINS.has(origin)) return response;
+	if (!origin || !isAllowedCorsOrigin(request, env, origin)) return response;
 
 	const corsResponse = new Response(response.body, response);
 	corsResponse.headers.set("access-control-allow-origin", origin);
@@ -410,6 +440,35 @@ function withPublicApiCors(request: Request, response: Response): Response {
 	corsResponse.headers.set("access-control-max-age", "600");
 	appendVaryHeader(corsResponse.headers, "Origin");
 	return corsResponse;
+}
+
+function isAllowedCorsOrigin(
+	request: Request,
+	env: Env,
+	origin: string,
+): boolean {
+	try {
+		const sourceOrigin = new URL(origin).origin;
+		const targetOrigin = new URL(request.url).origin;
+		return (
+			sourceOrigin === targetOrigin ||
+			sourceOrigin === normalizeOrigin(env.PUBLIC_SITE_ORIGIN) ||
+			(sourceOrigin === LOCAL_FRONTEND_ORIGIN &&
+				(targetOrigin === "http://localhost:8787" ||
+					targetOrigin === "http://127.0.0.1:8787"))
+		);
+	} catch {
+		return false;
+	}
+}
+
+function normalizeOrigin(value: string | undefined): string {
+	if (!value) return "";
+	try {
+		return new URL(value).origin;
+	} catch {
+		return "";
+	}
 }
 
 function appendVaryHeader(headers: Headers, value: string): void {

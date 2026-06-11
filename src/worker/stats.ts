@@ -28,14 +28,12 @@ let statsSchemaChecksSinceBootstrap = 0;
 const STATS_SCHEMA_RECHECK_INTERVAL = 1000;
 
 const STATS_RETENTION_DAYS = 2 * 365; // 2 years
-const PUBLIC_STATS_ORIGINS = new Set([
-	"https://blog.starshadow.cc",
-	"http://localhost:4321",
-]);
+const LOCAL_FRONTEND_ORIGIN = "http://localhost:4321";
 
-export function statsCorsPreflight(request: Request): Response {
+export function statsCorsPreflight(request: Request, env: Env): Response {
 	return withStatsCors(
 		request,
+		env,
 		new Response(null, {
 			status: 204,
 			headers: { "cache-control": "no-store" },
@@ -43,9 +41,14 @@ export function statsCorsPreflight(request: Request): Response {
 	);
 }
 
-export function withStatsCors(request: Request, response: Response): Response {
+export function withStatsCors(
+	request: Request,
+	env: Env,
+	response: Response,
+): Response {
 	const origin = request.headers.get("origin");
-	if (!origin || !PUBLIC_STATS_ORIGINS.has(origin)) return response;
+	if (!origin || !isAllowedStatsCorsOrigin(request, env, origin))
+		return response;
 
 	const corsResponse = new Response(response.body, response);
 	corsResponse.headers.set("access-control-allow-origin", origin);
@@ -57,6 +60,35 @@ export function withStatsCors(request: Request, response: Response): Response {
 	corsResponse.headers.set("access-control-max-age", "600");
 	appendVaryHeader(corsResponse.headers, "Origin");
 	return corsResponse;
+}
+
+function isAllowedStatsCorsOrigin(
+	request: Request,
+	env: Env,
+	origin: string,
+): boolean {
+	try {
+		const sourceOrigin = new URL(origin).origin;
+		const targetOrigin = new URL(request.url).origin;
+		return (
+			sourceOrigin === targetOrigin ||
+			sourceOrigin === normalizeOrigin(env.PUBLIC_SITE_ORIGIN) ||
+			(sourceOrigin === LOCAL_FRONTEND_ORIGIN &&
+				(targetOrigin === "http://localhost:8787" ||
+					targetOrigin === "http://127.0.0.1:8787"))
+		);
+	} catch {
+		return false;
+	}
+}
+
+function normalizeOrigin(value: string | undefined): string {
+	if (!value) return "";
+	try {
+		return new URL(value).origin;
+	} catch {
+		return "";
+	}
 }
 
 function appendVaryHeader(headers: Headers, value: string): void {
@@ -131,7 +163,7 @@ export async function recordStatsVisit(
 	heartbeatOnly: boolean,
 	ctx: ExecutionContext,
 ): Promise<Response> {
-	const originError = rejectCrossSiteWrite(request);
+	const originError = rejectCrossSiteWrite(request, env);
 	if (originError) return originError;
 
 	const rateLimit = await enforceRateLimit(
@@ -399,7 +431,7 @@ async function getStatsVisitorHash(
 ): Promise<string> {
 	const salt = await ensureStatsSaltCached(env);
 	const userAgent = request.headers.get("user-agent") ?? "";
-	const ip = getClientIp(request);
+	const ip = getClientIp(request, env);
 	const source = getStatsVisitorSource(ip, userAgent, clientVisitorId);
 	return hashToken(`${salt}:${source}`);
 }

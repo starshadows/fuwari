@@ -20,11 +20,11 @@
 - Site text/config entry points called out by the repo are `src/config.ts`, `src/i18n/`, and `src/content.config.ts`.
 
 ## Worker, D1, R2, And Deploy
-- Wrangler entrypoint is `src/worker/index.ts`; `wrangler.jsonc` binds `DB` and `MEDIA_BUCKET` and routes `api.starshadow.cc/*` to the Worker.
-- Vercel uses `vercel.json` to run `pnpm build`, publish `dist/`, and rewrite `/api/*` and `/media/*` to `https://api.starshadow.cc`.
+- Wrangler entrypoint is `src/worker/index.ts`; `wrangler.jsonc` intentionally only declares the Worker entrypoint. Bind `DB` and `MEDIA_BUCKET` in the Cloudflare Dashboard or the target environment, not with placeholder resource IDs in Git.
+- Vercel uses `vercel.json` to run `pnpm build` and publish `dist/`; `middleware.js` proxies `/api/*`, `/media/*`, and `/friends/admin/` to the Worker when `PUBLIC_API_ORIGIN`, `WORKER_ORIGIN`, `FUWARI_WORKER_ORIGIN`, `CONTENT_SYNC_BASE_URL`, or `FUWARI_CONTENT_API_BASE_URL` is set.
 - The nav item named `管理后台` is an external API Worker URL but sets `openInCurrentTab: true`; do not change other external links when adjusting this behavior.
-- `rejectCrossSiteWrite()` permits same-origin writes plus the production `blog.starshadow.cc` -> `api.starshadow.cc` write path used by comments; keep this pairing in mind when changing comment or CSRF logic.
-- D1 migrations live in `migrations/`; apply with `pnpm d1:migrate:local` or `pnpm d1:migrate:remote` against the `fuwari-data` database name from package scripts. Worker deploy CI applies remote migrations before `pnpm worker:deploy` and fails deployment if migrations fail.
+- `rejectCrossSiteWrite()` permits same-origin writes plus trusted Vercel middleware proxy writes carrying the internal proxy token; keep this in mind when changing comment or CSRF logic.
+- D1 migrations live in `migrations/` and the matching `MIGRATIONS` array in `src/worker/db.ts`. The Worker auto-runs migrations through the bound `env.DB`; CLI migration scripts only run when `D1_DATABASE_NAME` or `CLOUDFLARE_D1_DATABASE_NAME` is set.
 - Keep D1 migrations in sync in two places: `migrations/*.sql` for Wrangler CLI and the `MIGRATIONS` array in `src/worker/db.ts` for `/api/setup/init-db` runtime migration.
 - Do not commit placeholder Cloudflare resource IDs or secrets. Core secrets include `ADMIN_TOKEN`, `CONTENT_SYNC_TOKEN`, and `VERCEL_DEPLOY_HOOK_URL`.
 - Keep admin protection layered: Cloudflare Access may protect `/friends/admin/` and `/api/admin/*`, but Worker bearer/token auth must remain in code.

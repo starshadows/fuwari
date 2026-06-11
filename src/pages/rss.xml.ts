@@ -31,7 +31,7 @@ function absolutizeFeedUrls(html: string, postUrl: URL, siteUrl: URL): string {
 
 export async function GET(context: APIContext): Promise<Response> {
 	const blog = await getSortedPosts();
-	const siteUrl = new URL(context.site ?? "https://blog.starshadow.cc/");
+	const siteUrl = new URL(context.site ?? context.url.origin);
 
 	return rss({
 		title: siteConfig.title,

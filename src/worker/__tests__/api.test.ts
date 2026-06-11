@@ -52,6 +52,8 @@ function mockEnv(overrides: Partial<Env> = {}): Env {
 		MEDIA_BUCKET: mockR2Bucket(),
 		ADMIN_TOKEN: "test-admin-token",
 		CONTENT_SYNC_TOKEN: "test-sync-token",
+		PUBLIC_SITE_ORIGIN: "https://frontend.example.com",
+		PUBLIC_API_ORIGIN: "https://api.example.com",
 		VERCEL_DEPLOY_HOOK_URL: "https://vercel.example.com/deploy",
 		...overrides,
 	} as Env;
@@ -136,15 +138,15 @@ describe("Route dispatch", () => {
 	it("adds CORS headers for trusted public API origins", async () => {
 		const env = mockEnv();
 		const res = await worker.default.fetch(
-			new Request("https://api.starshadow.cc/api/anti-abuse/challenge", {
-				headers: { origin: "https://blog.starshadow.cc" },
+			new Request("https://api.example.com/api/anti-abuse/challenge", {
+				headers: { origin: "https://frontend.example.com" },
 			}),
 			env,
 			mockCtx(),
 		);
 		expect(res.status).toBe(200);
 		expect(res.headers.get("access-control-allow-origin")).toBe(
-			"https://blog.starshadow.cc",
+			"https://frontend.example.com",
 		);
 		expect(res.headers.get("access-control-allow-credentials")).toBe("true");
 		expect(res.headers.get("vary")).toContain("Origin");
@@ -153,16 +155,16 @@ describe("Route dispatch", () => {
 	it("handles public API CORS preflight", async () => {
 		const env = mockEnv();
 		const res = await worker.default.fetch(
-			new Request("https://api.starshadow.cc/api/comments/session", {
+			new Request("https://api.example.com/api/comments/session", {
 				method: "OPTIONS",
-				headers: { origin: "https://blog.starshadow.cc" },
+				headers: { origin: "https://frontend.example.com" },
 			}),
 			env,
 			mockCtx(),
 		);
 		expect(res.status).toBe(204);
 		expect(res.headers.get("access-control-allow-origin")).toBe(
-			"https://blog.starshadow.cc",
+			"https://frontend.example.com",
 		);
 		expect(res.headers.get("access-control-allow-methods")).toContain("POST");
 	});
@@ -170,7 +172,7 @@ describe("Route dispatch", () => {
 	it("does not add public API CORS headers for untrusted origins", async () => {
 		const env = mockEnv();
 		const res = await worker.default.fetch(
-			new Request("https://api.starshadow.cc/api/anti-abuse/challenge", {
+			new Request("https://api.example.com/api/anti-abuse/challenge", {
 				headers: { origin: "https://attacker.example" },
 			}),
 			env,
@@ -238,7 +240,7 @@ describe("Route dispatch", () => {
 			expect(res.headers.get("x-robots-tag")).toBe("noindex,nofollow");
 			expect(upstreamFetch).toHaveBeenCalledOnce();
 			expect(String(upstreamFetch.mock.calls[0]?.[0])).toBe(
-				"https://blog.starshadow.cc/worker-admin-shell/friends-admin/",
+				"https://frontend.example.com/worker-admin-shell/friends-admin/",
 			);
 			expect(upstreamFetch.mock.calls[0]?.[1]).toMatchObject({
 				headers: expect.objectContaining({
@@ -247,31 +249,31 @@ describe("Route dispatch", () => {
 			});
 			const html = await res.text();
 			expect(html).toContain(
-				'src="https://blog.starshadow.cc/_astro/admin.js"',
+				'src="https://frontend.example.com/_astro/admin.js"',
 			);
 			expect(html).toContain(
-				'component-url="https://blog.starshadow.cc/_astro/FriendAdminPanel.js"',
+				'component-url="https://frontend.example.com/_astro/FriendAdminPanel.js"',
 			);
 			expect(html).toContain(
-				"component-url='https://blog.starshadow.cc/_astro/SingleQuotePanel.js'",
+				"component-url='https://frontend.example.com/_astro/SingleQuotePanel.js'",
 			);
 			expect(html).toContain(
-				'srcset="https://blog.starshadow.cc/_astro/small.webp 640w, https://blog.starshadow.cc/_astro/large.webp 1280w"',
+				'srcset="https://frontend.example.com/_astro/small.webp 640w, https://frontend.example.com/_astro/large.webp 1280w"',
 			);
 			expect(html).toContain(
-				"href='https://blog.starshadow.cc/_astro/preload.js'",
+				"href='https://frontend.example.com/_astro/preload.js'",
 			);
 			expect(html).toContain(
-				'content="https://blog.starshadow.cc/sakana/starshadow.webp"',
+				'content="https://frontend.example.com/sakana/starshadow.webp"',
 			);
-			expect(html).toContain('href="https://blog.starshadow.cc/"');
+			expect(html).toContain('href="https://frontend.example.com/"');
 			expect(html).toContain('href="//cdn.example.com/app.js"');
-			expect(html).toContain('href="https://blog.starshadow.cc/archive/"');
+			expect(html).toContain('href="https://frontend.example.com/archive/"');
 			expect(html).toContain(
-				'const pagefind = "https://blog.starshadow.cc/pagefind/pagefind.js"',
+				'const pagefind = "https://frontend.example.com/pagefind/pagefind.js"',
 			);
 			expect(html).toContain(
-				'const image = "https://blog.starshadow.cc/sakana/starshadow.webp"',
+				'const image = "https://frontend.example.com/sakana/starshadow.webp"',
 			);
 			expect(html).toContain('fetch("/api/admin/friends")');
 			expect(warnSpy).not.toHaveBeenCalled();
@@ -383,7 +385,7 @@ describe("Route dispatch", () => {
 			);
 			expect(res.status).toBe(200);
 			expect(String(upstreamFetch.mock.calls[0]?.[0])).toBe(
-				"https://blog.starshadow.cc/_astro/twikoo.BipqqlPV.css",
+				"https://frontend.example.com/_astro/twikoo.BipqqlPV.css",
 			);
 			expect(res.headers.get("content-type")).toBe("text/css");
 			expect(res.headers.get("set-cookie")).toBeNull();
@@ -2255,7 +2257,11 @@ describe("Friend link hostname deduplication", () => {
 				if (sql.includes("normalized_host = ?") && sql.includes("id <>")) {
 					return duplicateStmt;
 				}
-				if (sql.includes("UPDATE friend_links SET")) return updateStmt;
+				if (
+					sql.includes("UPDATE friend_links SET") &&
+					sql.includes("WHERE id = ?")
+				)
+					return updateStmt;
 				return genericStmt;
 			}),
 			batch: vi.fn().mockResolvedValue([]),
@@ -2509,7 +2515,9 @@ describe("Admin music management", () => {
 		};
 		const db = {
 			prepare: vi.fn((sql: string) =>
-				sql.includes("UPDATE music_tracks SET") ? updateStmt : genericStmt,
+				sql.includes("UPDATE music_tracks SET") && sql.includes("WHERE id = ?")
+					? updateStmt
+					: genericStmt,
 			),
 			batch: vi.fn().mockResolvedValue([]),
 			exec: vi.fn().mockResolvedValue({ count: 0, duration: 0 }),

@@ -53,7 +53,7 @@ export async function createCommentsSession(
 	request: Request,
 	env: Env,
 ): Promise<Response> {
-	const originError = rejectCrossSiteWrite(request);
+	const originError = rejectCrossSiteWrite(request, env);
 	if (originError) return originError;
 
 	const rateLimit = await enforceRateLimit(
@@ -165,7 +165,7 @@ async function getActorHash(
 	const salt = await ensureStatsSaltCached(env);
 	const userAgent = request.headers.get("user-agent") ?? "";
 	return hashToken(
-		`${salt}:rate:${scope}:${getClientIp(request)}:${userAgent}`,
+		`${salt}:rate:${scope}:${getClientIp(request, env)}:${userAgent}`,
 	);
 }
 
@@ -256,7 +256,7 @@ export async function handleTwikooRequest(
 
 	// All write events require CSRF protection.
 	if (isWrite) {
-		const csrfError = rejectCrossSiteWrite(request);
+		const csrfError = rejectCrossSiteWrite(request, env);
 		if (csrfError) return csrfError;
 	}
 

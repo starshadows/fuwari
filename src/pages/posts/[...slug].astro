@@ -37,7 +37,7 @@ const postImages = import.meta.glob<ImageMetadata>(
 		import: "default",
 	},
 );
-const siteUrl = Astro.site ?? new URL("https://blog.starshadow.cc/");
+const siteUrl = Astro.site ?? Astro.url.origin;
 
 async function resolveJsonLdImage(): Promise<string | undefined> {
 	const image = entry.data.image?.trim();

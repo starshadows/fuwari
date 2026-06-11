@@ -156,35 +156,26 @@ draft: false
 
 ## ☁️ 线上部署架构
 
-当前生产环境拆成两个域名：
+生产可以拆成两个入口，也可以放在同一个域名下：
 
 ```text
-blog.starshadow.cc  -> Vercel 前端
-api.starshadow.cc   -> Cloudflare Worker 后端
+任意前端域名      -> Vercel 前端
+任意 Worker 域名  -> Cloudflare Worker 后端
 ```
 
-Vercel 通过 `vercel.json` 构建 Astro 静态站点，并把媒体同源请求转发到 Worker。生产浏览器端 API 请求会直接访问 `https://api.starshadow.cc`，避免 Vercel 中转影响 Worker 侧真实 IP、限流和访客识别。
+代码不要求固定域名。分离部署时，在 Vercel 设置 `PUBLIC_API_ORIGIN` 指向 Worker 的公开 origin；不设置时，前端默认使用同源 `/api/*` 和 `/media/*`。
 
-`vercel.json` 仍保留 `/api/*` rewrite 作为非生产域名、预览环境和非浏览器请求的兜底：
+Vercel 的 `middleware.js` 会在 `PUBLIC_API_ORIGIN`、`WORKER_ORIGIN`、`FUWARI_WORKER_ORIGIN`、`CONTENT_SYNC_BASE_URL` 或 `FUWARI_CONTENT_API_BASE_URL` 任一变量存在时，把 `/api/*`、`/media/*` 和 `/friends/admin/` 转到 Worker。
 
-```json
-{
-  "source": "/api/:path*",
-  "destination": "https://api.starshadow.cc/api/:path*"
-}
-```
-
-Worker 通过 `wrangler.jsonc` 绑定到 `api.starshadow.cc/*`，负责处理：
+Worker 负责处理：
 
 - `/api/*`
 - `/media/*`
-- `/friends/admin/`，用于在 Cloudflare Access 保护下代理 Vercel 前端里的后台壳；导航里的“管理后台”会在当前标签页打开该地址。
-
-`blog.starshadow.cc` 是否走纯 Vercel 线路取决于 Cloudflare DNS 记录状态：DNS only 会直连 Vercel，Proxied 会由 Cloudflare 代理回源 Vercel。
+- `/friends/admin/`，用于在 Cloudflare Access 保护下代理 Vercel 前端里的后台壳；导航里的“管理后台”使用相对路径 `/friends/admin/`。
 
 ## ☁️ Cloudflare Worker 部署
 
-Worker 只负责后端 API 和 R2 媒体访问，不再承载前端静态站点。`api.starshadow.cc` 必须在 Cloudflare 中绑定到 Worker 自定义域名或匹配 Worker route，否则 Vercel rewrites 无法正常访问后端。
+Worker 只负责后端 API 和 R2 媒体访问，不再承载前端静态站点。Worker 可以使用 workers.dev、自定义域名或 route，代码不要求具体域名。
 
 ### 1. 创建 Cloudflare 资源
 
@@ -194,15 +185,10 @@ Worker 只负责后端 API 和 R2 媒体访问，不再承载前端静态站点�
 - D1 数据库，binding 名称必须是 `DB`
 - R2 bucket，binding 名称必须是 `MEDIA_BUCKET`
 
-`wrangler.jsonc` 只声明 Worker 入口和路由，不声明 D1/R2 资源，避免 Cloudflare Git 集成或 Wrangler 根据仓库配置自动创建新的 D1/R2：
+`wrangler.jsonc` 只声明 Worker 入口，不声明 route、D1 或 R2，避免 Cloudflare Git 集成或 Wrangler 根据仓库配置自动创建/绑定资源：
 
 ```jsonc
-"routes": [
-  {
-    "pattern": "api.starshadow.cc/*",
-    "zone_name": "starshadow.cc"
-  }
-]
+"main": "src/worker/index.ts"
 ```
 
 在 Dashboard 的 Worker 绑定页面手动添加：
@@ -239,26 +225,30 @@ wrangler secret put VERCEL_DEPLOY_HOOK_URL
 
 ### 3. 初始化 / 迁移 D1
 
-远端迁移：
+D1 schema 会在 Worker 收到 `/api/*` 请求时通过绑定的 `env.DB` 自动初始化/迁移，不依赖 D1 数据库名称。`/api/setup/init-db` 仍保留为手动修复入口，但通常不需要主动调用。
+
+如果你仍想用 Wrangler CLI 手动迁移，先设置实际数据库名称：
 
 ```sh
-pnpm d1:migrate:remote
+D1_DATABASE_NAME=<your-d1-name> pnpm d1:migrate:remote
 ```
 
-或者部署后调用初始化接口：
+本地迁移同理：
+
+```sh
+D1_DATABASE_NAME=<your-d1-name> pnpm d1:migrate:local
+```
+
+未设置 `D1_DATABASE_NAME` 时，迁移脚本会跳过并提示使用运行时自动迁移。
+
+手动初始化接口：
 
 ```sh
 curl -H "Authorization: Bearer <ADMIN_TOKEN>" \
-  https://api.starshadow.cc/api/setup/init-db
+  <WORKER_ORIGIN>/api/setup/init-db
 ```
 
 初始化接口已经限流，并且不接受 token 放在 URL path / query 中。请使用 `Authorization: Bearer ...` 请求头，或在必要时使用 POST JSON body。
-
-本地迁移：
-
-```sh
-pnpm d1:migrate:local
-```
 
 ### 4. 构建与部署
 
@@ -272,7 +262,12 @@ pnpm worker:deploy
 
 Vercel 前端部署使用 `vercel.json` 中的 `buildCommand`：`pnpm build`。构建前会执行 `scripts/sync-posts.mjs`，优先从 Worker/R2 拉取文章到 `src/content/posts/`。同步需要 `CONTENT_SYNC_BASE_URL` 或 `FUWARI_CONTENT_API_BASE_URL`，以及 `CONTENT_SYNC_TOKEN`。Vercel 的 `CONTENT_SYNC_TOKEN` 还用于保护内部后台 shell，必须与 Worker 的 `CONTENT_SYNC_TOKEN` 一致。如果 R2 文章清单为空、同步配置缺失或同步失败，默认会构建空文章列表；需要让同步失败直接阻断构建时，设置 `CONTENT_SYNC_STRICT=true`。仅本地调试需要保留本地草稿时，可以设置 `CONTENT_SYNC_ENABLED=false` 跳过同步。
 
-GitHub Actions 中 Worker 部署会先尝试执行远端 D1 migrations，再部署 Worker；migration step 允许失败，避免权限或远端状态问题阻断 Worker 发布。
+推荐的通用环境变量：
+
+- Vercel：`PUBLIC_SITE_ORIGIN` 设为前端 origin，`PUBLIC_API_ORIGIN` 设为 Worker origin，`CONTENT_SYNC_TOKEN` 与 Worker 保持一致。
+- Worker：`PUBLIC_SITE_ORIGIN` 设为前端 origin，用于跨域 CORS；`ADMIN_SHELL_ORIGIN` 可选，未设置时复用 `PUBLIC_SITE_ORIGIN`。
+
+GitHub Actions 中不需要知道 D1/R2 资源名称；Worker 运行时会通过绑定名自动初始化 D1 schema。
 
 ### 5. 部署后检查
 
@@ -280,13 +275,13 @@ GitHub Actions 中 Worker 部署会先尝试执行远端 D1 migrations，再部�
 
 - `/api/comments/config` 是否返回评论配置。
 - `/api/anti-abuse/challenge?context=comments` 是否返回 ALTCHA challenge。
-- 评论区是否可以完成人机验证并提交评论；`blog.starshadow.cc` 前端写入 `api.starshadow.cc` Worker 是允许的可信跨域写入。
+- 评论区是否可以完成人机验证并提交评论。
 - Twikoo 管理员是否可以用 `ADMIN_TOKEN` 登录。
 - `/api/friends` 是否能返回友链列表。
 - `/api/music/tracks` 是否能返回音乐列表。
 - `/api/stats/summary` 是否能返回访问统计。
-- `https://api.starshadow.cc/media/*` 是否能访问预期 R2 对象。
-- `https://blog.starshadow.cc/api/*` 是否经由 Vercel rewrites 正常转发到 Worker。
+- `<WORKER_ORIGIN>/media/*` 是否能访问预期 R2 对象。
+- 前端域名下 `/api/*` 是否经由 Vercel middleware 正常转发到 Worker，或 `PUBLIC_API_ORIGIN` 是否直连 Worker。
 - `/friends/admin/` 和 `/api/admin/*` 是否被 Cloudflare Access 保护。
 - `/api/admin/*` 是否仍必须携带 `Authorization: Bearer <ADMIN_TOKEN>`。
 
@@ -294,7 +289,7 @@ GitHub Actions 中 Worker 部署会先尝试执行远端 D1 migrations，再部�
 
 项目中的公开写接口会尽量使用：
 
-- Origin / Referer 写保护；同源请求允许，生产中的 `blog.starshadow.cc` 前端写入 `api.starshadow.cc` Worker 也允许
+- Origin / Referer 写保护；同源请求允许，经 Vercel middleware 且带内部代理 token 的前端写入也允许
 - D1 rate limiting
 - ALTCHA 人机验证
 - JSON body size 限制

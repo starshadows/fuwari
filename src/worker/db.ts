@@ -33,6 +33,12 @@ interface Migration {
 	isApplied: (env: Env) => Promise<boolean>;
 }
 
+interface MigrationRunResult {
+	applied: string[];
+	skipped: string[];
+	version: string;
+}
+
 const MIGRATIONS: Migration[] = [
 	{
 		version: "0001",
@@ -231,6 +237,8 @@ const MIGRATIONS: Migration[] = [
 
 /** Key used to track the highest applied migration version in app_settings. */
 const MIGRATION_VERSION_KEY = "db_migration_version";
+const readyDatabases = new WeakSet<D1Database>();
+const readinessPromises = new WeakMap<D1Database, Promise<void>>();
 
 async function hasTable(env: Env, tableName: string): Promise<boolean> {
 	try {
@@ -381,6 +389,78 @@ function compareVersions(a: string, b: string): number {
 	return na - nb;
 }
 
+export async function ensureDatabaseReady(env: Env): Promise<Response | null> {
+	if (!env.DB) return json({ error: apiError("MISSING_D1") }, 503);
+	if (readyDatabases.has(env.DB)) return null;
+
+	let promise = readinessPromises.get(env.DB);
+	if (!promise) {
+		promise = applyPendingMigrations(env).then(() => {
+			readyDatabases.add(env.DB);
+		});
+		readinessPromises.set(env.DB, promise);
+	}
+
+	try {
+		await promise;
+		return null;
+	} catch (error) {
+		readinessPromises.delete(env.DB);
+		console.error("Automatic database migration failed", error);
+		return json({ error: apiError("SCHEMA_NOT_READY") }, 503);
+	}
+}
+
+async function applyPendingMigrations(
+	env: Env,
+	requestedVersions: string[] = [],
+): Promise<MigrationRunResult> {
+	const applied = await getEffectiveAppliedMigrationVersion(env);
+	const pending = MIGRATIONS.filter(
+		(migration) => compareVersions(migration.version, applied) > 0,
+	).filter(
+		(migration) =>
+			requestedVersions.length === 0 ||
+			requestedVersions.includes(migration.version),
+	);
+
+	if (pending.length === 0) {
+		return { applied: [], skipped: [], version: applied };
+	}
+
+	const executed: string[] = [];
+	const skipped: string[] = [];
+	for (const migration of pending) {
+		if (await migration.isApplied(env)) {
+			await setAppliedMigrationVersion(env, migration.version);
+			skipped.push(migration.version);
+			continue;
+		}
+
+		try {
+			for (const statement of migration.statements) {
+				await env.DB.prepare(statement).run();
+			}
+		} catch (error) {
+			if (await migration.isApplied(env)) {
+				await setAppliedMigrationVersion(env, migration.version);
+				skipped.push(migration.version);
+				continue;
+			}
+			throw error;
+		}
+
+		await setAppliedMigrationVersion(env, migration.version);
+		executed.push(migration.version);
+	}
+
+	return {
+		applied: executed,
+		skipped,
+		version: pending[pending.length - 1]?.version ?? applied,
+	};
+}
+
 export async function initializeDatabase(
 	request: Request,
 	env: Env,
@@ -452,54 +532,19 @@ export async function initializeDatabase(
 		}
 	}
 
-	const applied = await getEffectiveAppliedMigrationVersion(env);
-	const pending = MIGRATIONS.filter(
-		(migration) => compareVersions(migration.version, applied) > 0,
-	).filter(
-		(migration) =>
-			requestedVersions.length === 0 ||
-			requestedVersions.includes(migration.version),
-	);
-
-	if (pending.length === 0) {
-		return json({ ok: true, applied: [], version: applied });
-	}
-
-	const executed: string[] = [];
-	const skipped: string[] = [];
 	try {
-		for (const migration of pending) {
-			if (await migration.isApplied(env)) {
-				await setAppliedMigrationVersion(env, migration.version);
-				skipped.push(migration.version);
-				continue;
-			}
-			for (const statement of migration.statements) {
-				await env.DB.prepare(statement).run();
-			}
-			await setAppliedMigrationVersion(env, migration.version);
-			executed.push(migration.version);
-		}
+		const result = await applyPendingMigrations(env, requestedVersions);
+		readyDatabases.add(env.DB);
+		return json({ ok: true, ...result });
 	} catch (error) {
-		console.error(
-			`Migration ${executed[executed.length - 1] ?? pending[0]?.version} failed:`,
-			error,
-		);
+		console.error("Manual database migration failed", error);
 		return json(
 			{
 				error: "Migration failed. Check server logs for details.",
-				failed: executed,
 			},
 			500,
 		);
 	}
-
-	return json({
-		ok: true,
-		applied: executed,
-		skipped,
-		version: pending[pending.length - 1]?.version ?? applied,
-	});
 }
 
 function readSetupToken(

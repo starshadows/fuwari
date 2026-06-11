@@ -632,10 +632,9 @@ export function normalizeHumanProofContext(
 // URL / origin / validation
 // ================================================================
 
-const TRUSTED_WRITE_ORIGINS_BY_TARGET = new Map([
-	["https://api.starshadow.cc", new Set(["https://blog.starshadow.cc"])],
-	["http://localhost:8787", new Set(["http://localhost:4321"])],
-]);
+const TRUSTED_PROXY_TOKEN_HEADER = "x-fuwari-proxy-token";
+const TRUSTED_PROXY_ORIGIN_HEADER = "x-fuwari-proxy-origin";
+const TRUSTED_PROXY_CLIENT_IP_HEADER = "x-fuwari-client-ip";
 
 export function isSameOrigin(value: string, requestUrl: string): boolean {
 	try {
@@ -645,14 +644,47 @@ export function isSameOrigin(value: string, requestUrl: string): boolean {
 	}
 }
 
-function isTrustedWriteSource(value: string, requestUrl: string): boolean {
+function isTrustedProxyRequest(request: Request, env?: Env): boolean {
+	const configured = env?.CONTENT_SYNC_TOKEN?.trim();
+	if (!configured) return false;
+	const token = request.headers.get(TRUSTED_PROXY_TOKEN_HEADER)?.trim() ?? "";
+	return Boolean(token && timingSafeEqual(token, configured));
+}
+
+function getTrustedProxyOrigin(request: Request, env?: Env): string {
+	if (!isTrustedProxyRequest(request, env)) return "";
+	const value = request.headers.get(TRUSTED_PROXY_ORIGIN_HEADER) ?? "";
+	try {
+		return new URL(value).origin;
+	} catch {
+		return "";
+	}
+}
+
+function isLocalDevWriteSource(
+	sourceOrigin: string,
+	targetOrigin: string,
+): boolean {
+	return (
+		sourceOrigin === "http://localhost:4321" &&
+		(targetOrigin === "http://localhost:8787" ||
+			targetOrigin === "http://127.0.0.1:8787")
+	);
+}
+
+function isTrustedWriteSource(
+	value: string,
+	request: Request,
+	env?: Env,
+): boolean {
 	try {
 		const sourceOrigin = new URL(value).origin;
-		const targetOrigin = new URL(requestUrl).origin;
+		const targetOrigin = new URL(request.url).origin;
+		const proxyOrigin = getTrustedProxyOrigin(request, env);
 		return (
 			sourceOrigin === targetOrigin ||
-			(TRUSTED_WRITE_ORIGINS_BY_TARGET.get(targetOrigin)?.has(sourceOrigin) ??
-				false)
+			Boolean(proxyOrigin && sourceOrigin === proxyOrigin) ||
+			isLocalDevWriteSource(sourceOrigin, targetOrigin)
 		);
 	} catch {
 		return false;
@@ -775,16 +807,19 @@ export function isValidDescription(value: string): boolean {
 	return true;
 }
 
-export function rejectCrossSiteWrite(request: Request): Response | null {
+export function rejectCrossSiteWrite(
+	request: Request,
+	env?: Env,
+): Response | null {
 	const origin = request.headers.get("origin");
-	if (origin && !isTrustedWriteSource(origin, request.url)) {
+	if (origin && !isTrustedWriteSource(origin, request, env)) {
 		return json({ error: apiError("CROSS_SITE") }, 403);
 	}
 	const referer = request.headers.get("referer");
 	if (!origin && !referer) {
 		return json({ error: apiError("CROSS_SITE") }, 403);
 	}
-	if (!origin && referer && !isTrustedWriteSource(referer, request.url)) {
+	if (!origin && referer && !isTrustedWriteSource(referer, request, env)) {
 		return json({ error: apiError("CROSS_SITE") }, 403);
 	}
 	return null;
@@ -1208,9 +1243,8 @@ async function getRateLimitActorHash(
 	scope: string,
 ): Promise<string> {
 	const salt = await ensureStatsSalt(env);
-	// Only use cf-connecting-ip (set by Cloudflare, cannot be spoofed).
-	// User-Agent is NOT included — it is trivially rotated by attackers.
-	const ip = request.headers.get("cf-connecting-ip") ?? "";
+	// User-Agent is NOT included because it is trivially rotated by attackers.
+	const ip = getClientIp(request, env);
 	return hashToken(`${salt}:rate:${scope}:${ip}`);
 }
 
@@ -1226,12 +1260,16 @@ export function clampInteger(value: number, min: number, max: number): number {
 	return Math.min(max, Math.max(min, value));
 }
 
-export function getClientIp(request: Request): string {
+export function getClientIp(request: Request, env?: Env): string {
+	const proxyIp = isTrustedProxyRequest(request, env)
+		? request.headers.get(TRUSTED_PROXY_CLIENT_IP_HEADER)?.split(",")[0]?.trim()
+		: "";
 	return (
-		request.headers.get("cf-connecting-ip") ??
-		request.headers.get("x-real-ip") ??
-		request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-		""
+		proxyIp ||
+		(request.headers.get("cf-connecting-ip") ??
+			request.headers.get("x-real-ip") ??
+			request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+			"")
 	);
 }
 
@@ -1256,7 +1294,7 @@ export async function auditAdminAction(
 		const token = readAdminToken(request);
 		const salt = await ensureAdminAuditSalt(env);
 		const actorHash = await hashToken(`${salt}:${token || "unknown"}`);
-		const ip = getClientIp(request);
+		const ip = getClientIp(request, env);
 		await env.DB.prepare(
 			`INSERT INTO admin_audit_log (actor_hash, action, resource, resource_id, details, ip)
 	    	 VALUES (?, ?, ?, ?, ?, ?)`,

@@ -1,14 +1,18 @@
-const PRODUCTION_BLOG_HOST = "blog.starshadow.cc";
-const PRODUCTION_API_ORIGIN = "https://api.starshadow.cc";
+const configuredApiOrigin = normalizeOrigin(import.meta.env.PUBLIC_API_ORIGIN);
 
 export function apiUrl(path: string): string {
 	const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-	if (
-		typeof window !== "undefined" &&
-		window.location.hostname === PRODUCTION_BLOG_HOST &&
-		normalizedPath.startsWith("/api/")
-	) {
-		return `${PRODUCTION_API_ORIGIN}${normalizedPath}`;
+	if (configuredApiOrigin && normalizedPath.startsWith("/api/")) {
+		return `${configuredApiOrigin}${normalizedPath}`;
 	}
 	return normalizedPath;
+}
+
+function normalizeOrigin(value: string | undefined): string {
+	if (!value) return "";
+	try {
+		return new URL(value).origin;
+	} catch {
+		return "";
+	}
 }

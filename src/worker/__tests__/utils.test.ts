@@ -6,6 +6,7 @@ import {
 	TWIKOO_INIT_STATEMENTS,
 } from "../db-schema";
 import { getStatsVisitorSource, normalizeStatsPath } from "../stats";
+import type { Env } from "../types";
 import {
 	base64UrlDecode,
 	base64UrlEncode,
@@ -349,6 +350,8 @@ describe("isSameOrigin", () => {
 // rejectCrossSiteWrite
 // ================================================================
 describe("rejectCrossSiteWrite", () => {
+	const proxyEnv = { CONTENT_SYNC_TOKEN: "test-sync-token" } as Env;
+
 	it("rejects requests missing both origin and referer", async () => {
 		const request = new Request("https://example.com/api/write", {
 			method: "POST",
@@ -364,26 +367,34 @@ describe("rejectCrossSiteWrite", () => {
 		expect(rejectCrossSiteWrite(request)).toBeNull();
 	});
 
-	it("allows blog frontend writes to the API worker origin", async () => {
+	it("allows trusted proxy writes from its frontend origin", async () => {
 		const request = new Request(
-			"https://api.starshadow.cc/api/comments/session",
+			"https://api.example.com/api/comments/session",
 			{
 				method: "POST",
-				headers: { origin: "https://blog.starshadow.cc" },
+				headers: {
+					origin: "https://frontend.example.com",
+					"x-fuwari-proxy-origin": "https://frontend.example.com",
+					"x-fuwari-proxy-token": "test-sync-token",
+				},
 			},
 		);
-		expect(rejectCrossSiteWrite(request)).toBeNull();
+		expect(rejectCrossSiteWrite(request, proxyEnv)).toBeNull();
 	});
 
-	it("allows blog frontend referer writes to the API worker origin", async () => {
+	it("allows trusted proxy referer writes from its frontend origin", async () => {
 		const request = new Request(
-			"https://api.starshadow.cc/api/comments/session",
+			"https://api.example.com/api/comments/session",
 			{
 				method: "POST",
-				headers: { referer: "https://blog.starshadow.cc/posts/example/" },
+				headers: {
+					referer: "https://frontend.example.com/posts/example/",
+					"x-fuwari-proxy-origin": "https://frontend.example.com",
+					"x-fuwari-proxy-token": "test-sync-token",
+				},
 			},
 		);
-		expect(rejectCrossSiteWrite(request)).toBeNull();
+		expect(rejectCrossSiteWrite(request, proxyEnv)).toBeNull();
 	});
 
 	it("allows local Astro dev proxy writes to the local Worker", async () => {

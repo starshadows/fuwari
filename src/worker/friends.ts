@@ -64,7 +64,7 @@ export async function submitFriendLink(
 	env: Env,
 	ctx: ExecutionContext,
 ): Promise<Response> {
-	const originError = rejectCrossSiteWrite(request);
+	const originError = rejectCrossSiteWrite(request, env);
 	if (originError) return originError;
 
 	const rateLimit = await enforceRateLimit(
@@ -201,7 +201,7 @@ async function getFriendSubmitterHash(
 	const salt = await ensureStatsSaltCached(env);
 	const userAgent = request.headers.get("user-agent") ?? "";
 	return hashToken(
-		`${salt}:friend-submit:${getClientIp(request)}:${userAgent}`,
+		`${salt}:friend-submit:${getClientIp(request, env)}:${userAgent}`,
 	);
 }
 

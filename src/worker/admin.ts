@@ -64,7 +64,7 @@ export async function handleAdminApi(
 ): Promise<Response> {
 	const auth = await requireAdmin(request, env);
 	if (auth) return auth;
-	const originError = rejectAdminCrossSiteWrite(request);
+	const originError = rejectAdminCrossSiteWrite(request, env);
 	if (originError) return originError;
 
 	const segments = requestUrl.pathname.split("/").filter(Boolean);
@@ -151,13 +151,16 @@ function parseAdminRouteId(value: string): number | null {
 	return Number.isSafeInteger(id) ? id : null;
 }
 
-function rejectAdminCrossSiteWrite(request: Request): Response | null {
+function rejectAdminCrossSiteWrite(
+	request: Request,
+	env: Env,
+): Response | null {
 	if (!ADMIN_WRITE_METHODS.has(request.method)) return null;
 	const hasBrowserSource = Boolean(
 		request.headers.get("origin") || request.headers.get("referer"),
 	);
 	if (!hasBrowserSource && readBearerToken(request)) return null;
-	return rejectCrossSiteWrite(request);
+	return rejectCrossSiteWrite(request, env);
 }
 
 // ================================================================

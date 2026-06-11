@@ -24,6 +24,7 @@ import { parseDirectiveNode } from "./src/plugins/remark-directive-rehype.js";
 import { remarkExcerpt } from "./src/plugins/remark-excerpt.js";
 import { remarkReadingTime } from "./src/plugins/remark-reading-time.mjs";
 
+const site = process.env.PUBLIC_SITE_ORIGIN || "http://localhost:4321";
 const KNOWN_ASTRO_EXPRESSIVE_CODE_MARKDOWN_WARNING =
 	"`markdown.remarkPlugins`, `markdown.rehypePlugins`, and `markdown.remarkRehype` are deprecated";
 const KNOWN_TWIKOO_CHUNK_WARNING =
@@ -41,7 +42,7 @@ process.stderr.write = (chunk, ...args) => {
 
 // https://astro.build/config
 export default defineConfig({
-	site: "https://blog.starshadow.cc/",
+	site,
 	base: "/",
 	trailingSlash: "always",
 	integrations: [
