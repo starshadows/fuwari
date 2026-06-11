@@ -1,6 +1,6 @@
 <script lang="ts">
 import Icon from "@iconify/svelte";
-import { apiUrl } from "@utils/api-utils";
+import { apiJson, apiUrl } from "@utils/api-utils";
 import { onDestroy, onMount } from "svelte";
 
 type Track = {
@@ -184,12 +184,14 @@ const loadTracks = async () => {
 	error = "";
 
 	try {
-		const response = await fetch(apiUrl("/api/music/tracks"), {
-			signal: controller.signal,
-		});
-		const data = await response.json();
+		const data = await apiJson<{ tracks?: Track[] }>(
+			apiUrl("/api/music/tracks"),
+			{
+				signal: controller.signal,
+			},
+			"音乐接口未连接。",
+		);
 		if (isDestroyed || controller.signal.aborted) return;
-		if (!response.ok) throw new Error(data.error ?? "歌单加载失败。");
 		tracks = data.tracks ?? [];
 		if (tracks.length > 0) {
 			const restoredIndex =

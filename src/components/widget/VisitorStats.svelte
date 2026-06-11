@@ -1,6 +1,6 @@
 <script lang="ts">
 import Icon from "@iconify/svelte";
-import { apiUrl } from "@utils/api-utils";
+import { apiJson, apiUrl } from "@utils/api-utils";
 import { onMount } from "svelte";
 
 type StatsSummary = {
@@ -98,22 +98,23 @@ const applyStatsSummary = (data: StatsSummary, path = currentPath()) => {
 const sendStatsVisit = async (path = currentPath()): Promise<StatsSummary> => {
 	const url = apiUrl("/api/stats/visit");
 	const body = statsPayload(path);
-	const response = await fetch(url, {
-		method: "POST",
-		headers: { "content-type": "text/plain" },
-		body,
-		cache: "no-store",
-		credentials: "omit",
-	});
-	const data = await response.json();
-	if (!response.ok) throw new Error(data.error ?? "统计加载失败。");
-	return data;
+	return apiJson<StatsSummary>(
+		url,
+		{
+			method: "POST",
+			headers: { "content-type": "text/plain" },
+			body,
+			cache: "no-store",
+			credentials: "omit",
+		},
+		"统计接口未连接。",
+	);
 };
 
 const loadStatsSummary = async (
 	path = currentPath(),
 ): Promise<StatsSummary> => {
-	const response = await fetch(
+	return apiJson<StatsSummary>(
 		apiUrl(
 			`/api/stats/summary?path=${encodeURIComponent(path)}&_=${Date.now()}`,
 		),
@@ -121,10 +122,8 @@ const loadStatsSummary = async (
 			cache: "no-store",
 			credentials: "omit",
 		},
+		"统计接口未连接。",
 	);
-	const data = await response.json();
-	if (!response.ok) throw new Error(data.error ?? "统计加载失败。");
-	return data;
 };
 
 const loadInitialStats = async () => {
