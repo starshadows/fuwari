@@ -206,6 +206,16 @@ const MIGRATIONS: Migration[] = [
 		description: "Create content posts table",
 		statements: [
 			...CONTENT_POSTS_STATEMENTS,
+			`CREATE TABLE IF NOT EXISTS admin_audit_log (
+		    id INTEGER PRIMARY KEY AUTOINCREMENT,
+		    actor_hash TEXT NOT NULL,
+		    action TEXT NOT NULL CHECK (action IN ('create', 'update', 'delete', 'import', 'toggle')),
+		    resource TEXT NOT NULL CHECK (resource IN ('friend', 'music', 'comment', 'telegram', 'init-db')),
+		    resource_id TEXT NOT NULL DEFAULT '',
+		    details TEXT NOT NULL DEFAULT '',
+		    ip TEXT NOT NULL DEFAULT '',
+		    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+		  )`,
 			`CREATE TABLE IF NOT EXISTS admin_audit_log_new (
 		    id INTEGER PRIMARY KEY AUTOINCREMENT,
 		    actor_hash TEXT NOT NULL,
@@ -216,7 +226,7 @@ const MIGRATIONS: Migration[] = [
 		    ip TEXT NOT NULL DEFAULT '',
 		    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 		  )`,
-			`INSERT INTO admin_audit_log_new (
+			`INSERT OR IGNORE INTO admin_audit_log_new (
 				id, actor_hash, action, resource, resource_id, details, ip, created_at
 			)
 			SELECT id, actor_hash, action, resource, resource_id, details, ip, created_at
@@ -339,6 +349,10 @@ async function getEffectiveAppliedMigrationVersion(env: Env): Promise<string> {
 	// Older runtime detection could record 0010 after content_posts was auto-created
 	// but before admin_audit_log accepted content resources. Re-run 0010 to repair it.
 	if (compareVersions(recorded, "0010") >= 0 && detected === "0009") {
+		return detected;
+	}
+	if (compareVersions(detected, recorded) < 0) {
+		await setAppliedMigrationVersion(env, detected);
 		return detected;
 	}
 	if (compareVersions(detected, recorded) <= 0) return recorded;

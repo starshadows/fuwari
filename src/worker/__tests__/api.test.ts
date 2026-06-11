@@ -1902,7 +1902,7 @@ describe("Database initialization", () => {
 			"ALTER TABLE admin_audit_log_new RENAME TO admin_audit_log",
 		);
 		expect(preparedSql).toContain(
-			`INSERT INTO admin_audit_log_new (
+			`INSERT OR IGNORE INTO admin_audit_log_new (
 				id, actor_hash, action, resource, resource_id, details, ip, created_at
 			)
 			SELECT id, actor_hash, action, resource, resource_id, details, ip, created_at
