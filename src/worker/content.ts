@@ -1042,7 +1042,7 @@ async function listR2ContentPosts(
 		const parsed = parseR2ContentKey(object.key);
 		if (!parsed || excludedSlugs.has(parsed.slug)) continue;
 		if (
-			parsed.path !== "index.md" &&
+			!isMarkdownContentPath(parsed.path) &&
 			!ALLOWED_ASSET_EXTENSIONS.has(extensionOf(parsed.path))
 		) {
 			continue;
@@ -1060,10 +1060,21 @@ async function listR2ContentPosts(
 
 	const posts: ContentPostDto[] = [];
 	for (const [slug, files] of filesBySlug) {
-		const index = files.find((file) => file.path === "index.md");
-		if (!index) continue;
+		const markdownFiles = files.filter((file) =>
+			isMarkdownContentPath(file.path),
+		);
+		const source =
+			markdownFiles.find((file) => file.path === "index.md") ??
+			(markdownFiles.length === 1 ? markdownFiles[0] : undefined);
+		if (!source) continue;
 
-		const object = await env.MEDIA_BUCKET.get(index.key);
+		const sourceFile = { ...source, path: "index.md" };
+		const manifestFiles = [
+			sourceFile,
+			...files.filter((file) => !isMarkdownContentPath(file.path)),
+		].sort((a, b) => a.path.localeCompare(b.path));
+
+		const object = await env.MEDIA_BUCKET.get(source.key);
 		if (!object?.body) continue;
 		const frontmatter = parseFrontmatter(await object.text());
 		if (frontmatter instanceof Response) continue;
@@ -1071,14 +1082,14 @@ async function listR2ContentPosts(
 
 		const imageError = validateFrontmatterImage(
 			frontmatter.image,
-			files.map((file) => ({ ...file, bytes: new Uint8Array() })),
+			manifestFiles.map((file) => ({ ...file, bytes: new Uint8Array() })),
 		);
 		if (imageError) continue;
 
 		posts.push({
 			id: 0,
 			slug,
-			sourceKey: index.key,
+			sourceKey: source.key,
 			format: "md",
 			title: frontmatter.title,
 			description: frontmatter.description,
@@ -1089,8 +1100,8 @@ async function listR2ContentPosts(
 			published: frontmatter.published,
 			updated: frontmatter.updated,
 			status: "published",
-			contentHash: index.key,
-			files: files.sort((a, b) => a.path.localeCompare(b.path)),
+			contentHash: source.key,
+			files: manifestFiles,
 			deployStatus: "triggered",
 			deploymentError: "",
 			lastDeployTriggeredAt: "",
@@ -1136,6 +1147,10 @@ function parseR2ContentKey(
 	if (!isValidContentSlug(slug)) return null;
 	if (!path || normalizeZipPath(path) !== path) return null;
 	return { slug, path };
+}
+
+function isMarkdownContentPath(value: string): boolean {
+	return /^([^/]+\.md|index\.md)$/i.test(value);
 }
 
 function compareContentPosts(a: ContentPostDto, b: ContentPostDto): number {
@@ -1277,40 +1292,11 @@ async function isPublishedR2ContentKey(
 ): Promise<boolean> {
 	const parsed = parseR2ContentKey(key);
 	if (!parsed || !env.MEDIA_BUCKET) return false;
-	if (
-		parsed.path !== "index.md" &&
-		!ALLOWED_ASSET_EXTENSIONS.has(extensionOf(parsed.path))
-	) {
-		return false;
-	}
-
-	const indexObject = await firstExistingR2Object(
-		env.MEDIA_BUCKET,
-		parsed.path === "index.md"
-			? [key]
-			: [
-					`${CONTENT_POSTS_PREFIX}${parsed.slug}/index.md`,
-					`${CONTENT_POSTS_PREFIX}${parsed.slug}.md`,
-				],
+	const posts = await listR2ContentPosts(env);
+	return posts.some(
+		(post) =>
+			post.slug === parsed.slug && post.files.some((file) => file.key === key),
 	);
-	if (!indexObject?.body) return false;
-	const frontmatter = parseFrontmatter(await indexObject.text());
-	return !(
-		frontmatter instanceof Response ||
-		!frontmatter.title ||
-		!frontmatter.published
-	);
-}
-
-async function firstExistingR2Object(
-	bucket: R2Bucket,
-	keys: string[],
-): Promise<R2ObjectBody | null> {
-	for (const key of keys) {
-		const object = await bucket.get(key);
-		if (object?.body) return object;
-	}
-	return null;
 }
 
 function safeDecodePathSegment(value: string): string {

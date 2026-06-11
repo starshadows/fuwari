@@ -789,6 +789,45 @@ Body`,
 		]);
 	});
 
+	it("normalizes a unique markdown file inside an R2 post folder", async () => {
+		const bucket = mockContentBucket({
+			objects: [{ key: "posts/named-entry/named-entry.md", size: 42 }],
+			bodies: {
+				"posts/named-entry/named-entry.md": `---
+title: Named Entry
+published: 2026-01-03
+---
+Body`,
+			},
+		});
+		const env = mockEnv({ DB: mockContentDb([]), MEDIA_BUCKET: bucket });
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/content/manifest", {
+				headers: { authorization: "Bearer test-sync-token" },
+			}),
+			env,
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as {
+			posts: Array<{
+				slug: string;
+				files: Array<{ path: string; key: string }>;
+			}>;
+		};
+		expect(body.posts).toHaveLength(1);
+		expect(body.posts[0].slug).toBe("named-entry");
+		expect(body.posts[0].files).toEqual([
+			{
+				path: "index.md",
+				key: "posts/named-entry/named-entry.md",
+				size: 42,
+				contentType: "text/markdown; charset=utf-8",
+			},
+		]);
+	});
+
 	it("downloads only published content objects with a valid token", async () => {
 		const bucket = mockContentBucket();
 		const env = mockEnv({ DB: mockContentDb(), MEDIA_BUCKET: bucket });
