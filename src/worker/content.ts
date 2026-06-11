@@ -166,15 +166,23 @@ async function contentSyncAuthFailure(
 }
 
 async function getContentManifest(env: Env): Promise<Response> {
+	const generatedAt = new Date().toISOString();
 	try {
 		const rows = await listContentRows(env, "published");
+		const posts = rows.map((row) => toContentPostDto(row));
+		const d1PostsWithFiles = posts.filter((post) => post.files.length > 0);
+		const r2Posts = await listR2ContentPosts(
+			env,
+			new Set(d1PostsWithFiles.map((post) => post.slug)),
+		);
 		return json({
-			posts: rows.map((row) => toContentPostDto(row)),
-			generatedAt: new Date().toISOString(),
+			posts: [...d1PostsWithFiles, ...r2Posts].sort(compareContentPosts),
+			generatedAt,
 		});
 	} catch (error) {
-		if (isMissingD1SchemaError(error))
-			return json({ posts: [], generatedAt: new Date().toISOString() });
+		if (isMissingD1SchemaError(error)) {
+			return json({ posts: await listR2ContentPosts(env), generatedAt });
+		}
 		throw error;
 	}
 }
@@ -901,9 +909,7 @@ function isValidContentSlug(value: string): boolean {
 }
 
 function isContentObjectKey(value: string): boolean {
-	if (!value.startsWith(CONTENT_POSTS_PREFIX)) return false;
-	const clean = normalizeZipPath(value);
-	return clean === value && clean.split("/").length >= 3;
+	return parseR2ContentKey(value) !== null;
 }
 
 function extensionOf(value: string): string {
@@ -1025,6 +1031,121 @@ function stripBytes(files: ParsedZipFile[]): ContentFileInfo[] {
 	}));
 }
 
+async function listR2ContentPosts(
+	env: Env,
+	excludedSlugs = new Set<string>(),
+): Promise<ContentPostDto[]> {
+	if (!env.MEDIA_BUCKET) return [];
+
+	const filesBySlug = new Map<string, ContentFileInfo[]>();
+	for (const object of await listR2ContentObjects(env.MEDIA_BUCKET)) {
+		const parsed = parseR2ContentKey(object.key);
+		if (!parsed || excludedSlugs.has(parsed.slug)) continue;
+		if (
+			parsed.path !== "index.md" &&
+			!ALLOWED_ASSET_EXTENSIONS.has(extensionOf(parsed.path))
+		) {
+			continue;
+		}
+
+		const files = filesBySlug.get(parsed.slug) ?? [];
+		files.push({
+			path: parsed.path,
+			key: object.key,
+			size: Number(object.size ?? 0),
+			contentType: contentTypeForPath(parsed.path),
+		});
+		filesBySlug.set(parsed.slug, files);
+	}
+
+	const posts: ContentPostDto[] = [];
+	for (const [slug, files] of filesBySlug) {
+		const index = files.find((file) => file.path === "index.md");
+		if (!index) continue;
+
+		const object = await env.MEDIA_BUCKET.get(index.key);
+		if (!object?.body) continue;
+		const frontmatter = parseFrontmatter(await object.text());
+		if (frontmatter instanceof Response) continue;
+		if (!frontmatter.title || !frontmatter.published) continue;
+
+		const imageError = validateFrontmatterImage(
+			frontmatter.image,
+			files.map((file) => ({ ...file, bytes: new Uint8Array() })),
+		);
+		if (imageError) continue;
+
+		posts.push({
+			id: 0,
+			slug,
+			sourceKey: index.key,
+			format: "md",
+			title: frontmatter.title,
+			description: frontmatter.description,
+			image: frontmatter.image,
+			tags: frontmatter.tags,
+			category: frontmatter.category,
+			lang: frontmatter.lang,
+			published: frontmatter.published,
+			updated: frontmatter.updated,
+			status: "published",
+			contentHash: index.key,
+			files: files.sort((a, b) => a.path.localeCompare(b.path)),
+			deployStatus: "triggered",
+			deploymentError: "",
+			lastDeployTriggeredAt: "",
+			createdAt: "",
+			updatedAt: "",
+		});
+	}
+
+	return posts;
+}
+
+async function listR2ContentObjects(bucket: R2Bucket): Promise<R2Object[]> {
+	const objects: R2Object[] = [];
+	let cursor: string | undefined;
+	do {
+		const listed = await bucket.list({
+			prefix: CONTENT_POSTS_PREFIX,
+			cursor,
+		});
+		objects.push(...listed.objects);
+		cursor = listed.truncated ? listed.cursor : undefined;
+	} while (cursor);
+	return objects;
+}
+
+function parseR2ContentKey(
+	value: string,
+): { slug: string; path: string } | null {
+	if (!value.startsWith(CONTENT_POSTS_PREFIX)) return null;
+	const clean = normalizeZipPath(value);
+	if (clean !== value) return null;
+
+	const parts = clean.slice(CONTENT_POSTS_PREFIX.length).split("/");
+	if (parts.length === 1) {
+		const fileName = parts[0] ?? "";
+		if (!/\.md$/i.test(fileName)) return null;
+		const slug = fileName.replace(/\.md$/i, "");
+		return isValidContentSlug(slug) ? { slug, path: "index.md" } : null;
+	}
+
+	const slug = parts[0] ?? "";
+	const path = parts.slice(1).join("/");
+	if (!isValidContentSlug(slug)) return null;
+	if (!path || normalizeZipPath(path) !== path) return null;
+	return { slug, path };
+}
+
+function compareContentPosts(a: ContentPostDto, b: ContentPostDto): number {
+	return (
+		b.published.localeCompare(a.published) ||
+		b.updatedAt.localeCompare(a.updatedAt) ||
+		a.slug.localeCompare(b.slug)
+	);
+}
+
 // ================================================================
 // D1 helpers
 // ================================================================
@@ -1128,11 +1249,68 @@ function isContentFileInfo(value: unknown): value is ContentFileInfo {
 }
 
 async function isPublishedContentKey(env: Env, key: string): Promise<boolean> {
-	const rows = await listContentRows(env, "published");
-	return rows.some((row) => {
+	const parsed = parseR2ContentKey(key);
+	if (!parsed) return false;
+
+	let rows: ContentPostRow[] = [];
+	try {
+		rows = await listContentRows(env, "published");
+	} catch (error) {
+		if (!isMissingD1SchemaError(error)) throw error;
+	}
+	let hasD1AllowlistForSlug = false;
+	const isAllowedByD1 = rows.some((row) => {
 		const post = toContentPostDto(row);
+		if (post.slug === parsed.slug && post.files.length > 0) {
+			hasD1AllowlistForSlug = true;
+		}
 		return post.files.some((file) => file.key === key);
 	});
+	if (isAllowedByD1) return true;
+	if (hasD1AllowlistForSlug) return false;
+	return isPublishedR2ContentKey(env, key);
+}
+
+async function isPublishedR2ContentKey(
+	env: Env,
+	key: string,
+): Promise<boolean> {
+	const parsed = parseR2ContentKey(key);
+	if (!parsed || !env.MEDIA_BUCKET) return false;
+	if (
+		parsed.path !== "index.md" &&
+		!ALLOWED_ASSET_EXTENSIONS.has(extensionOf(parsed.path))
+	) {
+		return false;
+	}
+
+	const indexObject = await firstExistingR2Object(
+		env.MEDIA_BUCKET,
+		parsed.path === "index.md"
+			? [key]
+			: [
+					`${CONTENT_POSTS_PREFIX}${parsed.slug}/index.md`,
+					`${CONTENT_POSTS_PREFIX}${parsed.slug}.md`,
+				],
+	);
+	if (!indexObject?.body) return false;
+	const frontmatter = parseFrontmatter(await indexObject.text());
+	return !(
+		frontmatter instanceof Response ||
+		!frontmatter.title ||
+		!frontmatter.published
+	);
+}
+
+async function firstExistingR2Object(
+	bucket: R2Bucket,
+	keys: string[],
+): Promise<R2ObjectBody | null> {
+	for (const key of keys) {
+		const object = await bucket.get(key);
+		if (object?.body) return object;
+	}
+	return null;
 }
 
 function safeDecodePathSegment(value: string): string {

@@ -646,19 +646,35 @@ describe("Content sync API", () => {
 		} as unknown as D1Database;
 	}
 
-	function mockContentBucket(): R2Bucket {
+	function mockContentBucket(
+		options: {
+			objects?: Array<{ key: string; size?: number }>;
+			bodies?: Record<string, string>;
+		} = {},
+	): R2Bucket {
+		const bodies = options.bodies ?? {
+			"posts/published-post/index.md": "body",
+		};
 		return {
-			get: vi.fn().mockResolvedValue({
-				body: new Response("body").body,
-				httpEtag: '"etag"',
-				writeHttpMetadata(headers: Headers) {
-					headers.set("content-type", "text/markdown; charset=utf-8");
-				},
+			get: vi.fn(async (key: string) => {
+				const body = bodies[key];
+				if (body === undefined) return null;
+				return {
+					body: new Response(body).body,
+					text: () => Promise.resolve(body),
+					httpEtag: '"etag"',
+					writeHttpMetadata(headers: Headers) {
+						headers.set("content-type", "text/markdown; charset=utf-8");
+					},
+				};
 			}),
 			put: vi.fn(),
 			delete: vi.fn(),
 			head: vi.fn(),
-			list: vi.fn(),
+			list: vi.fn().mockResolvedValue({
+				objects: options.objects ?? [],
+				truncated: false,
+			}),
 			createMultipartUpload: vi.fn(),
 			resumeMultipartUpload: vi.fn(),
 		} as unknown as R2Bucket;
@@ -732,6 +748,47 @@ describe("Content sync API", () => {
 		expect(body.posts[0].slug).toBe("published-post");
 	});
 
+	it("falls back to R2 posts when D1 has no published content rows", async () => {
+		const bucket = mockContentBucket({
+			objects: [
+				{ key: "posts/r2-post/index.md", size: 42 },
+				{ key: "posts/r2-post/cover.png", size: 10 },
+			],
+			bodies: {
+				"posts/r2-post/index.md": `---
+title: R2 Post
+published: 2026-01-02
+image: ./cover.png
+---
+Body`,
+			},
+		});
+		const env = mockEnv({ DB: mockContentDb([]), MEDIA_BUCKET: bucket });
+		const res = await worker.default.fetch(
+			new Request("https://blog.example.com/api/content/manifest", {
+				headers: { authorization: "Bearer test-sync-token" },
+			}),
+			env,
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as {
+			posts: Array<{
+				slug: string;
+				title: string;
+				files: Array<{ key: string }>;
+			}>;
+		};
+		expect(body.posts).toHaveLength(1);
+		expect(body.posts[0].slug).toBe("r2-post");
+		expect(body.posts[0].title).toBe("R2 Post");
+		expect(body.posts[0].files.map((file) => file.key)).toEqual([
+			"posts/r2-post/cover.png",
+			"posts/r2-post/index.md",
+		]);
+	});
+
 	it("downloads only published content objects with a valid token", async () => {
 		const bucket = mockContentBucket();
 		const env = mockEnv({ DB: mockContentDb(), MEDIA_BUCKET: bucket });
@@ -747,6 +804,38 @@ describe("Content sync API", () => {
 		expect(await res.text()).toBe("body");
 		expect(vi.mocked(bucket.get)).toHaveBeenCalledWith(
 			"posts/published-post/index.md",
+		);
+	});
+
+	it("downloads published R2 fallback content objects", async () => {
+		const bucket = mockContentBucket({
+			objects: [
+				{ key: "posts/r2-post/index.md", size: 42 },
+				{ key: "posts/r2-post/cover.png", size: 10 },
+			],
+			bodies: {
+				"posts/r2-post/index.md": `---
+title: R2 Post
+published: 2026-01-02
+---
+Body`,
+				"posts/r2-post/cover.png": "image",
+			},
+		});
+		const env = mockEnv({ DB: mockContentDb([]), MEDIA_BUCKET: bucket });
+		const res = await worker.default.fetch(
+			new Request(
+				"https://blog.example.com/api/content/object?key=posts%2Fr2-post%2Fcover.png",
+				{ headers: { authorization: "Bearer test-sync-token" } },
+			),
+			env,
+			mockCtx(),
+		);
+
+		expect(res.status).toBe(200);
+		expect(await res.text()).toBe("image");
+		expect(vi.mocked(bucket.get)).toHaveBeenCalledWith(
+			"posts/r2-post/cover.png",
 		);
 	});
 
